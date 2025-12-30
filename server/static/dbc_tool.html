@@ -1,0 +1,384 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>DBC 解析工具</title>
+  <style>
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin:0; padding:20px; background:#f8f9fa; }
+    h1 { color:#1a73e8; margin-bottom: 16px; }
+    .card { background:#fff; border:1px solid #dee2e6; border-radius:8px; padding:16px; margin-bottom:16px; }
+    .controls { display:flex; flex-wrap:wrap; gap:10px; align-items:center; }
+    button { padding:10px 16px; border-radius:6px; border:1px solid #ced4da; background:#fff; cursor:pointer; }
+    button.primary { background:#1a73e8; color:#fff; border-color:#1a73e8; }
+    .dbc-stats { display:grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap:10px; }
+    .dbc-stat-item { background:#f8f9fa; padding:10px; border-radius:6px; text-align:center; border:1px solid #e9ecef; }
+    .kv { font-family: ui-monospace, Menlo, Consolas, monospace; background:#0b2447; color:#9bd0ff; padding:8px; border-radius:6px; }
+    .tree { border:1px solid #e9ecef; border-radius:8px; background:#fff; }
+    .item { border-bottom:1px solid #e9ecef; }
+    .item:last-child { border-bottom:none; }
+    .hd { padding:0; background:#f5f9ff; cursor:pointer; user-select:none; }
+    .bd { display:none; padding:10px 12px; background:#fff; }
+    .hd.expanded + .bd { display:block; }
+    .name { color:#1976d2; font-weight:bold; }
+    .id { color:#fd7e14; font-family: ui-monospace, monospace; }
+    .signals { font-family: ui-monospace, monospace; }
+    .toggle { width:14px; display:inline-block; transition: transform .15s ease; color:#666; }
+    .hd.expanded .toggle { transform: rotate(90deg); }
+    .meta { font-family: ui-monospace, monospace; color:#555; margin-bottom:8px; }
+    /* CANalyzer 风格的表格式布局 */
+    .row-main { display:grid; grid-template-columns: 1.6fr 64px 48px 92px 1fr; gap:10px; align-items:center; padding:10px 12px; }
+    .header { background:#eef5ff; color:#0b3d91; font-weight:bold; }
+    .mono { font-family: ui-monospace, monospace; }
+    .pill { padding:2px 6px; border-radius:10px; background:#e9ecef; color:#495057; font-size:12px; }
+    .row-raw { background:#fffdf5; }
+    .signal-table { display:grid; grid-template-columns: 2fr 1.2fr 1.2fr; gap:6px 12px; align-items:center; }
+    .signal-header { font-weight:bold; color:#0b3d91; background:#f3f7ff; padding:6px 8px; border-radius:6px; margin-bottom:6px; display:grid; grid-template-columns: 2fr 1.2fr 1.2fr; text-align:center; }
+    .sig-name { color:#344767; }
+    .sig-val { text-align:center; font-family: ui-monospace, monospace; color:#111; }
+    .sig-raw { text-align:center; font-family: ui-monospace, monospace; color:#555; }
+  </style>
+</head>
+<body>
+  <h1>🧠 DBC 解析工具</h1>
+
+  <div class="card">
+    <div style="background:#e7f3ff;padding:12px;border-radius:6px;margin-bottom:12px;border-left:4px solid #1a73e8;">
+      <strong>💡 实时自动解析模式</strong>：后端已自动加载所有DBC文件，实时解析所有CAN帧信号
+    </div>
+    <div class="controls">
+      <input id="dbcFile" type="file" accept=".dbc,.DBC,.kcd" />
+      <button class="primary" onclick="uploadDbc()">上传DBC</button>
+      <select id="dbcSelect" style="min-width:220px;padding:8px;border-radius:6px;"></select>
+      <button onclick="refreshDbcList()">刷新列表</button>
+      <button onclick="deleteDbc()" style="background:#dc3545;color:#fff;border-color:#dc3545;">删除所选</button>
+      <span id="msg" class="kv"></span>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="controls">
+      <button onclick="showDbcStats()">统计信息</button>
+      <button onclick="clearDisplay()">清空显示</button>
+      <span class="kv" id="wsInfo">WS: 未连接</span>
+      <span class="kv" id="parseInfo">解析: 0 条</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>按消息ID实时分组</h3>
+    <div id="tree" class="tree"></div>
+  </div>
+
+  <div class="card">
+    <h3>日志</h3>
+    <pre id="log" style="height:200px;overflow:auto;background:#1e1e1e;color:#d4d4d4;padding:10px;border-radius:8px;"></pre>
+  </div>
+
+<script>
+// === 前后端分离：只接收后端解析好的数据并显示 ===
+let ws = null;
+let wsShouldReconnect = true;
+let idToDecoded = new Map();
+let expandedItems = new Set();
+let parseCount = 0;
+
+// 将原始值格式化为十六进制显示
+function formatHexRaw(val){
+  try{
+    if (val === null || val === undefined) return '-';
+    if (Array.isArray(val)){
+      return val.map(x => (typeof x === 'number' ? x.toString(16).toUpperCase().padStart(2,'0') : String(x))).join(' ');
+    }
+    if (typeof val === 'boolean') return val ? '0x1' : '0x0';
+    if (typeof val === 'number') return '0x' + val.toString(16).toUpperCase();
+    const s = String(val).trim();
+    if (!s) return '-';
+    if (/^0x[0-9a-f]+$/i.test(s)) return s.toUpperCase();
+    if (/^[0-9]+$/.test(s)) return '0x' + parseInt(s, 10).toString(16).toUpperCase();
+    // 若是以空格分隔的字节串，如 "FF 0A E0"，保持原样
+    if (/^[0-9a-fA-F]{2}(\s[0-9a-fA-F]{2})+$/.test(s)) return s.toUpperCase();
+    return s; // 其他情况保持原样
+  }catch(e){
+    return String(val);
+  }
+}
+
+function connectWS(){
+  try { if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return; } catch(e){}
+  const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const host = location.hostname || '172.17.237.241';
+  const wsUrl = `${protocol}//${host}:5052/ui`;
+  log('连接 WebSocket: ' + wsUrl);
+  try{
+    ws = new WebSocket(wsUrl);
+    ws.onopen = ()=>{ 
+      document.getElementById('wsInfo').textContent = 'WS: 已连接'; 
+      log('WebSocket 已连接，等待数据...');
+    };
+    ws.onerror = (e)=>{ document.getElementById('wsInfo').textContent = 'WS: 错误'; log('WS 错误: '+e); };
+    ws.onclose = ()=>{
+      document.getElementById('wsInfo').textContent = 'WS: 已断开';
+      if (wsShouldReconnect && document.visibilityState === 'visible') {
+        setTimeout(connectWS, 1500);
+      }
+    };
+    ws.onmessage = (ev)=>{ handleWSMessage(ev.data); };
+  }catch(e){ log('WS 连接异常: '+e); }
+}
+
+function handleWSMessage(data){
+  try{
+    const msg = JSON.parse(data);
+    
+    // 接收后端解析好的数据
+    if (msg && msg.event === 'can_parsed'){
+      const results = (msg.data && Array.isArray(msg.data.results)) ? msg.data.results : [];
+      if (results.length > 0){
+        // 更新到全局 Map（按ID合并）
+        results.forEach(it=>{
+          if (it && (it.id !== undefined && it.id !== null)) {
+            idToDecoded.set(it.id, it);
+          }
+        });
+        
+        // 渲染
+        const arr = [];
+        idToDecoded.forEach((v,k)=>{ arr.push(Object.assign({id:k}, v)); });
+        renderTree(arr);
+        
+        // 更新统计
+        parseCount += results.length;
+        document.getElementById('parseInfo').textContent = `解析: ${parseCount} 条`;
+      }
+    }
+    
+    // 兼容旧版：接收原始can_frames（如果后端没有解析器）
+    else if (msg && msg.event === 'can_frames'){
+      log('收到原始CAN帧（后端未启用DBC解析）');
+    }
+  }catch(e){ /* ignore non-JSON */ }
+}
+
+// 页面可见性：隐藏时关闭 WS，返回时重连
+document.addEventListener('visibilitychange', ()=>{
+  if (document.visibilityState === 'hidden'){
+    wsShouldReconnect = false;
+    try{ if (ws) ws.close(); }catch(e){}
+    ws = null;
+  } else {
+    wsShouldReconnect = true;
+    connectWS();
+  }
+});
+async function refreshDbcList(){
+  const sel = document.getElementById('dbcSelect');
+  const currentValue = sel.value; // 保存当前选择
+  sel.innerHTML='';
+  const empty=document.createElement('option'); empty.value=''; empty.textContent='未选择DBC'; sel.appendChild(empty);
+  try{
+    const r = await fetch('/api/dbc/list');
+    const j = await r.json();
+    if (j && j.ok && Array.isArray(j.items)) {
+      j.items.forEach(it=>{ const o=document.createElement('option'); o.value=it.name; o.textContent=it.name; sel.appendChild(o); });
+      // 自动选择：优先恢复之前的选择，否则选第一个DBC文件
+      if (currentValue && j.items.some(it => it.name === currentValue)) {
+        sel.value = currentValue;
+      } else if (j.items.length > 0) {
+        sel.value = j.items[0].name;
+        log('自动选择 DBC: ' + j.items[0].name);
+      }
+    }
+  }catch(e){ log('刷新列表失败: '+e, 'error'); }
+}
+
+async function uploadDbc(){
+  const f = document.getElementById('dbcFile').files[0];
+  if(!f){ setMsg('请选择 DBC 文件'); return; }
+  const fd = new FormData(); fd.append('file', f);
+  setMsg('正在上传...');
+  const r = await fetch('/api/dbc/upload', { method:'POST', body: fd });
+  const j = await r.json().catch(()=>({}));
+  if(j && j.ok){ 
+    setMsg(`✅ 上传成功: ${j.name}，后端已重新加载所有DBC`); 
+    await refreshDbcList(); 
+    document.getElementById('dbcSelect').value=j.name; 
+    log(`DBC文件 ${j.name} 已上传并加入实时解析`);
+  }
+  else setMsg('上传失败: ' + (j && (j.error||JSON.stringify(j))));
+}
+
+async function deleteDbc(){
+  const name = document.getElementById('dbcSelect').value;
+  if(!name){ setMsg('请先选择DBC'); return; }
+  if(!confirm(`确定要删除 ${name} 吗？\n\n删除后后端会重新加载剩余的DBC文件。`)){ return; }
+  const r = await fetch('/api/dbc/delete', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ name }) });
+  const j = await r.json();
+  if (j && j.ok) { 
+    setMsg(`✅ 删除成功: ${name}，后端已重新加载`); 
+    await refreshDbcList(); 
+    clearDisplay();
+    log(`DBC文件 ${name} 已删除，实时解析已更新`);
+  }
+  else setMsg('删除失败: '+ (j.error||'未知错误'));
+}
+
+function clearDisplay(){
+  const tree = document.getElementById('tree');
+  tree.innerHTML=''; 
+  tree.dataset.headerRendered = '';
+  idToDecoded.clear();
+  expandedItems.clear();
+  parseCount = 0;
+  document.getElementById('parseInfo').textContent = '解析: 0 条';
+  log('显示已清空');
+}
+
+function renderTree(items){
+  const tree = document.getElementById('tree');
+  tree.innerHTML='';
+  tree.dataset.headerRendered = ''; // 重置表头标记
+  
+  const byId = new Map();
+  items.forEach(it=>{ byId.set(it.id, it); });
+  
+  // 添加表头
+  const header = document.createElement('div'); 
+  header.className='row-main header';
+  header.innerHTML = `<span>名称</span><span>方向</span><span>DLC</span><span class="mono">ID</span><span class="mono">数据（悬停查看时间）</span>`;
+  tree.appendChild(header);
+  tree.dataset.headerRendered = '1';
+  
+  // 渲染消息列表
+  [...byId.entries()].sort((a,b)=>a[0]-b[0]).forEach(([id, v])=>{
+    const div = document.createElement('div'); 
+    div.className='item';
+    
+    const hd = document.createElement('div'); 
+    hd.className='hd';
+    
+    const bd = document.createElement('div'); 
+    bd.className='bd';
+    
+    const idHex = `0x${Number(id).toString(16).toUpperCase()}`;
+    const dlc = (v && (v.payload_length || (v.payload_hex ? Math.floor((v.payload_hex||'').length/2) : 0))) || 0;
+    const dir = (v && (String(v.channel||'').toUpperCase()));
+    const dirText = (dir === 'TX' || dir === 'RX') ? dir : (dir || '-');
+    const payload = (v && v.payload_hex) ? v.payload_hex.replace(/([0-9A-Fa-f]{2})(?=[0-9A-Fa-f])/g,'$1 ').trim().toUpperCase() : '';
+
+    // 格式化时间戳
+    let timeStr = '-';
+    if (v.timestamp) {
+      const date = new Date(v.timestamp * 1000);
+      const h = String(date.getHours()).padStart(2, '0');
+      const m = String(date.getMinutes()).padStart(2, '0');
+      const s = String(date.getSeconds()).padStart(2, '0');
+      const ms = String(date.getMilliseconds()).padStart(3, '0');
+      timeStr = `${h}:${m}:${s}.${ms}`;
+    }
+    
+    const rowClass = (v && v.matched === false) ? 'row-main row-raw' : 'row-main';
+    hd.innerHTML = `<div class="${rowClass}"><span><span class="toggle">▶</span><span class="name">${v.name||'未知消息'}</span></span><span class="pill">${dirText}</span><span class="pill">${dlc}</span><span class="id">${idHex}</span><span class="mono" title="接收时间: ${timeStr}">${payload}</span></div>`;
+
+    const sigs = v.signals || {}; 
+    let html = '';
+    
+    // 格式化时间戳
+    let timeDisplay = '-';
+    if (v.timestamp) {
+      const date = new Date(v.timestamp * 1000);
+      const h = String(date.getHours()).padStart(2, '0');
+      const m = String(date.getMinutes()).padStart(2, '0');
+      const s = String(date.getSeconds()).padStart(2, '0');
+      const ms = String(date.getMilliseconds()).padStart(3, '0');
+      timeDisplay = `${h}:${m}:${s}.${ms}`;
+    }
+    
+    html += `<div class="meta">时间: ${timeDisplay} | 来源: ${v.source_file || '-'}${v.raw_line?(' | 原始: '+v.raw_line):''}</div>`;
+    const entries = Object.entries(sigs);
+    if (entries.length === 0) {
+      html += '<div class="signals">无信号数据</div>';
+    } else {
+      html += '<div class="signal-header"><span>信号</span><span>解析值</span><span>原始值</span></div>';
+      html += '<div class="signal-table">';
+      entries.forEach(([k,val])=>{ 
+        const hasObj = (val && typeof val === 'object');
+        const displayVal = hasObj && (val.display_value!==undefined) ? val.display_value : val;
+        const unit = hasObj && val.unit ? (' '+val.unit) : '';
+        const rawVal0 = hasObj && (val.raw_value!==undefined) ? val.raw_value : displayVal;
+        const rawVal = formatHexRaw(rawVal0);
+        html += `<div class="sig-name">${k}</div><div class="sig-val">${displayVal}${unit}</div><div class="sig-raw">${rawVal}</div>`; 
+      });
+      html += '</div>';
+    }
+    bd.innerHTML = html;
+
+    const idStr = String(id);
+    if (expandedItems.has(idStr)) { hd.classList.add('expanded'); }
+    
+    // 绑定点击事件
+    hd.addEventListener('click', (e)=>{
+      e.stopPropagation();
+      const isExpanded = hd.classList.contains('expanded');
+      hd.classList.toggle('expanded');
+      if (isExpanded) {
+        expandedItems.delete(idStr);
+      } else {
+        expandedItems.add(idStr);
+      }
+    });
+
+    div.appendChild(hd); 
+    div.appendChild(bd); 
+    tree.appendChild(div);
+  });
+}
+
+async function showDbcStats() {
+  try {
+    const response = await fetch('/api/dbc/stats');
+    const data = await response.json();
+    
+    if (data.ok) {
+      let message = `📊 DBC实时解析统计\n\n`;
+      message += `全局统计:\n`;
+      message += `- 已加载文件: ${data.global_stats.loaded_files}\n`;
+      message += `- 消息总数: ${data.global_stats.total_messages}\n`;
+      message += `- 映射总数: ${data.total_mappings}\n`;
+      message += `- 已解析帧数: ${parseCount}\n`;
+      message += `- 最后更新: ${new Date(data.global_stats.last_update * 1000).toLocaleString()}\n\n`;
+      
+      if (data.file_stats && Object.keys(data.file_stats).length > 0) {
+        message += `已加载的DBC文件（所有文件同时生效）:\n`;
+        for (const [filename, stats] of Object.entries(data.file_stats)) {
+          message += `✅ ${filename}: ${stats.unique_ids}个唯一ID\n`;
+        }
+        message += `\n💡 提示:\n`;
+        message += `- 后端自动使用所有DBC文件进行实时解析\n`;
+        message += `- 上传新DBC后自动重新加载\n`;
+        message += `- 选择文件后点击"删除所选"可删除`;
+      } else {
+        message += `⚠️ 没有已加载的DBC文件\n`;
+        message += `💡 提示: 请先上传DBC文件以启用实时解析`;
+      }
+      
+      alert(message);
+    } else {
+      alert('获取DBC统计信息失败: ' + data.error);
+    }
+  } catch (error) {
+    alert('网络错误: ' + error.message);
+  }
+}
+
+function setMsg(text){ document.getElementById('msg').textContent = text; log(text); }
+function log(text){ const el=document.getElementById('log'); const ts=new Date().toLocaleTimeString(); el.textContent += `[${ts}] ${text}\n`; el.scrollTop = el.scrollHeight; }
+
+// 初始化
+refreshDbcList();
+connectWS();
+</script>
+</body>
+</html>
+
+

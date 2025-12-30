@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>CAN帧解析测试</title>
+  <style>
+    body { font-family: system-ui, -apple-system, sans-serif; margin: 20px; background: #f5f5f5; }
+    .container { max-width: 1200px; margin: 0 auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+    h1 { color: #333; margin-bottom: 30px; }
+    .section { margin-bottom: 30px; padding: 20px; border: 1px solid #ddd; border-radius: 6px; }
+    .section h3 { margin-top: 0; color: #555; }
+    textarea { width: 100%; height: 120px; padding: 10px; border: 1px solid #ccc; border-radius: 4px; font-family: monospace; }
+    button { padding: 10px 20px; background: #007cba; color: white; border: none; border-radius: 4px; cursor: pointer; margin-right: 10px; }
+    button:hover { background: #005a87; }
+    button:disabled { background: #ccc; cursor: not-allowed; }
+    .result { margin-top: 15px; padding: 15px; background: #f8f9fa; border-radius: 4px; border-left: 4px solid #007cba; }
+    .error { border-left-color: #dc3545; background: #f8d7da; }
+    .success { border-left-color: #28a745; background: #d4edda; }
+    .parsed-item { margin: 10px 0; padding: 10px; background: #e9ecef; border-radius: 4px; }
+    .parsed-item strong { color: #495057; }
+    .config-info { background: #e7f3ff; padding: 15px; border-radius: 4px; margin-bottom: 20px; }
+    pre { background: #f8f9fa; padding: 10px; border-radius: 4px; overflow-x: auto; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🔧 CAN帧解析测试工具</h1>
+    
+    <div class="config-info">
+      <h3>📋 解析器配置信息</h3>
+      <div id="configInfo">加载中...</div>
+    </div>
+    
+    <div class="section">
+      <h3>📝 CAN帧输入</h3>
+      <p>支持的格式：</p>
+      <ul>
+        <li><code>51#001234567890ABCD</code> - 标准格式</li>
+        <li><code>0x51: 00 12 34 56 78 90 AB CD</code> - 带空格格式</li>
+        <li>每行一个CAN帧</li>
+      </ul>
+      <textarea id="canInput" placeholder="请输入CAN帧数据，每行一个帧...&#10;示例：&#10;51#001234567890ABCD&#10;0x51: 00 12 34 56 78 90 AB CD">51#001234567890ABCD
+0x51: 00 12 34 56 78 90 AB CD
+51#00F0567890ABCDEF</textarea>
+      <br><br>
+      <button onclick="parseFrames()">🔍 解析CAN帧</button>
+      <button onclick="clearInput()">🗑️ 清空输入</button>
+      <button onclick="loadExample()">📄 加载示例</button>
+    </div>
+    
+    <div class="section">
+      <h3>📊 解析结果</h3>
+      <div id="parseResult">点击"解析CAN帧"按钮开始解析...</div>
+    </div>
+    
+    <div class="section">
+      <h3>📖 电池电压解析说明</h3>
+      <div class="config-info">
+        <p><strong>ID 0x51 - 电池总电压</strong></p>
+        <ul>
+          <li>数据格式：MOTOROLA (大端序)</li>
+          <li>起始位：8 (从第0-1字节提取)</li>
+          <li>数据长度：2字节 (16位)</li>
+          <li>单位：V (伏特)</li>
+          <li>精度：0.1V</li>
+        </ul>
+        <p><strong>计算公式：</strong> 电压 = (字节0 << 8 | 字节1) × 0.1</p>
+        <p><strong>示例：</strong></p>
+        <pre>CAN帧: 51#001234567890ABCD
+解析: 字节0=0x00, 字节1=0x12
+原始值: 0x0012 = 18
+电压: 18 × 0.1 = 1.8V</pre>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // 加载解析器配置信息
+    async function loadConfig() {
+      try {
+        const response = await fetch('/api/can/config/parser');
+        const data = await response.json();
+        
+        const configDiv = document.getElementById('configInfo');
+        if (data.ok) {
+          configDiv.innerHTML = `
+            <p><strong>支持的CAN ID：</strong> ${data.supported_ids.join(', ')}</p>
+            <p><strong>解析规则数量：</strong> ${data.rules_count}</p>
+          `;
+        } else {
+          configDiv.innerHTML = `<span style="color: red;">配置加载失败: ${data.error}</span>`;
+        }
+      } catch (error) {
+        document.getElementById('configInfo').innerHTML = `<span style="color: red;">网络错误: ${error.message}</span>`;
+      }
+    }
+
+    // 解析CAN帧
+    async function parseFrames() {
+      const input = document.getElementById('canInput').value.trim();
+      const resultDiv = document.getElementById('parseResult');
+      
+      if (!input) {
+        resultDiv.innerHTML = '<div class="result error">请输入CAN帧数据</div>';
+        return;
+      }
+      
+      // 分割成行
+      const frames = input.split('\n').map(line => line.trim()).filter(line => line);
+      
+      try {
+        resultDiv.innerHTML = '<div class="result">解析中...</div>';
+        
+        const response = await fetch('/api/can/parse', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ frames: frames })
+        });
+        
+        const data = await response.json();
+        
+        if (data.ok) {
+          let html = `<div class="result success">
+            <strong>解析完成</strong><br>
+            总帧数: ${data.total_frames}, 成功解析: ${data.parsed_count}
+          </div>`;
+          
+          if (data.results && data.results.length > 0) {
+            html += '<h4>解析结果：</h4>';
+            data.results.forEach((result, index) => {
+              html += `<div class="parsed-item">
+                <strong>帧 ${index + 1}:</strong> ${result.type}<br>
+                <strong>CAN ID:</strong> 0x${result.can_id.toString(16).toUpperCase()}<br>`;
+              
+              if (result.type === 'battery_voltage') {
+                html += `<strong>电池电压:</strong> ${result.voltage} ${result.unit}<br>
+                <strong>原始值:</strong> ${result.raw_value}`;
+              }
+              
+              html += '</div>';
+            });
+          } else {
+            html += '<p>没有找到可解析的帧数据。</p>';
+          }
+          
+          resultDiv.innerHTML = html;
+        } else {
+          resultDiv.innerHTML = `<div class="result error">解析失败: ${data.error}</div>`;
+        }
+      } catch (error) {
+        resultDiv.innerHTML = `<div class="result error">网络错误: ${error.message}</div>`;
+      }
+    }
+
+    // 清空输入
+    function clearInput() {
+      document.getElementById('canInput').value = '';
+      document.getElementById('parseResult').innerHTML = '输入已清空';
+    }
+
+    // 加载示例数据
+    function loadExample() {
+      const examples = [
+        '51#001234567890ABCD',
+        '0x51: 00 F0 56 78 90 AB CD EF',
+        '51#00C8567890ABCDEF',
+        '0x51: 00 64 12 34 56 78 90 AB'
+      ];
+      
+      document.getElementById('canInput').value = examples.join('\n');
+      document.getElementById('parseResult').innerHTML = '示例数据已加载，点击"解析CAN帧"开始解析';
+    }
+
+    // 页面加载时获取配置
+    window.addEventListener('load', loadConfig);
+  </script>
+</body>
+</html>

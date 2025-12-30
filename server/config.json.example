@@ -1,0 +1,67 @@
+{
+  "_comment": "服务器配置文件 - 部署时请复制为 config.json 并修改相应配置",
+  
+  "qt_client": {
+    "_comment": "QT客户端连接配置（当服务器作为客户端连接QT时使用）",
+    "host": "192.168.1.100",
+    "port": 5051
+  },
+  
+  "web_server": {
+    "_comment": "Web服务器配置",
+    "host": "0.0.0.0",
+    "port": 18080,
+    "debug": false
+  },
+  
+  "tcp_hub": {
+    "_comment": "TCP Hub配置（QT客户端反向连接到服务器）",
+    "listen_host": "0.0.0.0",
+    "listen_port": 5051
+  },
+  
+  "websocket": {
+    "_comment": "WebSocket服务器配置（QT客户端通过WebSocket连接）",
+    "listen_host": "0.0.0.0",
+    "listen_port": 5052
+  },
+  
+  "paths": {
+    "_comment": "文件路径配置",
+    "base_dir": "/mnt",
+    "dbc_dir": "./uploads/dbc",
+    "static_dir": "./static",
+    "upload_dir": "./uploads"
+  },
+  
+  "network": {
+    "_comment": "网络配置",
+    "socket_timeout": 3.0,
+    "max_connections": 100,
+    "keepalive": true
+  },
+  
+  "logging": {
+    "_comment": "日志配置",
+    "level": "info",
+    "file": "./logs/server.log",
+    "max_size_mb": 100,
+    "backup_count": 5
+  },
+  
+  "security": {
+    "_comment": "安全配置（未来扩展）",
+    "enable_auth": false,
+    "secret_key": "change-this-secret-key-in-production",
+    "allowed_origins": ["*"]
+  },
+  
+  "features": {
+    "_comment": "功能开关",
+    "enable_can_parser": true,
+    "enable_dbc_support": true,
+    "enable_file_manager": true,
+    "enable_uds": true
+  }
+}
+

@@ -1,0 +1,2511 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CAN总线监控</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Microsoft YaHei', sans-serif;
+            background: #1a1a1a;
+            color: #e0e0e0;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 10px;
+            padding: 20px 30px;
+            margin-bottom: 20px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+        }
+
+        .header h1 {
+            color: white;
+            font-size: 28px;
+            margin-bottom: 10px;
+        }
+
+        .status-bar {
+            display: flex;
+            gap: 20px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        .status-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 15px;
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 5px;
+        }
+
+        .status-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #666;
+        }
+
+        .status-dot.active {
+            background: #10b981;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .main-grid {
+            display: grid;
+            grid-template-columns: 300px 1fr;
+            gap: 20px;
+        }
+
+        .control-panel {
+            background: #2a2a2a;
+            border-radius: 10px;
+            padding: 20px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+            height: fit-content;
+        }
+
+        .control-section {
+            margin-bottom: 25px;
+        }
+
+        .control-section h3 {
+            color: #667eea;
+            font-size: 16px;
+            margin-bottom: 15px;
+            padding-bottom: 8px;
+            border-bottom: 2px solid #667eea;
+        }
+
+        .btn {
+            width: 100%;
+            padding: 12px;
+            margin: 8px 0;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            transition: all 0.3s;
+        }
+
+        .btn-primary {
+            background: #667eea;
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: #5568d3;
+            transform: translateY(-2px);
+        }
+
+        .btn-success {
+            background: #10b981;
+            color: white;
+        }
+
+        .btn-success:hover {
+            background: #059669;
+        }
+
+        .btn-danger {
+            background: #ef4444;
+            color: white;
+        }
+
+        .btn-danger:hover {
+            background: #dc2626;
+        }
+
+        .btn-warning {
+            background: #f59e0b;
+            color: white;
+        }
+
+        .btn-warning:hover {
+            background: #d97706;
+        }
+
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .input-group {
+            margin: 10px 0;
+        }
+
+        .input-group label {
+            display: block;
+            margin-bottom: 5px;
+            color: #a0a0a0;
+            font-size: 13px;
+        }
+
+        .input-group input,
+        .input-group select {
+            width: 100%;
+            padding: 8px 12px;
+            background: #1a1a1a;
+            border: 1px solid #444;
+            border-radius: 5px;
+            color: #e0e0e0;
+            font-size: 14px;
+        }
+
+        .monitor-panel {
+            background: #2a2a2a;
+            border-radius: 10px;
+            padding: 20px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+        }
+
+        .tab-bar {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            border-bottom: 2px solid #444;
+        }
+
+        .tab {
+            padding: 10px 20px;
+            cursor: pointer;
+            border-radius: 5px 5px 0 0;
+            transition: all 0.3s;
+        }
+
+        .tab:hover {
+            background: #333;
+        }
+
+        .tab.active {
+            background: #667eea;
+            color: white;
+        }
+
+        .tab-content {
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        .frames-container {
+            background: #1a1a1a;
+            border-radius: 5px;
+            padding: 15px;
+            max-height: 600px;
+            overflow-y: auto;
+        }
+
+        .frame-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-family: 'Courier New', monospace;
+            font-size: 13px;
+        }
+
+        .frame-table thead {
+            background: #333;
+            position: sticky;
+            top: 0;
+            z-index: 10;
+        }
+
+        .frame-table th {
+            padding: 12px 8px;
+            text-align: left;
+            color: #667eea;
+            font-weight: 600;
+            border-bottom: 2px solid #667eea;
+        }
+
+        .frame-table td {
+            padding: 8px;
+            border-bottom: 1px solid #333;
+        }
+
+        .frame-table tbody tr {
+            background: #2a2a2a;
+            transition: background-color 0.2s;
+        }
+
+        .frame-table tbody tr:hover {
+            background: #353535;
+        }
+
+        .frame-time {
+            color: #10b981;
+            white-space: nowrap;
+            min-width: 90px;
+        }
+
+        .frame-id {
+            color: #f59e0b;
+            font-weight: bold;
+            white-space: nowrap;
+            min-width: 80px;
+        }
+
+        .frame-data {
+            color: #60a5fa;
+            font-family: 'Courier New', monospace;
+            word-break: break-all;
+        }
+
+        .frame-channel {
+            color: #a78bfa;
+            font-weight: 600;
+            text-align: center;
+            white-space: nowrap;
+            min-width: 60px;
+        }
+
+        .frame-channel.can1 {
+            color: #10b981;
+        }
+
+        .frame-channel.can2 {
+            color: #3b82f6;
+        }
+
+        /* 信号卡片样式 */
+        .message-card {
+            background: #1a1a1a;
+            border-radius: 8px;
+            padding: 15px;
+            border-left: 4px solid #667eea;
+            transition: all 0.3s;
+        }
+
+        .message-card:hover {
+            background: #252525;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.4);
+        }
+
+        .message-card.updated {
+            animation: highlight 0.5s;
+        }
+
+        @keyframes highlight {
+            0%, 100% { background: #1a1a1a; }
+            50% { background: #2d3748; }
+        }
+
+        .message-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid #374151;
+        }
+
+        .message-id {
+            font-size: 16px;
+            font-weight: bold;
+            color: #f59e0b;
+        }
+
+        .message-name {
+            font-size: 14px;
+            color: #10b981;
+            font-style: italic;
+        }
+
+        .message-meta {
+            display: flex;
+            gap: 10px;
+            font-size: 11px;
+            color: #9ca3af;
+            margin-bottom: 10px;
+        }
+
+        .message-channel {
+            background: #374151;
+            padding: 2px 8px;
+            border-radius: 3px;
+        }
+
+        .message-time {
+            background: #374151;
+            padding: 2px 8px;
+            border-radius: 3px;
+        }
+
+        .signals-list {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .signal-item {
+            display: grid;
+            grid-template-columns: 1fr auto;
+            gap: 10px;
+            padding: 8px;
+            background: #2a2a2a;
+            border-radius: 5px;
+            align-items: center;
+        }
+
+        .signal-name {
+            color: #a78bfa;
+            font-weight: 500;
+            font-size: 13px;
+        }
+
+        .signal-value-group {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .signal-value {
+            color: #fbbf24;
+            font-weight: bold;
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+        }
+
+        .signal-unit {
+            color: #9ca3af;
+            font-size: 11px;
+        }
+
+        .signal-raw {
+            color: #6b7280;
+            font-size: 11px;
+            font-family: 'Courier New', monospace;
+        }
+
+        /* CANalyzer风格的树形视图 */
+        .signal-tree {
+            background: #1a1a1a;
+            border-radius: 5px;
+            overflow: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 13px;
+        }
+
+        .tree-node {
+            border-bottom: 1px solid #2a2a2a;
+        }
+
+        .tree-node:last-child {
+            border-bottom: none;
+        }
+
+        .tree-header {
+            display: grid;
+            grid-template-columns: 40px 80px 150px 200px 150px 100px 80px 1fr;
+            gap: 10px;
+            padding: 10px;
+            background: #2a2a2a;
+            font-weight: bold;
+            color: #667eea;
+            border-bottom: 2px solid #667eea;
+            position: sticky;
+            top: 0;
+            z-index: 10;
+        }
+
+        .tree-row {
+            display: grid;
+            grid-template-columns: 40px 80px 150px 200px 150px 100px 80px 1fr;
+            gap: 10px;
+            padding: 8px 10px;
+            cursor: pointer;
+            transition: background 0.2s;
+            align-items: center;
+        }
+
+        .tree-row:hover {
+            background: #252525;
+        }
+
+        .tree-row.expanded {
+            background: #2d3748;
+        }
+
+        /* 移除闪烁动画 */
+
+        .tree-expand-icon {
+            cursor: pointer;
+            color: #9ca3af;
+            user-select: none;
+            font-size: 16px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .tree-expand-icon.expanded::before {
+            content: '▼';
+        }
+
+        .tree-expand-icon.collapsed::before {
+            content: '▶';
+        }
+
+        .tree-channel {
+            color: #3b82f6;
+            font-weight: bold;
+        }
+
+        .tree-id {
+            color: #f59e0b;
+            font-weight: bold;
+        }
+
+        .tree-name {
+            color: #10b981;
+        }
+
+        .tree-name.unmatched {
+            color: #9ca3af;
+            font-style: italic;
+        }
+
+        .tree-raw-data {
+            color: #60a5fa;
+            font-family: 'Courier New', monospace;
+        }
+
+        .tree-frame-type {
+            color: #9ca3af;
+            font-size: 11px;
+        }
+
+        .tree-dlc {
+            color: #c084fc;
+        }
+
+        .tree-timestamp {
+            color: #9ca3af;
+            font-size: 11px;
+        }
+
+        .signal-details {
+            display: none;
+            background: #1f2937;
+            border-left: 4px solid #667eea;
+            margin-left: 40px;
+        }
+
+        .signal-details.expanded {
+            display: block;
+        }
+
+        .signal-detail-row {
+            display: grid;
+            grid-template-columns: 250px 150px 100px 100px 1fr;
+            gap: 10px;
+            padding: 6px 20px;
+            border-bottom: 1px solid #374151;
+            align-items: center;
+        }
+
+        .signal-detail-row:hover {
+            background: #252525;
+        }
+
+        .signal-detail-row:last-child {
+            border-bottom: none;
+        }
+
+        .signal-detail-header {
+            display: grid;
+            grid-template-columns: 250px 150px 100px 100px 1fr;
+            gap: 10px;
+            padding: 8px 20px;
+            background: #374151;
+            font-weight: bold;
+            color: #a78bfa;
+            font-size: 12px;
+            border-bottom: 2px solid #667eea;
+        }
+
+        .signal-detail-name {
+            color: #a78bfa;
+            padding-left: 20px;
+        }
+
+        .signal-detail-value {
+            color: #fbbf24;
+            font-weight: bold;
+        }
+
+        .signal-detail-raw {
+            color: #9ca3af;
+        }
+
+        .signal-detail-unit {
+            color: #9ca3af;
+            font-style: italic;
+        }
+
+        .no-signals-row {
+            padding: 10px 20px;
+            color: #6b7280;
+            font-style: italic;
+            text-align: center;
+        }
+
+        .send-frame {
+            background: #1a1a1a;
+            border-radius: 5px;
+            padding: 15px;
+        }
+
+        .send-frame input {
+            width: calc(100% - 100px);
+            padding: 10px;
+            background: #2a2a2a;
+            border: 1px solid #444;
+            border-radius: 5px 0 0 5px;
+            color: #e0e0e0;
+            font-family: 'Courier New', monospace;
+        }
+
+        .send-frame button {
+            width: 100px;
+            padding: 10px;
+            border: none;
+            border-radius: 0 5px 5px 0;
+            background: #10b981;
+            color: white;
+            cursor: pointer;
+        }
+
+        .send-frame button:hover {
+            background: #059669;
+        }
+
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+
+        .stat-card {
+            background: #1a1a1a;
+            border-radius: 5px;
+            padding: 15px;
+            text-align: center;
+        }
+
+        .stat-value {
+            font-size: 28px;
+            font-weight: bold;
+            color: #667eea;
+        }
+
+        .stat-label {
+            font-size: 12px;
+            color: #a0a0a0;
+            margin-top: 5px;
+        }
+
+        .filter-panel {
+            background: #1a1a1a;
+            border-radius: 5px;
+            padding: 15px;
+        }
+
+        .filter-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin: 10px 0;
+            padding: 10px;
+            background: #2a2a2a;
+            border-radius: 5px;
+        }
+
+        .filter-item input {
+            flex: 1;
+            padding: 8px;
+            background: #1a1a1a;
+            border: 1px solid #444;
+            border-radius: 3px;
+            color: #e0e0e0;
+        }
+
+        .filter-item button {
+            padding: 8px 15px;
+            background: #ef4444;
+            color: white;
+            border: none;
+            border-radius: 3px;
+            cursor: pointer;
+        }
+
+        .dbc-panel {
+            background: #1a1a1a;
+            border-radius: 5px;
+            padding: 15px;
+        }
+
+        .dbc-select {
+            width: 100%;
+            padding: 10px;
+            background: #2a2a2a;
+            border: 1px solid #444;
+            border-radius: 5px;
+            color: #e0e0e0;
+            margin-bottom: 15px;
+        }
+
+        .signal-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 10px;
+        }
+
+        .signal-card {
+            background: #2a2a2a;
+            border-radius: 5px;
+            padding: 12px;
+        }
+
+        .signal-name {
+            font-weight: bold;
+            color: #667eea;
+            margin-bottom: 5px;
+        }
+
+        .signal-value {
+            font-size: 24px;
+            color: #10b981;
+        }
+
+        .signal-unit {
+            font-size: 12px;
+            color: #a0a0a0;
+        }
+
+        .toolbar {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+
+        .toolbar button {
+            flex: 1;
+            padding: 10px;
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+
+        .toolbar button:hover {
+            background: #5568d3;
+        }
+
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: #1a1a1a;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: #444;
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: #555;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- 头部 -->
+        <div class="header">
+            <h1>🚗 CAN总线监控系统</h1>
+            <div class="status-bar">
+                <div class="status-item">
+                    <div class="status-dot" id="serverStatus"></div>
+                    <span id="serverText">服务器: 检查中...</span>
+                </div>
+                <div class="status-item">
+                    <div class="status-dot" id="canStatus"></div>
+                    <span id="canText">CAN: 未启动</span>
+                </div>
+                <div class="status-item">
+                    <span>CAN1: <span id="can0Bitrate">-</span></span>
+                </div>
+                <div class="status-item">
+                    <span>CAN2: <span id="can1Bitrate">-</span></span>
+                </div>
+            </div>
+        </div>
+
+        <!-- 主体网格 -->
+        <div class="main-grid">
+            <!-- 控制面板 -->
+            <div class="control-panel">
+                <!-- CAN控制 -->
+                <div class="control-section">
+                    <h3>CAN控制</h3>
+                    <button class="btn btn-success" id="btnStart" onclick="startCAN()">启动监控</button>
+                    <button class="btn btn-danger" id="btnStop" onclick="stopCAN()" disabled>停止监控</button>
+                    <button class="btn btn-warning" onclick="clearFrames()">清除数据</button>
+                </div>
+
+                <!-- 录制控制 -->
+                <div class="control-section">
+                    <h3>报文录制</h3>
+                    <button class="btn btn-success" id="btnStartRecord" onclick="startRecord()">开始录制</button>
+                    <button class="btn btn-danger" id="btnStopRecord" onclick="stopRecord()" disabled>停止录制</button>
+                    <div style="margin-top:10px; font-size:12px; color:#10b981;" id="recordStatus">未录制</div>
+                </div>
+
+                <!-- 波特率配置 -->
+                <div class="control-section">
+                    <h3>波特率配置</h3>
+                    <div class="input-group">
+                        <label>CAN1 波特率 (bps)</label>
+                        <select id="bitrateSelect0">
+                            <option value="125000">125K</option>
+                            <option value="250000">250K</option>
+                            <option value="500000" selected>500K</option>
+                            <option value="1000000">1M</option>
+                        </select>
+                    </div>
+                    <div class="input-group">
+                        <label>CAN2 波特率 (bps)</label>
+                        <select id="bitrateSelect1">
+                            <option value="125000">125K</option>
+                            <option value="250000">250K</option>
+                            <option value="500000" selected>500K</option>
+                            <option value="1000000">1M</option>
+                        </select>
+                    </div>
+                    <button class="btn btn-primary" onclick="setBitrates()">应用配置</button>
+                </div>
+
+                <!-- 发送帧 -->
+                <div class="control-section">
+                    <h3>发送CAN帧</h3>
+                    <div class="input-group">
+                        <label>接口</label>
+                        <select id="sendInterface">
+                            <option value="can0">CAN1</option>
+                            <option value="can1">CAN2</option>
+                        </select>
+                    </div>
+                    <div class="input-group">
+                        <label>CAN ID (hex)</label>
+                        <input type="text" id="sendId" placeholder="123" value="123">
+                    </div>
+                    <div class="input-group">
+                        <label>数据 (hex, 空格分隔)</label>
+                        <input type="text" id="sendData" placeholder="01 02 03 04 05 06 07 08" value="01 02 03 04 05 06 07 08">
+                    </div>
+                    <button class="btn btn-success" onclick="sendFrame()">发送</button>
+                </div>
+            </div>
+
+            <!-- 监控面板 -->
+            <div class="monitor-panel">
+                <!-- 选项卡栏 -->
+                <div class="tab-bar">
+                    <div class="tab active" onclick="switchTab('frames')">实时帧</div>
+                    <div class="tab" onclick="switchTab('signals')">信号解析</div>
+                    <div class="tab" onclick="switchTab('dbc')">DBC管理</div>
+                    <div class="tab" onclick="switchTab('filter')">过滤器</div>
+                    <div class="tab" onclick="switchTab('stats')">统计</div>
+                </div>
+
+                <!-- 实时帧 -->
+                <div class="tab-content active" id="tab-frames">
+                    <div class="toolbar">
+                        <button onclick="refreshFrames()">刷新</button>
+                        <button onclick="exportFrames()">导出</button>
+                        <button onclick="pauseMonitor()">暂停/继续</button>
+                    </div>
+                    <div class="frames-container" id="framesContainer">
+                        <div style="text-align: center; color: #666; padding: 50px;">
+                            暂无CAN数据<br>点击"启动监控"开始接收
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 信号解析 -->
+                <div class="tab-content" id="tab-signals">
+                    <div class="toolbar">
+                        <button onclick="clearSignalsView()">清空</button>
+                        <button onclick="expandAllSignals()">全部展开</button>
+                        <button onclick="collapseAllSignals()">全部折叠</button>
+                        <input type="text" id="signalFilterInput" placeholder="过滤消息名称或ID" 
+                               style="flex: 1; padding: 8px; background: #1a1a1a; border: 1px solid #444; border-radius: 5px; color: #e0e0e0; margin: 0 10px;">
+                        <button onclick="applySignalFilter()">应用过滤</button>
+                    </div>
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; margin: 15px 0;">
+                        <div style="background: #1a1a1a; padding: 10px; border-radius: 5px; text-align: center;">
+                            <div style="font-size: 20px; font-weight: bold; color: #667eea;" id="signalStatMessages">0</div>
+                            <div style="font-size: 11px; color: #a0a0a0;">消息类型</div>
+                        </div>
+                        <div style="background: #1a1a1a; padding: 10px; border-radius: 5px; text-align: center;">
+                            <div style="font-size: 20px; font-weight: bold; color: #10b981;" id="signalStatSignals">0</div>
+                            <div style="font-size: 11px; color: #a0a0a0;">总信号数</div>
+                        </div>
+                        <div style="background: #1a1a1a; padding: 10px; border-radius: 5px; text-align: center;">
+                            <div style="font-size: 20px; font-weight: bold; color: #f59e0b;" id="signalStatMatched">0</div>
+                            <div style="font-size: 11px; color: #a0a0a0;">DBC匹配数</div>
+                        </div>
+                        <div style="background: #1a1a1a; padding: 10px; border-radius: 5px; text-align: center;">
+                            <div style="font-size: 20px; font-weight: bold; color: #3b82f6;" id="signalStatRate">0</div>
+                            <div style="font-size: 11px; color: #a0a0a0;">更新/秒</div>
+                        </div>
+                    </div>
+                    <!-- CANalyzer风格的树形表格 -->
+                    <div class="signal-tree" style="max-height: 600px; overflow-y: auto;">
+                        <div class="tree-header">
+                            <div></div>
+                            <div>通道</div>
+                            <div>CAN ID</div>
+                            <div>消息名称</div>
+                            <div>原始数据</div>
+                            <div>类型</div>
+                            <div>DLC</div>
+                            <div>时间戳</div>
+                        </div>
+                        <div id="signalsTreeBody">
+                            <div style="text-align: center; color: #666; padding: 50px;">
+                                等待接收DBC解析数据...<br>
+                                <small>请确保已上传DBC文件并启动CAN监控</small>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- DBC管理 -->
+                <div class="tab-content" id="tab-dbc">
+                    <div class="dbc-panel">
+                        <div style="margin-bottom: 20px;">
+                            <h4 style="color: #667eea; margin-bottom: 15px;">📁 DBC文件管理</h4>
+                            
+                            <!-- 上传区域 -->
+                            <div style="display: flex; gap: 10px; margin-bottom: 15px; align-items: center;">
+                                <input type="file" id="dbcFileInput" accept=".dbc" style="flex: 1; padding: 8px; background: #1a1a1a; border: 1px solid #444; border-radius: 5px; color: #e0e0e0;">
+                                <button class="btn btn-success" onclick="uploadDBC()" style="width: auto; padding: 10px 20px; margin: 0;">上传DBC</button>
+                                <button class="btn btn-primary" onclick="refreshDBCList()" style="width: auto; padding: 10px 20px; margin: 0;">刷新列表</button>
+                                <button class="btn btn-warning" onclick="reloadDBC()" style="width: auto; padding: 10px 20px; margin: 0;">重新加载</button>
+                            </div>
+                            
+                            <!-- 状态消息 -->
+                            <div id="dbcStatusMessage" style="padding: 10px; border-radius: 5px; margin-bottom: 15px; display: none;"></div>
+                            
+                            <!-- 已加载的DBC文件列表 -->
+                            <div style="background: #1a1a1a; border-radius: 5px; padding: 15px; margin-bottom: 15px;">
+                                <h5 style="color: #a0a0a0; margin-bottom: 10px;">已加载的DBC文件</h5>
+                                <div id="dbcFileList" style="max-height: 200px; overflow-y: auto;">
+                                    <div style="text-align: center; color: #666; padding: 20px;">
+                                        加载中...
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- DBC统计信息 -->
+                            <div id="dbcStatsPanel" style="background: #1a1a1a; border-radius: 5px; padding: 15px;">
+                                <h5 style="color: #a0a0a0; margin-bottom: 10px;">DBC统计</h5>
+                                <div id="dbcStatsContent" style="color: #e0e0e0; font-size: 13px;">
+                                    <div>总文件数: <span id="statTotalFiles">0</span></div>
+                                    <div>总消息数: <span id="statTotalMessages">0</span></div>
+                                    <div>总映射数: <span id="statTotalMappings">0</span></div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="signal-grid" id="signalGrid">
+                            <div style="text-align: center; color: #666; padding: 50px;">
+                                DBC文件已自动加载并解析<br>
+                                实时数据将显示在"实时帧"标签页
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 过滤器 -->
+                <div class="tab-content" id="tab-filter">
+                    <div class="filter-panel">
+                        <h3 style="color: #667eea; margin-bottom: 15px;">CAN ID 过滤</h3>
+                        <button class="btn btn-primary" onclick="addFilter()">添加过滤器</button>
+                        <div id="filterList">
+                            <div style="text-align: center; color: #666; padding: 30px;">
+                                暂无过滤规则
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 统计 -->
+                <div class="tab-content" id="tab-stats">
+                    <div class="stats">
+                        <div class="stat-card">
+                            <div class="stat-value" id="statTotal">0</div>
+                            <div class="stat-label">总帧数</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-value" id="statCan0">0</div>
+                            <div class="stat-label">CAN0</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-value" id="statCan1">0</div>
+                            <div class="stat-label">CAN1</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-value" id="statRate">0</div>
+                            <div class="stat-label">帧率 (fps)</div>
+                        </div>
+                    </div>
+                    <div class="frames-container" style="height: 400px;">
+                        <canvas id="statsChart" width="400" height="200"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = window.location.origin;
+        let monitorPaused = false;
+        let monitorActive = false;
+        let recordActive = false;
+        let frameCount = 0;
+        let can0Count = 0;
+        let can1Count = 0;
+        let lastUpdateTime = Date.now();
+        let filters = [];
+        let autoRefreshTimer = null;
+        let statusSyncTimer = null;
+        let ws = null;
+        let wsReconnectTimer = null;
+        let lastSeq = 0;          // 后端全局序列号，用于时序去重
+        let lastTimestamp = 0;    // 设备时间戳去重（秒）
+        const MAX_FRAMES = 200;   // 最多显示200帧
+        let messageBuffer = [];   // 消息缓冲区，用于时间戳排序（存储 {timestamp, frame} 对象）
+        let flushScheduled = false;
+        
+        // 信号解析相关
+        let messagesMap = new Map(); // 存储消息ID -> 消息数据
+        let expandedMessages = new Set(); // 存储展开的消息ID
+        let signalFilterText = '';
+        let signalUpdateCount = 0;
+        let lastSignalUpdateTime = Date.now();
+        let signalUpdateRateTimer = null;
+
+        // WebSocket连接管理
+        function connectWebSocket() {
+            const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${wsProtocol}//${window.location.host.split(':')[0]}:5052/ui`;
+            
+            console.log('连接WebSocket:', wsUrl);
+            
+            try {
+                ws = new WebSocket(wsUrl);
+                
+                ws.onopen = () => {
+                    console.log('✓ WebSocket已连接');
+                    document.getElementById('serverStatus').classList.add('active');
+                    document.getElementById('serverText').textContent = '服务器: 在线 (WS)';
+                };
+                
+                ws.onmessage = (event) => {
+                    try {
+                        const msg = JSON.parse(event.data);
+                        handleWebSocketMessage(msg);
+                    } catch (e) {
+                        console.error('解析WebSocket消息失败:', e, event.data);
+                    }
+                };
+                
+                ws.onerror = (error) => {
+                    console.error('WebSocket错误:', error);
+                };
+                
+                ws.onclose = () => {
+                    console.log('WebSocket已断开');
+                    document.getElementById('serverStatus').classList.remove('active');
+                    document.getElementById('serverText').textContent = '服务器: 断开';
+                    ws = null;
+                    
+                    // 5秒后重连
+                    if (wsReconnectTimer) clearTimeout(wsReconnectTimer);
+                    wsReconnectTimer = setTimeout(connectWebSocket, 5000);
+                };
+            } catch (e) {
+                console.error('创建WebSocket失败:', e);
+            }
+        }
+        
+        // 刷新显示（从messageBuffer排序后显示）
+        function flushDisplay() {
+            if (messageBuffer.length === 0) {
+                flushScheduled = false;
+                return;
+            }
+            
+            // 按时间戳排序（确保时序正确）
+            messageBuffer.sort((a, b) => a.timestamp - b.timestamp);
+            
+            // 限制缓冲区大小（保留最新的帧）
+            if (messageBuffer.length > MAX_FRAMES) {
+                messageBuffer = messageBuffer.slice(-MAX_FRAMES);
+            }
+            
+            // 立即显示（最新的在前，所以反转）
+            const framesToDisplay = messageBuffer.slice().reverse();
+            displayFrames(framesToDisplay.map(item => item.frame));
+            
+            // 更新统计
+            can0Count = messageBuffer.filter(item => {
+                const iface = (item.frame.iface || '').toLowerCase();
+                return iface.includes('can1') || iface === '1';
+            }).length;
+            can1Count = messageBuffer.filter(item => {
+                const iface = (item.frame.iface || '').toLowerCase();
+                return iface.includes('can2') || iface === '2';
+            }).length;
+            frameCount = messageBuffer.length;
+            
+            updateStats();
+            flushScheduled = false;
+        }
+        
+        // 安排刷新（使用 requestAnimationFrame）
+        function scheduleFlush() {
+            if (!flushScheduled) {
+                flushScheduled = true;
+                requestAnimationFrame(flushDisplay);
+            }
+        }
+        
+        // 处理WebSocket消息
+        function handleWebSocketMessage(msg) {
+            if (!msg || !msg.event) return;
+            
+            console.log('收到WebSocket事件:', msg.event);
+            
+            if (msg.event === 'can_frames') {
+                handleCANFrames(msg.data);
+            } else if (msg.event === 'can_parsed') {
+                // 处理DBC解析后的数据（包含原始帧）
+                handleCANParsed(msg.data);
+                // 同时更新信号解析视图
+                handleCANParsedForSignals(msg.data);
+            }
+        }
+        
+        // 处理CAN帧数据（参考旧版实现）
+        function handleCANFrames(data) {
+            if (!data) return;
+            
+            console.log('处理CAN帧数据:', data);
+            
+            // 优先使用后端提供的带时间戳的 frames 数组（参考旧版测试页逻辑）
+            let framesToProcess = [];
+            if (Array.isArray(data.frames) && data.frames.length > 0) {
+                // 后端提供了时间戳和line
+                framesToProcess = data.frames.map(f => ({
+                    line: f.line,
+                    timestamp: f.timestamp || (Date.now() / 1000),
+                    seq: (typeof f.seq === 'number') ? f.seq : 0
+                }));
+                // 若存在序号，按序并去重；否则按时间戳去重
+                const hasSeq = framesToProcess.some(f => f.seq && f.seq > 0);
+                if (hasSeq) {
+                    framesToProcess.sort((a,b)=> (a.seq||0) - (b.seq||0));
+                    framesToProcess = framesToProcess.filter(f => (f.seq||0) > lastSeq);
+                    if (framesToProcess.length > 0) {
+                        lastSeq = Math.max(lastSeq, framesToProcess[framesToProcess.length-1].seq||0);
+                        lastTimestamp = Math.max(lastTimestamp, framesToProcess[framesToProcess.length-1].timestamp||0);
+                    }
+                } else {
+                    framesToProcess = framesToProcess.filter(f => typeof f.timestamp === 'number');
+                    framesToProcess.sort((a,b)=> (a.timestamp||0) - (b.timestamp||0));
+                    framesToProcess = framesToProcess.filter(f => (f.timestamp||0) > lastTimestamp);
+                    if (framesToProcess.length > 0) {
+                        lastTimestamp = Math.max(lastTimestamp, framesToProcess[framesToProcess.length-1].timestamp||0);
+                    }
+                }
+            } else if (Array.isArray(data.lines) && data.lines.length > 0) {
+                // 兼容旧格式：如果没有 frames，使用 lines
+                const now = Date.now() / 1000;
+                framesToProcess = data.lines.map((line, index) => ({
+                    line: line,
+                    timestamp: now + index * 0.001
+                }));
+                // 基于时间戳排序与去重
+                framesToProcess.sort((a,b)=> a.timestamp - b.timestamp);
+                framesToProcess = framesToProcess.filter(f => f.timestamp > lastTimestamp);
+                if (framesToProcess.length > 0) {
+                    lastTimestamp = Math.max(lastTimestamp, framesToProcess[framesToProcess.length-1].timestamp||0);
+                }
+            } else if (data.buf && typeof data.buf === 'string') {
+                // 兼容 buf 模式（大批量时按\n拼接）
+                const lines = data.buf.split('\n').filter(l => l.trim());
+                const now = Date.now() / 1000;
+                framesToProcess = lines.map((line, index) => ({
+                    line: line,
+                    timestamp: now + index * 0.001
+                }));
+                framesToProcess.sort((a,b)=> a.timestamp - b.timestamp);
+                framesToProcess = framesToProcess.filter(f => f.timestamp > lastTimestamp);
+                if (framesToProcess.length > 0) {
+                    lastTimestamp = Math.max(lastTimestamp, framesToProcess[framesToProcess.length-1].timestamp||0);
+                }
+            }
+            
+            console.log('提取到帧:', framesToProcess.length);
+            
+            if (framesToProcess.length === 0) {
+                console.warn('没有提取到任何帧');
+                return;
+            }
+            
+            // 解析line字符串为结构化数据，加入消息缓冲区排序
+            framesToProcess.forEach(frameData => {
+                const parsed = parseCANLine(frameData.line);
+                if (parsed) {
+                    parsed.timestamp = frameData.timestamp;
+                    parsed.line = frameData.line; // 保留原始line用于显示
+                    
+                    // 加入消息缓冲区（带时间戳用于排序）
+                    messageBuffer.push({
+                        timestamp: frameData.timestamp,
+                        frame: parsed
+                    });
+                    
+                    console.log('解析的帧:', parsed);
+                } else {
+                    console.warn('无法解析line:', frameData.line);
+                }
+            });
+            
+            console.log('消息缓冲区大小:', messageBuffer.length);
+            
+            // 安排一次刷新（排序后显示）
+            scheduleFlush();
+        }
+        
+        // 处理CAN parsed数据（DBC解析后的数据，包含原始帧）
+        function handleCANParsed(data) {
+            if (!data || !data.results) return;
+            
+            console.log('处理CAN parsed数据，results数量:', data.results.length);
+            
+            const results = data.results || [];
+            const currentTime = Date.now() / 1000;
+            
+            // 若存在序号，则先按seq排序并去重；否则按设备时间戳排序并基于时间戳去重
+            const hasSeq = results.some(r => typeof r.seq === 'number' && r.seq > 0);
+            let filteredResults = [];
+            if (hasSeq) {
+                const sorted = results.slice().sort((a,b)=> (a.seq||0) - (b.seq||0));
+                filteredResults = sorted.filter(r => (r.seq||0) > lastSeq);
+                if (filteredResults.length > 0) {
+                lastSeq = Math.max(lastSeq, filteredResults[filteredResults.length - 1].seq||0);
+                    lastTimestamp = Math.max(lastTimestamp, filteredResults[filteredResults.length - 1].timestamp||0);
+                }
+            } else {
+                const withTs = results.filter(r => typeof r.timestamp === 'number');
+                const sorted = withTs.sort((a,b)=> (a.timestamp||0) - (b.timestamp||0));
+                filteredResults = sorted.filter(r => (r.timestamp||0) > lastTimestamp);
+                if (filteredResults.length > 0) {
+                    lastTimestamp = Math.max(lastTimestamp, filteredResults[filteredResults.length - 1].timestamp||0);
+                }
+            }
+
+            filteredResults.forEach((result, index) => {
+                // 直接从result中提取结构化数据
+                if (!result.id && result.id !== 0) return;
+                
+                // 只显示第一条的result示例（避免日志过多）
+                if (index === 0) {
+                    console.log('result示例:', result);
+                }
+                
+                // 从payload_hex提取数据字节数组
+                const data = [];
+                const payloadHex = result.payload_hex || '';
+                if (payloadHex) {
+                    // "0102030405" -> [1, 2, 3, 4, 5]
+                    for (let i = 0; i < payloadHex.length; i += 2) {
+                        const byte = parseInt(payloadHex.substr(i, 2), 16);
+                        if (!isNaN(byte)) {
+                            data.push(byte);
+                        }
+                    }
+                }
+                
+                // 从raw_line提取接口（备用）
+                const rawLine = result.raw_line || result.line || '';
+                let iface = result.channel || 'can1'; // 优先使用channel字段
+                if (!iface || iface === 'unknown') {
+                    // 从raw_line提取
+                    const ifaceMatch = rawLine.match(/can(\d+)/i);
+                    if (ifaceMatch) {
+                        iface = `can${ifaceMatch[1]}`;
+                    }
+                }
+                
+                // 构造帧对象
+                const frame = {
+                    id: result.id,
+                    data: data,
+                    iface: iface,
+                    interface: iface,
+                    timestamp: result.timestamp || (currentTime + index * 0.001),
+                    line: rawLine // 保留原始字符串
+                };
+                
+                // 加入消息缓冲区（带时间戳用于排序）
+                messageBuffer.push({
+                    timestamp: frame.timestamp,
+                    frame: frame
+                });
+                
+                if (index === 0) {
+                    console.log('第一个解析后的帧:', frame);
+                }
+            });
+            
+            console.log('消息缓冲区大小:', messageBuffer.length);
+            
+            // 安排一次刷新（排序后显示）
+            scheduleFlush();
+        }
+        
+        // 解析CAN line字符串为结构化数据
+        // 格式: "13:43:44 ID:0x0000 [10 27 00 00] can1"
+        function parseCANLine(line) {
+            if (!line || typeof line !== 'string') return null;
+            
+            line = line.trim();
+            if (!line) return null;
+            
+            // 移除emoji前缀（如果有）
+            line = line.replace(/^[🟢🔵📋❌]\s*/, '');
+            
+            try {
+                // 提取时间（可选）
+                const timeMatch = line.match(/^(\d{2}:\d{2}:\d{2})/);
+                let lineRest = line;
+                if (timeMatch) {
+                    lineRest = line.substring(timeMatch[0].length).trim();
+                }
+                
+                // 提取ID: "ID:0x0000" 或 "ID:0000"
+                const idMatch = lineRest.match(/ID:(?:0x)?([0-9A-Fa-f]+)/);
+                if (!idMatch) return null;
+                const id = parseInt(idMatch[1], 16);
+                
+                // 提取数据: "[10 27 00 00]" 或 "[]"
+                const dataMatch = lineRest.match(/\[([^\]]*)\]/);
+                const data = [];
+                if (dataMatch && dataMatch[1].trim()) {
+                    const bytes = dataMatch[1].trim().split(/\s+/);
+                    bytes.forEach(b => {
+                        const byte = parseInt(b, 16);
+                        if (!isNaN(byte)) {
+                            data.push(byte);
+                        }
+                    });
+                }
+                
+                // 提取接口: "can1" 或 "can2"
+                const ifaceMatch = lineRest.match(/can(\d+)/i);
+                let iface = 'can1'; // 默认
+                if (ifaceMatch) {
+                    iface = `can${ifaceMatch[1]}`;
+                }
+                
+                return {
+                    id: id,
+                    data: data,
+                    iface: iface,
+                    interface: iface
+                };
+            } catch (e) {
+                console.warn('解析CAN line失败:', line, e);
+                return null;
+            }
+        }
+        
+        // 检查服务器状态
+        async function checkStatus() {
+            try {
+                const response = await fetch(API_BASE + '/api/status');
+                const result = await response.json();
+                
+                document.getElementById('serverStatus').classList.add('active');
+                document.getElementById('serverText').textContent = '服务器: 运行中';
+                
+                // 检查设备连接状态
+                if (result.hub && result.hub.connected) {
+                    // 更新CAN状态
+                    updateCANStatus();
+                }
+            } catch (error) {
+                document.getElementById('serverStatus').classList.remove('active');
+                document.getElementById('serverText').textContent = '服务器: 离线';
+            }
+        }
+        
+        // 更新CAN状态
+        async function updateCANStatus() {
+            try {
+                // 这里可以添加获取CAN状态的API调用
+                // 暂时检查是否有帧数据来判断CAN是否在运行
+                const response = await fetch(API_BASE + '/api/can/frames?limit=1');
+                const result = await response.json();
+                if (result.ok && result.data && result.data.frames && result.data.frames.length > 0) {
+                    if (!monitorActive) {
+                        monitorActive = true;
+                        document.getElementById('canStatus').classList.add('active');
+                        document.getElementById('canText').textContent = 'CAN: 监控中';
+                        document.getElementById('btnStart').disabled = true;
+                        document.getElementById('btnStop').disabled = false;
+                    }
+                }
+            } catch (error) {
+                console.error('更新CAN状态失败:', error);
+            }
+        }
+
+        // 启动CAN监控
+        async function startCAN() {
+            console.log('startCAN 被调用');
+            
+            // 防止重复点击
+            const btnStart = document.getElementById('btnStart');
+            if (btnStart.disabled) {
+                console.log('按钮已禁用，忽略点击');
+                return;
+            }
+            
+            // 立即禁用按钮，防止重复提交
+            btnStart.disabled = true;
+            
+            try {
+                const response = await fetch(API_BASE + '/api/can/start', {
+                    method: 'POST'
+                });
+                const result = await response.json();
+                
+                console.log('CAN启动响应:', result);
+                
+                if (result.ok !== false) {
+                    monitorActive = true;
+                    document.getElementById('canStatus').classList.add('active');
+                    document.getElementById('canText').textContent = 'CAN: 监控中';
+                    document.getElementById('btnStop').disabled = false;
+                    
+                    console.log('CAN监控已启动，按钮状态已更新');
+                    
+                    // 启动后立即刷新一次
+                    setTimeout(refreshFrames, 500);
+                } else {
+                    // 启动失败，重新启用按钮
+                    btnStart.disabled = false;
+                    alert('启动失败: ' + (result.error || '未知错误'));
+                }
+            } catch (error) {
+                // 发生异常，重新启用按钮
+                btnStart.disabled = false;
+                alert('启动失败: ' + error.message);
+                console.error('CAN启动错误:', error);
+            }
+        }
+
+        // 停止CAN监控
+        async function stopCAN() {
+            console.log('stopCAN 被调用');
+            
+            // 防止重复点击
+            const btnStop = document.getElementById('btnStop');
+            if (btnStop.disabled) {
+                console.log('停止按钮已禁用，忽略点击');
+                return;
+            }
+            
+            // 立即禁用按钮
+            btnStop.disabled = true;
+            
+            try {
+                const response = await fetch(API_BASE + '/api/can/stop', {
+                    method: 'POST'
+                });
+                const result = await response.json();
+                
+                console.log('CAN停止响应:', result);
+                
+                // 无论成功失败，都更新状态
+                monitorActive = false;
+                document.getElementById('canStatus').classList.remove('active');
+                document.getElementById('canText').textContent = 'CAN: 已停止';
+                
+                // 重新启用启动按钮
+                const btnStart = document.getElementById('btnStart');
+                btnStart.disabled = false;
+                
+                console.log('CAN监控已停止，启动按钮已启用:', !btnStart.disabled);
+            } catch (error) {
+                // 即使出错也要恢复按钮状态
+                monitorActive = false;
+                document.getElementById('btnStart').disabled = false;
+                btnStop.disabled = true;
+                
+                alert('停止失败: ' + error.message);
+                console.error('CAN停止错误:', error);
+            }
+        }
+
+        // 开始录制
+        async function startRecord() {
+            console.log('startRecord 被调用');
+            
+            const btnStart = document.getElementById('btnStartRecord');
+            if (btnStart.disabled) {
+                return;
+            }
+            
+            btnStart.disabled = true;
+            
+            try {
+                const response = await fetch(API_BASE + '/api/can/record/start', {
+                    method: 'POST'
+                });
+                const result = await response.json();
+                
+                console.log('录制启动响应:', result);
+                
+                if (result.ok !== false) {
+                    recordActive = true;
+                    document.getElementById('btnStopRecord').disabled = false;
+                    document.getElementById('recordStatus').textContent = '录制中...';
+                    document.getElementById('recordStatus').style.color = '#ef4444';
+                    console.log('录制已启动');
+                } else {
+                    btnStart.disabled = false;
+                    alert('启动录制失败: ' + (result.error || '未知错误'));
+                }
+            } catch (error) {
+                btnStart.disabled = false;
+                alert('启动录制失败: ' + error.message);
+                console.error('录制启动错误:', error);
+            }
+        }
+
+        // 停止录制
+        async function stopRecord() {
+            console.log('stopRecord 被调用');
+            
+            const btnStop = document.getElementById('btnStopRecord');
+            if (btnStop.disabled) {
+                return;
+            }
+            
+            btnStop.disabled = true;
+            
+            try {
+                const response = await fetch(API_BASE + '/api/can/record/stop', {
+                    method: 'POST'
+                });
+                const result = await response.json();
+                
+                console.log('录制停止响应:', result);
+                
+                recordActive = false;
+                document.getElementById('btnStartRecord').disabled = false;
+                document.getElementById('recordStatus').textContent = '未录制';
+                document.getElementById('recordStatus').style.color = '#10b981';
+                
+                if (result.ok !== false && result.data && result.data.filename) {
+                    alert('录制已停止\n文件: ' + result.data.filename);
+                }
+                
+                console.log('录制已停止');
+            } catch (error) {
+                recordActive = false;
+                document.getElementById('btnStartRecord').disabled = false;
+                btnStop.disabled = true;
+                
+                alert('停止录制失败: ' + error.message);
+                console.error('录制停止错误:', error);
+            }
+        }
+
+        // 清除数据
+        async function clearFrames() {
+            try {
+                // 清除本地缓冲区
+                messageBuffer = [];
+                lastSeq = 0;
+                lastTimestamp = 0;
+                
+                // 通知服务器清除缓存（可选）
+                await fetch(API_BASE + '/api/can/clear', {
+                    method: 'POST'
+                });
+                
+                document.getElementById('framesContainer').innerHTML = '<div style="text-align: center; color: #666; padding: 50px;">数据已清除<br>等待新的CAN帧...</div>';
+                frameCount = 0;
+                can0Count = 0;
+                can1Count = 0;
+                updateStats();
+                
+                console.log('✓ 本地帧缓冲区已清除');
+            } catch (error) {
+                alert('清除失败: ' + error.message);
+            }
+        }
+
+        // 设置波特率
+        async function setBitrates() {
+            const can1 = parseInt(document.getElementById('bitrateSelect0').value);
+            const can2 = parseInt(document.getElementById('bitrateSelect1').value);
+            
+            if (!can1 || !can2) {
+                alert('请选择有效的波特率');
+                return;
+            }
+            
+            console.log('设置波特率:', {can1, can2});
+            
+            try {
+                const response = await fetch(API_BASE + '/api/can/set_bitrates', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({can1, can2})
+                });
+                const result = await response.json();
+                
+                console.log('波特率设置响应:', result);
+                
+                if (result.ok !== false) {
+                    // 更新头部显示的波特率
+                    const can0BitrateSpan = document.getElementById('can0Bitrate');
+                    const can1BitrateSpan = document.getElementById('can1Bitrate');
+                    if (can0BitrateSpan) can0BitrateSpan.textContent = (can1/1000) + 'K';
+                    if (can1BitrateSpan) can1BitrateSpan.textContent = (can2/1000) + 'K';
+                    
+                    console.log('波特率配置成功: CAN1=' + can1 + ', CAN2=' + can2);
+                    alert('波特率配置成功!\nCAN1: ' + (can1/1000) + 'K\nCAN2: ' + (can2/1000) + 'K');
+                } else {
+                    alert('配置失败: ' + (result.error || '未知错误'));
+                }
+            } catch (error) {
+                alert('配置失败: ' + error.message);
+                console.error('波特率配置错误:', error);
+            }
+        }
+
+        // 发送帧
+        async function sendFrame() {
+            const iface = document.getElementById('sendInterface').value;
+            const id = document.getElementById('sendId').value.trim();
+            const data = document.getElementById('sendData').value.trim().replace(/\s+/g, '');
+            
+            // 验证输入
+            if (!id) {
+                alert('请输入CAN ID');
+                return;
+            }
+            
+            if (!data) {
+                alert('请输入数据');
+                return;
+            }
+            
+            // 构建CAN帧文本: 格式为 "can0 123#0102030405060708"
+            const frameText = `${iface} ${id}#${data}`;
+            
+            console.log('发送CAN帧:', frameText);
+            
+            try {
+                const response = await fetch(API_BASE + '/api/can/send', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({text: frameText})
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP错误: ${response.status}`);
+                }
+                
+                const result = await response.json();
+                console.log('发送响应:', result);
+                
+                if (result.ok !== false) {
+                    console.log('✅ CAN帧发送成功:', frameText);
+                    // 显示成功提示（可选）
+                    // alert('CAN帧发送成功!');
+                    
+                    // 立即刷新一次以显示刚发送的帧
+                    setTimeout(refreshFrames, 200);
+                } else {
+                    alert('发送失败: ' + (result.error || '未知错误'));
+                }
+            } catch (error) {
+                console.error('发送错误:', error);
+                alert('发送失败: ' + error.message);
+            }
+        }
+
+        // 刷新帧
+        async function refreshFrames() {
+            if (monitorPaused) return;
+            
+            try {
+                const response = await fetch(API_BASE + '/api/can/frames?limit=50');
+                if (!response.ok) {
+                    console.error('HTTP错误:', response.status);
+                    return;
+                }
+                
+                const result = await response.json();
+                console.log('收到CAN帧原始数据:', JSON.stringify(result).substring(0, 200));
+                
+                // 兼容多种响应格式
+                let frames = [];
+                
+                // 格式1: {ok: true, data: {frames: [...]}} 或 {ok: true, data: "JSON字符串"}
+                if (result.ok && result.data) {
+                    if (typeof result.data === 'string') {
+                        // data是JSON字符串，需要再次解析
+                        try {
+                            const parsed = JSON.parse(result.data);
+                            frames = parsed.frames || parsed || [];
+                        } catch (e) {
+                            console.error('解析data字符串失败:', e);
+                        }
+                    } else if (result.data.frames) {
+                        frames = result.data.frames;
+                    } else if (Array.isArray(result.data)) {
+                        frames = result.data;
+                    }
+                }
+                // 格式2: {ok: true, frames: [...]}
+                else if (result.ok && result.frames) {
+                    frames = result.frames;
+                }
+                // 格式3: {frames: [...]}
+                else if (result.frames) {
+                    frames = result.frames;
+                }
+                // 格式4: 直接是数组
+                else if (Array.isArray(result)) {
+                    frames = result;
+                }
+                
+                console.log('解析出帧数量:', frames.length, frames.length > 0 ? '第一帧:' : '', frames[0]);
+                
+                if (frames && frames.length > 0) {
+                    displayFrames(frames);
+                    
+                    // 统计CAN0和CAN1的帧数（改进的匹配逻辑）
+                    can0Count = frames.filter(f => {
+                        const iface = (f.iface || f.interface || '').toString().toLowerCase();
+                        return iface.includes('can0') || iface === '0';
+                    }).length;
+                    can1Count = frames.filter(f => {
+                        const iface = (f.iface || f.interface || '').toString().toLowerCase();
+                        return iface.includes('can1') || iface === '1';
+                    }).length;
+                    frameCount = frames.length;
+                    
+                    updateStats();
+                } else {
+                    // 没有数据时显示提示
+                    const container = document.getElementById('framesContainer');
+                    if (container.children.length === 0) {
+                        container.innerHTML = '<div style="text-align: center; color: #666; padding: 50px;">暂无CAN数据<br>点击"启动监控"开始接收</div>';
+                    }
+                }
+            } catch (error) {
+                console.error('刷新失败:', error);
+            }
+        }
+
+        // 显示帧
+        function displayFrames(frames) {
+            const container = document.getElementById('framesContainer');
+            
+            // 如果没有帧，显示提示
+            if (!frames || frames.length === 0) {
+                container.innerHTML = '<div style="text-align: center; color: #666; padding: 50px;">暂无CAN数据<br>等待接收...</div>';
+                return;
+            }
+            
+            console.log('显示帧数量:', frames.length, '第一帧:', frames[0]);
+            
+            // 创建表格结构
+            let tableHTML = `
+                <table class="frame-table">
+                    <thead>
+                        <tr>
+                            <th>时间戳</th>
+                            <th>CAN ID</th>
+                            <th>数据</th>
+                            <th>通道</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+            `;
+            
+            // frames已经是反转后的（最新的在前），直接使用
+            frames.forEach((frame, idx) => {
+                // 处理时间戳
+                const timeStr = formatTime(frame.timestamp || frame.time || Date.now()/1000);
+                
+                // 处理CAN ID（支持标准帧和扩展帧）
+                const canId = frame.id || frame.can_id || 0;
+                // 标准帧（≤ 0x7FF）显示3位，扩展帧显示8位
+                const padLength = canId <= 0x7FF ? 3 : 8;
+                const idStr = '0x' + canId.toString(16).toUpperCase().padStart(padLength, '0');
+                
+                // 处理数据
+                const data = frame.data || [];
+                if (idx === 0) {
+                    console.log('第一帧data:', data, '类型:', Array.isArray(data));
+                }
+                
+                const dataStr = Array.isArray(data) 
+                    ? data.map(b => {
+                        const byte = typeof b === 'number' ? b : parseInt(b, 16) || 0;
+                        return byte.toString(16).padStart(2,'0').toUpperCase();
+                    }).join(' ')
+                    : (data ? String(data) : '');
+                
+                // 处理接口
+                const iface = frame.iface || frame.interface || '';
+                const ifaceStr = iface.toUpperCase();
+                const ifaceClass = iface.toLowerCase().includes('can1') ? 'can1' : 
+                                   iface.toLowerCase().includes('can2') ? 'can2' : '';
+                
+                tableHTML += `
+                    <tr>
+                        <td class="frame-time">${timeStr}</td>
+                        <td class="frame-id">${idStr}</td>
+                        <td class="frame-data">${dataStr}</td>
+                        <td class="frame-channel ${ifaceClass}">${ifaceStr || '-'}</td>
+                    </tr>
+                `;
+            });
+            
+            tableHTML += `
+                    </tbody>
+                </table>
+                `;
+            
+            container.innerHTML = tableHTML;
+            
+            console.log('✓ 已显示', frames.length, '帧');
+        }
+
+        // 格式化时间
+        function formatTime(timestamp) {
+            // 处理不同格式的时间戳
+            const ts = typeof timestamp === 'number' ? timestamp : parseFloat(timestamp) || (Date.now()/1000);
+            // 如果时间戳太小，可能是秒级的，否则是毫秒级的
+            const date = ts < 10000000000 ? new Date(ts * 1000) : new Date(ts);
+            return date.toLocaleTimeString('zh-CN', {hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit'});
+        }
+
+        // 切换选项卡
+        function switchTab(tabName) {
+            document.querySelectorAll('.tab').forEach(tab => tab.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
+            
+            event.target.classList.add('active');
+            document.getElementById('tab-' + tabName).classList.add('active');
+        }
+
+        // 暂停/继续监控
+        function pauseMonitor() {
+            monitorPaused = !monitorPaused;
+            event.target.textContent = monitorPaused ? '继续' : '暂停';
+        }
+
+        // 导出帧
+        function exportFrames() {
+            alert('导出功能开发中...');
+        }
+
+        // 添加过滤器
+        function addFilter() {
+            const id = prompt('输入要过滤的CAN ID (hex):');
+            if (id) {
+                filters.push(id);
+                updateFilterList();
+            }
+        }
+
+        // 更新过滤器列表
+        function updateFilterList() {
+            const list = document.getElementById('filterList');
+            list.innerHTML = '';
+            
+            filters.forEach((filter, index) => {
+                const div = document.createElement('div');
+                div.className = 'filter-item';
+                div.innerHTML = `
+                    <input type="text" value="${filter}" readonly>
+                    <button onclick="removeFilter(${index})">删除</button>
+                `;
+                list.appendChild(div);
+            });
+        }
+
+        // 删除过滤器
+        function removeFilter(index) {
+            filters.splice(index, 1);
+            updateFilterList();
+        }
+
+        // 更新统计
+        function updateStats() {
+            document.getElementById('statTotal').textContent = frameCount;
+            document.getElementById('statCan0').textContent = can0Count;
+            document.getElementById('statCan1').textContent = can1Count;
+            
+            const now = Date.now();
+            const elapsed = (now - lastUpdateTime) / 1000;
+            const rate = Math.round(frameCount / elapsed);
+            document.getElementById('statRate').textContent = rate;
+        }
+
+        // 自动刷新
+        function startAutoRefresh() {
+            // 防止重复启动
+            if (autoRefreshTimer) {
+                return;
+            }
+            
+            autoRefreshTimer = setInterval(() => {
+                if (!monitorPaused) {
+                    refreshFrames();
+                }
+            }, 1000);  // 每秒刷新一次
+            
+            console.log('自动刷新已启动');
+        }
+        
+        // 停止自动刷新
+        function stopAutoRefresh() {
+            if (autoRefreshTimer) {
+                clearInterval(autoRefreshTimer);
+                autoRefreshTimer = null;
+                console.log('自动刷新已停止');
+            }
+        }
+
+        // 同步设备端状态到Web端
+        async function syncDeviceStatus() {
+            try {
+                // 获取设备端CAN状态
+                const response = await fetch(API_BASE + '/api/can/status');
+                if (response.ok) {
+                    const result = await response.json();
+                    console.log('设备状态:', result);
+                    
+                    if (result.ok && result.data) {
+                        // 同步监控状态
+                        const isMonitoring = result.data.is_running || result.data.running || false;
+                        if (isMonitoring !== monitorActive) {
+                            monitorActive = isMonitoring;
+                            if (isMonitoring) {
+                                document.getElementById('canStatus').classList.add('active');
+                                document.getElementById('canText').textContent = 'CAN: 监控中';
+                                document.getElementById('btnStart').disabled = true;
+                                document.getElementById('btnStop').disabled = false;
+                            } else {
+                                document.getElementById('canStatus').classList.remove('active');
+                                document.getElementById('canText').textContent = 'CAN: 已停止';
+                                document.getElementById('btnStart').disabled = false;
+                                document.getElementById('btnStop').disabled = true;
+                            }
+                        }
+                        
+                        // 同步录制状态
+                        const isRecording = result.data.is_recording || result.data.recording || false;
+                        if (isRecording !== recordActive) {
+                            recordActive = isRecording;
+                            if (isRecording) {
+                                document.getElementById('btnStartRecord').disabled = true;
+                                document.getElementById('btnStopRecord').disabled = false;
+                                document.getElementById('recordStatus').textContent = '录制中...';
+                                document.getElementById('recordStatus').style.color = '#ef4444';
+                            } else {
+                                document.getElementById('btnStartRecord').disabled = false;
+                                document.getElementById('btnStopRecord').disabled = true;
+                                document.getElementById('recordStatus').textContent = '未录制';
+                                document.getElementById('recordStatus').style.color = '#10b981';
+                            }
+                        }
+                    }
+                }
+            } catch (error) {
+                console.error('同步设备状态失败:', error);
+            }
+        }
+
+        // 获取并更新波特率信息
+        async function updateBitrates() {
+            try {
+                // 尝试从设备获取当前波特率
+                const response = await fetch(API_BASE + '/api/can/config');
+                if (response.ok) {
+                    const result = await response.json();
+                    console.log('收到CAN配置:', result);
+                    
+                    if (result.ok && result.data) {
+                        // 注意：API中can1对应设备can0，can2对应设备can1
+                        const can0Bitrate = result.data.can1_bitrate || result.data.can0 || result.data.bitrate0 || 500000;
+                        const can1Bitrate = result.data.can2_bitrate || result.data.can1 || result.data.bitrate1 || 500000;
+                        
+                        console.log('解析波特率:', {can0: can0Bitrate, can1: can1Bitrate});
+                        
+                        // 更新头部显示（显示为K单位）
+                        const can0Span = document.getElementById('can0Bitrate');
+                        const can1Span = document.getElementById('can1Bitrate');
+                        if (can0Span) can0Span.textContent = (can0Bitrate / 1000) + 'K';
+                        if (can1Span) can1Span.textContent = (can1Bitrate / 1000) + 'K';
+                        
+                        // 更新下拉框选择
+                        const select0 = document.getElementById('bitrateSelect0');
+                        const select1 = document.getElementById('bitrateSelect1');
+                        if (select0) select0.value = can0Bitrate;
+                        if (select1) select1.value = can1Bitrate;
+                        
+                        console.log('波特率显示已更新: CAN1=' + can0Bitrate + ', CAN2=' + can1Bitrate);
+                        return;
+                    }
+                }
+            } catch (error) {
+                console.log('获取CAN配置失败，使用默认值:', error);
+            }
+            
+            // 如果API不支持或失败，使用默认值
+            const can1Bitrate = 500000;
+            const can2Bitrate = 500000;
+            
+            const can0Span = document.querySelector('[id*="can0Bitrate"]');
+            const can1Span = document.querySelector('[id*="can1Bitrate"]');
+            if (can0Span) can0Span.textContent = (can1Bitrate / 1000) + 'K';
+            if (can1Span) can1Span.textContent = (can2Bitrate / 1000) + 'K';
+        }
+
+        // 显示状态消息
+        function showDBCMessage(message, isSuccess) {
+            const msgDiv = document.getElementById('dbcStatusMessage');
+            msgDiv.style.display = 'block';
+            msgDiv.style.background = isSuccess ? '#d4edda' : '#f8d7da';
+            msgDiv.style.color = isSuccess ? '#155724' : '#721c24';
+            msgDiv.style.border = isSuccess ? '1px solid #c3e6cb' : '1px solid #f5c6cb';
+            msgDiv.textContent = message;
+            
+            // 3秒后自动隐藏
+            setTimeout(() => {
+                msgDiv.style.display = 'none';
+            }, 3000);
+        }
+
+        // 上传DBC文件
+        async function uploadDBC() {
+            const fileInput = document.getElementById('dbcFileInput');
+            const file = fileInput.files[0];
+            
+            if (!file) {
+                showDBCMessage('请选择DBC文件', false);
+                return;
+            }
+            
+            if (!file.name.endsWith('.dbc')) {
+                showDBCMessage('请选择.dbc格式的文件', false);
+                return;
+            }
+            
+            try {
+                const formData = new FormData();
+                formData.append('file', file);
+                
+                showDBCMessage('正在上传...', true);
+                
+                const response = await fetch(API_BASE + '/api/dbc/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const result = await response.json();
+                
+                if (result.ok) {
+                    showDBCMessage(`上传成功: ${result.name}`, true);
+                    fileInput.value = ''; // 清空文件选择
+                    await refreshDBCList(); // 刷新列表
+                    await updateDBCStats(); // 更新统计
+                } else {
+                    showDBCMessage(`上传失败: ${result.error || '未知错误'}`, false);
+                }
+            } catch (error) {
+                showDBCMessage(`上传错误: ${error.message}`, false);
+                console.error('上传DBC失败:', error);
+            }
+        }
+
+        // 刷新DBC文件列表
+        // 重新加载DBC文件
+        async function reloadDBC() {
+            try {
+                showDBCMessage('正在重新加载DBC文件...', false);
+                
+                const response = await fetch(API_BASE + '/api/dbc/reload', {
+                    method: 'POST'
+                });
+                
+                if (!response.ok) {
+                    throw new Error('重新加载失败');
+                }
+                
+                const data = await response.json();
+                if (data.ok) {
+                    showDBCMessage(`✓ ${data.message || 'DBC文件已重新加载'}`, true);
+                    // 刷新列表和统计
+                    await refreshDBCList();
+                } else {
+                    showDBCMessage(`✗ ${data.error || '重新加载失败'}`, false);
+                }
+            } catch (error) {
+                showDBCMessage(`✗ 重新加载失败: ${error.message}`, false);
+            }
+        }
+        
+        async function refreshDBCList() {
+            try {
+                const response = await fetch(API_BASE + '/api/dbc/list');
+                if (!response.ok) {
+                    throw new Error('获取DBC列表失败');
+                }
+                
+                    const result = await response.json();
+                const listDiv = document.getElementById('dbcFileList');
+                
+                if (result.ok && result.items && result.items.length > 0) {
+                    listDiv.innerHTML = '';
+                    
+                    result.items.forEach(item => {
+                        const itemDiv = document.createElement('div');
+                        itemDiv.style.cssText = 'display: flex; justify-content: space-between; align-items: center; padding: 10px; margin: 5px 0; background: #2a2a2a; border-radius: 5px; border-left: 3px solid #667eea;';
+                        
+                        const infoDiv = document.createElement('div');
+                        infoDiv.style.cssText = 'flex: 1;';
+                        infoDiv.innerHTML = `
+                            <div style="color: #e0e0e0; font-weight: bold;">${item.name}</div>
+                            <div style="color: #a0a0a0; font-size: 12px; margin-top: 4px;">
+                                消息数: ${item.message_count || 0} | 
+                                大小: ${item.size ? (item.size / 1024).toFixed(2) + ' KB' : 'N/A'}
+                            </div>
+                        `;
+                        
+                        const deleteBtn = document.createElement('button');
+                        deleteBtn.textContent = '删除';
+                        deleteBtn.className = 'btn btn-danger';
+                        deleteBtn.style.cssText = 'width: auto; padding: 8px 16px; margin: 0;';
+                        deleteBtn.onclick = () => deleteDBC(item.name);
+                        
+                        itemDiv.appendChild(infoDiv);
+                        itemDiv.appendChild(deleteBtn);
+                        listDiv.appendChild(itemDiv);
+                    });
+                } else {
+                    listDiv.innerHTML = '<div style="text-align: center; color: #666; padding: 20px;">暂无DBC文件<br>请上传DBC文件</div>';
+                }
+                
+                // 更新统计
+                await updateDBCStats();
+                
+            } catch (error) {
+                console.error('刷新DBC列表失败:', error);
+                document.getElementById('dbcFileList').innerHTML = '<div style="text-align: center; color: #f87171; padding: 20px;">加载失败: ' + error.message + '</div>';
+            }
+        }
+
+        // 删除DBC文件
+        async function deleteDBC(filename) {
+            if (!confirm(`确定要删除DBC文件 "${filename}" 吗？\n\n删除后将无法恢复，且会清空该文件的解析映射。`)) {
+                return;
+            }
+            
+            try {
+                const response = await fetch(API_BASE + '/api/dbc/delete', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name: filename })
+                });
+                
+                const result = await response.json();
+                
+                if (result.ok) {
+                    showDBCMessage(`已删除: ${filename}`, true);
+                    await refreshDBCList(); // 刷新列表
+                } else {
+                    showDBCMessage(`删除失败: ${result.error || '未知错误'}`, false);
+                }
+            } catch (error) {
+                showDBCMessage(`删除错误: ${error.message}`, false);
+                console.error('删除DBC失败:', error);
+            }
+        }
+
+        // 更新DBC统计信息
+        async function updateDBCStats() {
+            try {
+                const response = await fetch(API_BASE + '/api/dbc/stats');
+                if (!response.ok) return;
+                
+                const result = await response.json();
+                
+                if (result.ok) {
+                    document.getElementById('statTotalFiles').textContent = result.global_stats?.loaded_files || 0;
+                    document.getElementById('statTotalMessages').textContent = result.global_stats?.total_messages || 0;
+                    document.getElementById('statTotalMappings').textContent = result.total_mappings || 0;
+                }
+            } catch (error) {
+                console.error('获取DBC统计失败:', error);
+            }
+        }
+
+        // ===== 信号解析功能 =====
+        
+        // 处理DBC解析数据（用于信号解析标签页）
+        function handleCANParsedForSignals(data) {
+            if (!data || !data.results) return;
+            
+            const results = data.results || [];
+            
+            results.forEach(result => {
+                if (!result.id && result.id !== 0) return;
+                // 显示所有帧（包括未匹配DBC的）
+                
+                signalUpdateCount++;
+                
+                // 更新或添加消息
+                const msgId = result.id;
+                messagesMap.set(msgId, {
+                    id: msgId,
+                    id_hex: result.id_hex || `0x${msgId.toString(16).toUpperCase()}`,
+                    name: result.name || `Unknown_0x${msgId.toString(16).toUpperCase()}`,
+                    channel: result.channel || '-',
+                    signals: result.signals || {},
+                    timestamp: result.timestamp || Date.now() / 1000,
+                    source_file: result.source_file || '',
+                    payload_hex: result.payload_hex || '',
+                    payload_length: result.payload_length || 0,
+                    matched: result.matched || false
+                });
+            });
+            
+            // 更新信号视图（如果在该标签页）
+            if (document.getElementById('tab-signals').classList.contains('active')) {
+                renderSignalsView();
+            }
+        }
+        
+        // 渲染信号视图（CANalyzer风格树形结构）
+        function renderSignalsView() {
+            const treeBody = document.getElementById('signalsTreeBody');
+            
+            if (messagesMap.size === 0) {
+                treeBody.innerHTML = '<div style="text-align: center; color: #666; padding: 50px;">暂无CAN数据<br><small>等待接收CAN消息</small></div>';
+                updateSignalStats();
+                return;
+            }
+            
+            // 应用过滤
+            let filteredMessages = Array.from(messagesMap.values());
+            if (signalFilterText) {
+                const filter = signalFilterText.toLowerCase();
+                filteredMessages = filteredMessages.filter(msg => 
+                    msg.name.toLowerCase().includes(filter) ||
+                    msg.id_hex.toLowerCase().includes(filter) ||
+                    msg.id.toString().includes(filter)
+                );
+            }
+            
+            // 按 CAN ID 从小到大排序（CANalyzer风格）
+            filteredMessages.sort((a, b) => a.id - b.id);
+            
+            // 生成HTML
+            treeBody.innerHTML = '';
+            
+            filteredMessages.forEach(msg => {
+                const node = createTreeNode(msg);
+                treeBody.appendChild(node);
+            });
+            
+            updateSignalStats();
+        }
+        
+        // 创建树形节点（CANalyzer风格）
+        function createTreeNode(msg) {
+            const nodeDiv = document.createElement('div');
+            nodeDiv.className = 'tree-node';
+            
+            const isExpanded = expandedMessages.has(msg.id);
+            const signals = Object.entries(msg.signals || {});
+            
+            // 格式化时间
+            const time = new Date(msg.timestamp * 1000).toLocaleTimeString('zh-CN', {
+                hour12: false,
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit'
+            });
+            
+            // 格式化原始数据（从payload_hex获取）
+            let rawData = msg.payload_hex || '';
+            if (rawData) {
+                // 每两个字符（一个字节）加一个空格
+                rawData = rawData.match(/.{1,2}/g).join(' ').toUpperCase();
+            }
+            
+            // 计算DLC
+            const dlc = msg.payload_length || (rawData ? rawData.replace(/\s/g, '').length / 2 : 0);
+            
+            // 主行（移除 updated 类，不需要闪烁）
+            const rowDiv = document.createElement('div');
+            rowDiv.className = 'tree-row' + (isExpanded ? ' expanded' : '');
+            rowDiv.onclick = () => toggleMessageExpand(msg.id);
+            
+            rowDiv.innerHTML = `
+                <div class="tree-expand-icon ${isExpanded ? 'expanded' : 'collapsed'}"></div>
+                <div class="tree-channel">${msg.channel || '-'}</div>
+                <div class="tree-id">${msg.id_hex}</div>
+                <div class="tree-name ${msg.matched ? '' : 'unmatched'}">${msg.name}</div>
+                <div class="tree-raw-data">${rawData || '-'}</div>
+                <div class="tree-frame-type">CAN</div>
+                <div class="tree-dlc">${dlc}</div>
+                <div class="tree-timestamp">${time}</div>
+            `;
+            
+            nodeDiv.appendChild(rowDiv);
+            
+            // 信号详情区域
+            if (signals.length > 0) {
+                const detailsDiv = document.createElement('div');
+                detailsDiv.className = 'signal-details' + (isExpanded ? ' expanded' : '');
+                detailsDiv.id = `signal-details-${msg.id}`;
+                
+                // 信号表头
+                const headerDiv = document.createElement('div');
+                headerDiv.className = 'signal-detail-header';
+                headerDiv.innerHTML = `
+                    <div>信号名称</div>
+                    <div>显示值</div>
+                    <div>原始值</div>
+                    <div>单位</div>
+                    <div>说明</div>
+                `;
+                detailsDiv.appendChild(headerDiv);
+                
+                // 信号行
+                signals.forEach(([name, value]) => {
+                    let displayValue = value;
+                    let rawValue = value;
+                    let unit = '';
+                    
+                    // 处理新格式的信号数据
+                    if (typeof value === 'object' && value !== null) {
+                        displayValue = value.display_value !== undefined ? value.display_value : value.raw_value;
+                        rawValue = value.raw_value !== undefined ? value.raw_value : displayValue;
+                        unit = value.unit || '';
+                    }
+                    
+                    // 格式化数值
+                    if (typeof displayValue === 'number') {
+                        displayValue = displayValue.toFixed(2);
+                    }
+                    if (typeof rawValue === 'number') {
+                        rawValue = rawValue.toFixed(2);
+                    }
+                    
+                    const signalRow = document.createElement('div');
+                    signalRow.className = 'signal-detail-row';
+                    signalRow.innerHTML = `
+                        <div class="signal-detail-name">${name}</div>
+                        <div class="signal-detail-value">${displayValue}</div>
+                        <div class="signal-detail-raw">${rawValue}</div>
+                        <div class="signal-detail-unit">${unit || '-'}</div>
+                        <div style="color: #9ca3af; font-size: 11px;">${msg.source_file || ''}</div>
+                    `;
+                    detailsDiv.appendChild(signalRow);
+                });
+                
+                nodeDiv.appendChild(detailsDiv);
+            } else {
+                if (isExpanded) {
+                    const noSignalsDiv = document.createElement('div');
+                    noSignalsDiv.className = 'signal-details expanded';
+                    noSignalsDiv.innerHTML = '<div class="no-signals-row">该消息无信号数据</div>';
+                    nodeDiv.appendChild(noSignalsDiv);
+                }
+            }
+            
+            return nodeDiv;
+        }
+        
+        // 切换消息展开/折叠
+        function toggleMessageExpand(msgId) {
+            if (expandedMessages.has(msgId)) {
+                expandedMessages.delete(msgId);
+            } else {
+                expandedMessages.add(msgId);
+            }
+            renderSignalsView();
+        }
+        
+        // 全部展开
+        function expandAllSignals() {
+            messagesMap.forEach((msg, id) => {
+                expandedMessages.add(id);
+            });
+            renderSignalsView();
+        }
+        
+        // 全部折叠
+        function collapseAllSignals() {
+            expandedMessages.clear();
+            renderSignalsView();
+        }
+        
+        // 更新信号统计
+        function updateSignalStats() {
+            document.getElementById('signalStatMessages').textContent = messagesMap.size;
+            
+            let totalSignals = 0;
+            let matchedCount = 0;
+            messagesMap.forEach(msg => {
+                totalSignals += Object.keys(msg.signals || {}).length;
+                if (msg.matched) {
+                    matchedCount++;
+                }
+            });
+            document.getElementById('signalStatSignals').textContent = totalSignals;
+            document.getElementById('signalStatMatched').textContent = matchedCount;
+            
+            // 计算更新率
+            const now = Date.now();
+            const elapsed = (now - lastSignalUpdateTime) / 1000;
+            if (elapsed >= 1) {
+                const rate = Math.round(signalUpdateCount / elapsed);
+                document.getElementById('signalStatRate').textContent = rate;
+                signalUpdateCount = 0;
+                lastSignalUpdateTime = now;
+            }
+        }
+        
+        // 清空信号视图
+        function clearSignalsView() {
+            messagesMap.clear();
+            expandedMessages.clear();
+            signalUpdateCount = 0;
+            renderSignalsView();
+            console.log('✓ 已清空信号数据');
+        }
+        
+        // 应用信号过滤
+        function applySignalFilter() {
+            signalFilterText = document.getElementById('signalFilterInput').value.trim();
+            renderSignalsView();
+            }
+        
+        // 定时更新信号统计
+        function startSignalStatsTimer() {
+            signalUpdateRateTimer = setInterval(() => {
+                if (document.getElementById('tab-signals').classList.contains('active')) {
+                    updateSignalStats();
+                }
+            }, 1000);
+        }
+
+        // 页面加载时初始化
+        window.addEventListener('load', () => {
+            console.log('CAN监控页面已加载 - WebSocket实时模式');
+            
+            // 连接WebSocket（实时接收CAN帧）
+            connectWebSocket();
+            
+            // 检查服务器状态
+            checkStatus();
+            setInterval(checkStatus, 5000);
+            
+            // 同步设备状态（监控、录制）
+            syncDeviceStatus();
+            // 定期同步状态（每2秒）
+            statusSyncTimer = setInterval(syncDeviceStatus, 2000);
+            
+            // 更新波特率显示
+            updateBitrates();
+            // 定期更新波特率（每10秒）
+            setInterval(updateBitrates, 10000);
+            
+            // 加载DBC文件列表和统计
+            refreshDBCList();
+            
+            // 启动信号统计定时器
+            startSignalStatsTimer();
+            
+            // 绑定信号过滤输入框的回车事件
+            document.getElementById('signalFilterInput').addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') {
+                    applySignalFilter();
+                }
+            });
+            
+            // 注意：不再需要定时刷新，WebSocket会实时推送数据
+            // 但保留刷新函数作为fallback（在WebSocket断开时使用）
+            console.log('✓ WebSocket实时推送模式已启用');
+            console.log('  - CAN帧将通过WebSocket实时接收');
+            console.log('  - 不再使用REST API轮询');
+        });
+        
+        // 页面卸载时停止刷新
+        window.addEventListener('beforeunload', () => {
+            stopAutoRefresh();
+        });
+    </script>
+</body>
+</html>
+

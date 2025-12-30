@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>设备主页</title>
+  <link rel="icon" href="/static/dashboard/favicon.ico">
+  <style>
+    :root { --bg:#0b2447; --panel:#0d366b40; --border:#3f8cff4d; --text:#d7e3ff; --acc:#7fb3ff; }
+    html, body { height:100%; margin:0; background: radial-gradient(ellipse at center, #0b2447 0%, #061427 70%); color:var(--text); font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+    a { color: var(--acc); text-decoration: none; }
+    .container { max-width: 1080px; margin: 28px auto; padding: 0 16px; }
+    .title { display:flex; align-items:center; justify-content:space-between; gap:16px; margin-bottom: 16px; }
+    .title h1 { margin:0; font-size: 22px; }
+    .panel { background: var(--panel); border:1px solid var(--border); border-radius:12px; padding:16px; box-shadow: 0 0 20px rgba(63,140,255,0.12) inset; }
+    .grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap:16px; }
+    .row { display:flex; gap:12px; align-items:center; flex-wrap: wrap; }
+    .hint { opacity:.8; font-size: 12px; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; white-space: pre-wrap; word-break: break-word; }
+    button { padding:8px 12px; border-radius:8px; border:1px solid rgba(255,255,255,0.15); background:#1a73e8; color:#fff; cursor:pointer; box-shadow:0 6px 14px rgba(26,115,232,0.35); }
+    button.secondary { background:#244a87; }
+    .badge { display:inline-flex; align-items:center; gap:8px; font-weight:bold; }
+    .dot { width:10px; height:10px; border-radius:50%; background:#df3b3b; box-shadow:0 0 8px #df3b3b; }
+    .dot.on { background:#2ecc71; box-shadow:0 0 8px #2ecc71; }
+    ul.links { margin:8px 0 0; padding-left: 18px; }
+    ul.links li { margin:4px 0; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="title">
+      <h1>设备主页</h1>
+      <div class="row"><a href="/dashboard">进入仪表盘</a></div>
+    </div>
+
+    <div class="grid">
+      <div class="panel">
+        <div class="row" style="justify-content:space-between">
+          <div class="badge"><span id="statusDot" class="dot"></span><span id="statusText">后端状态</span></div>
+          <button id="btnRefresh">刷新状态</button>
+        </div>
+        <div class="mono" id="statusOut" style="margin-top:8px">加载中...</div>
+      </div>
+
+      <div class="panel">
+        <div style="font-weight:bold; margin-bottom:8px">快速导航</div>
+        <ul class="links">
+          <li><a href="/can">🚗 CAN 监控</a> <span class="hint">(新)</span></li>
+          <li><a href="/test">🧪 API 测试工具</a></li>
+          <li><a href="/dashboard">📊 实时仪表盘</a></li>
+          <li><a href="/dbc">📝 DBC 解析工具</a></li>
+          <li><a href="/uds">🔧 UDS 固件刷写</a></li>
+          <li><a href="/static/file_manager.html">📁 文件管理</a></li>
+          <li><a href="/static/can_test.html">🔬 CAN 测试 (旧版)</a></li>
+        </ul>
+        <div class="hint" style="margin-top:12px">
+          💡 提示：新版CAN监控提供更专业的实时监控界面
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // ⭐ 配置后端服务器地址 ⭐
+    const BACKEND_HOST = '172.17.237.241';  // ← 修改为您的后端服务器IP
+    const BACKEND_PORT = 18080;             // ← Web服务端口
+    const API_BASE = `http://${BACKEND_HOST}:${BACKEND_PORT}`;
+    // 如果需要自动获取，使用: const API_BASE = '';
+    
+    const $ = (id)=>document.getElementById(id);
+    const statusDot = $("statusDot");
+    const statusText = $("statusText");
+
+    function setStatus(connected) {
+      statusDot.className = 'dot' + (connected ? ' on' : '');
+      statusText.textContent = connected ? '后端状态：已连接' : '后端状态：未连接';
+    }
+
+    async function refreshStatus() {
+      try {
+        const r = await fetch(`${API_BASE}/api/status`);
+        const j = await r.json();
+        const hub = (j && j.hub) || {};
+        setStatus(!!hub.connected);
+        $("statusOut").textContent = JSON.stringify(j, null, 2);
+      } catch (e) {
+        setStatus(false);
+        $("statusOut").textContent = '获取状态失败：' + e;
+      }
+    }
+
+    $("btnRefresh").addEventListener('click', refreshStatus);
+
+    // 首屏加载状态
+    refreshStatus();
+  </script>
+</body>
+</html>

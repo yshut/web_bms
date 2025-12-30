@@ -1,0 +1,76 @@
+# Makefile for touch_test - 触摸功能测试程序
+
+# 工具链配置
+CC = arm-openwrt-linux-gcc
+CFLAGS = -Wall -O2
+LDFLAGS = -lpthread -lm
+
+# LVGL 路径
+LVGL_DIR = ../package/gui/littlevgl-8/lvgl
+LVGL_DRIVERS_DIR = ../package/gui/littlevgl-8/lv_drivers
+
+# 包含路径
+INCLUDES = -I. \
+           -I$(LVGL_DIR) \
+           -I$(LVGL_DRIVERS_DIR)
+
+# 源文件
+SRCS = touch_test.c \
+       drivers/display_drv.c \
+       drivers/touch_drv.c \
+       utils/logger.c
+
+# LVGL 核心源文件（链接已编译的库）
+LVGL_OBJS = $(wildcard $(LVGL_DIR)/src/core/*.o) \
+            $(wildcard $(LVGL_DIR)/src/draw/*.o) \
+            $(wildcard $(LVGL_DIR)/src/draw/*/*.o) \
+            $(wildcard $(LVGL_DIR)/src/font/*.o) \
+            $(wildcard $(LVGL_DIR)/src/hal/*.o) \
+            $(wildcard $(LVGL_DIR)/src/misc/*.o) \
+            $(wildcard $(LVGL_DIR)/src/widgets/*.o) \
+            $(wildcard $(LVGL_DIR)/src/extra/*/*.o)
+
+# 目标文件
+OBJS = $(SRCS:.c=.o)
+
+# 目标程序
+TARGET = touch_test
+
+# 默认目标
+all: $(TARGET)
+	@echo "==================================="
+	@echo "触摸测试程序编译完成！"
+	@echo "运行: ./$(TARGET)"
+	@echo "==================================="
+
+# 链接
+$(TARGET): $(OBJS)
+	@echo "链接 $@..."
+	$(CC) -o $@ $^ $(LVGL_OBJS) $(LDFLAGS)
+
+# 编译
+%.o: %.c
+	@echo "编译 $<..."
+	$(CC) $(CFLAGS) $(INCLUDES) -c $< -o $@
+
+# 清理
+clean:
+	@echo "清理编译文件..."
+	rm -f $(OBJS) $(TARGET)
+	@echo "清理完成"
+
+# 运行
+run: $(TARGET)
+	@echo "运行触摸测试程序..."
+	./$(TARGET)
+
+# 帮助
+help:
+	@echo "可用目标:"
+	@echo "  make          - 编译触摸测试程序"
+	@echo "  make clean    - 清理编译文件"
+	@echo "  make run      - 编译并运行"
+	@echo "  make help     - 显示此帮助信息"
+
+.PHONY: all clean run help
+

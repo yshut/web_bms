@@ -1,0 +1,885 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>CAN数据解析</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { 
+      font-family: 'Microsoft YaHei', system-ui, -apple-system, sans-serif; 
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+      color: #333;
+    }
+    
+    .header {
+      background: rgba(255,255,255,0.95);
+      padding: 20px 0;
+      box-shadow: 0 2px 20px rgba(0,0,0,0.1);
+      backdrop-filter: blur(10px);
+    }
+    
+    .header-content {
+      max-width: 1400px;
+      margin: 0 auto;
+      padding: 0 20px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    
+    .header h1 {
+      color: #2c3e50;
+      font-size: 28px;
+      font-weight: 600;
+    }
+    
+    .status-info {
+      display: flex;
+      gap: 20px;
+      align-items: center;
+    }
+    
+    .status-badge {
+      padding: 8px 16px;
+      border-radius: 20px;
+      font-size: 14px;
+      font-weight: 500;
+    }
+    
+    .status-online { background: #d4edda; color: #155724; }
+    .status-offline { background: #f8d7da; color: #721c24; }
+    
+    .container {
+      max-width: 1400px;
+      margin: 0 auto;
+      padding: 30px 20px;
+    }
+    
+    .controls {
+      background: rgba(255,255,255,0.95);
+      padding: 20px;
+      border-radius: 12px;
+      margin-bottom: 30px;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+      backdrop-filter: blur(10px);
+    }
+    
+    .controls-row {
+      display: flex;
+      gap: 15px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    .modal { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.55); z-index: 1000; }
+    .modal.hidden { display: none; }
+    .modal-content { width: min(860px, 92vw); max-height: 86vh; overflow: auto; background: #f5f7fb; border-radius: 12px; padding: 16px; box-shadow: 0 12px 40px rgba(0,0,0,0.35); }
+    .modal-head { display:flex; align-items:center; justify-content:space-between; gap:8px; font-weight:bold; margin-bottom:10px; }
+    .modal-close { background:#6c757d; color:#fff; border:none; border-radius:6px; padding:6px 10px; cursor:pointer; }
+    .dbc-list { border:1px solid #e3e6ef; border-radius:8px; overflow:hidden; background:#fff; }
+    .dbc-item { padding:10px 12px; border-bottom:1px solid #eef0f5; display:flex; align-items:center; justify-content:space-between; }
+    .dbc-item:hover { background:#f7f9fc; }
+    .dbc-empty { padding:12px; color:#6c757d; }
+    
+    .btn {
+      padding: 10px 20px;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 500;
+      transition: all 0.3s ease;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    
+    .btn-primary { background: #007cba; color: white; }
+    .btn-primary:hover { background: #005a87; transform: translateY(-2px); }
+    
+    .btn-success { background: #28a745; color: white; }
+    .btn-success:hover { background: #1e7e34; transform: translateY(-2px); }
+    
+    .btn-danger { background: #dc3545; color: white; }
+    .btn-danger:hover { background: #c82333; transform: translateY(-2px); }
+    
+    .btn-secondary { background: #6c757d; color: white; }
+    .btn-secondary:hover { background: #545b62; transform: translateY(-2px); }
+    
+    .btn:disabled {
+      background: #ccc;
+      cursor: not-allowed;
+      transform: none;
+    }
+    
+    .data-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 30px;
+      margin-bottom: 30px;
+    }
+    
+    @media (max-width: 1200px) {
+      .data-grid { grid-template-columns: 1fr; }
+    }
+    
+    .data-panel {
+      background: rgba(255,255,255,0.95);
+      border-radius: 12px;
+      padding: 25px;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+      backdrop-filter: blur(10px);
+    }
+    
+    .panel-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 20px;
+      padding-bottom: 15px;
+      border-bottom: 2px solid #e9ecef;
+    }
+    
+    .panel-title {
+      font-size: 18px;
+      font-weight: 600;
+      color: #2c3e50;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    
+    .panel-badge {
+      background: #007cba;
+      color: white;
+      padding: 4px 12px;
+      border-radius: 12px;
+      font-size: 12px;
+      font-weight: 500;
+    }
+    
+    .data-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 15px 0;
+      border-bottom: 1px solid #f1f3f4;
+    }
+    
+    .data-item:last-child { border-bottom: none; }
+    
+    .data-label {
+      font-weight: 500;
+      color: #495057;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    
+    .data-value {
+      font-weight: 600;
+      font-size: 16px;
+      color: #2c3e50;
+    }
+    
+    .data-unit {
+      font-size: 14px;
+      color: #6c757d;
+      margin-left: 5px;
+    }
+    
+    .data-timestamp {
+      font-size: 12px;
+      color: #6c757d;
+      margin-top: 5px;
+    }
+    
+    .raw-data {
+      background: #f8f9fa;
+      padding: 10px;
+      border-radius: 6px;
+      font-family: 'Consolas', 'Monaco', monospace;
+      font-size: 12px;
+      color: #495057;
+      margin-top: 10px;
+      word-break: break-all;
+    }
+    
+    .no-data {
+      text-align: center;
+      padding: 40px 20px;
+      color: #6c757d;
+      font-size: 16px;
+    }
+    
+    .no-data .icon {
+      font-size: 48px;
+      margin-bottom: 15px;
+      opacity: 0.5;
+    }
+    
+    .log-panel {
+      background: rgba(255,255,255,0.95);
+      border-radius: 12px;
+      padding: 25px;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+      backdrop-filter: blur(10px);
+      height: 400px;
+      display: flex;
+      flex-direction: column;
+    }
+    
+    .log-content {
+      flex: 1;
+      background: #1e1e1e;
+      color: #d4d4d4;
+      padding: 15px;
+      border-radius: 8px;
+      font-family: 'Consolas', 'Monaco', monospace;
+      font-size: 13px;
+      overflow-y: auto;
+      line-height: 1.4;
+    }
+    
+    .log-entry {
+      margin-bottom: 8px;
+      padding: 5px 0;
+    }
+    
+    .log-timestamp {
+      color: #569cd6;
+      margin-right: 10px;
+    }
+    
+    .log-level-info { color: #4ec9b0; }
+    .log-level-error { color: #f44747; }
+    .log-level-warn { color: #ffcc02; }
+    
+    .status-indicators {
+      display: flex;
+      gap: 20px;
+      margin-bottom: 20px;
+    }
+    
+    .status-card {
+      flex: 1;
+      background: rgba(255,255,255,0.95);
+      padding: 20px;
+      border-radius: 12px;
+      text-align: center;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+      backdrop-filter: blur(10px);
+    }
+    
+    .status-number {
+      font-size: 32px;
+      font-weight: 700;
+      margin-bottom: 8px;
+    }
+    
+    .status-label {
+      font-size: 14px;
+      color: #6c757d;
+      font-weight: 500;
+    }
+    
+    .status-total { color: #007cba; }
+    .status-success { color: #28a745; }
+    .status-error { color: #dc3545; }
+    
+    .loading {
+      display: inline-block;
+      width: 20px;
+      height: 20px;
+      border: 3px solid #f3f3f3;
+      border-top: 3px solid #007cba;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+    }
+    
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+    
+    .fade-in {
+      animation: fadeIn 0.5s ease-in;
+    }
+    
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(20px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div class="header-content">
+      <h1>🔧 CAN数据解析中心</h1>
+      <div class="status-info">
+        <div class="status-badge" id="connectionStatus">连接状态检查中...</div>
+        <div class="status-badge status-online" id="parseStatus">解析器就绪</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="container">
+    <!-- 状态指示器 -->
+    <div class="status-indicators">
+      <div class="status-card">
+        <div class="status-number status-total" id="totalFrames">0</div>
+        <div class="status-label">总接收帧数</div>
+      </div>
+      <div class="status-card">
+        <div class="status-number status-success" id="parsedFrames">0</div>
+        <div class="status-label">成功解析</div>
+      </div>
+      <div class="status-card">
+        <div class="status-number status-error" id="errorFrames">0</div>
+        <div class="status-label">解析失败</div>
+      </div>
+    </div>
+
+    <!-- 控制面板 -->
+    <div class="controls">
+      <div class="controls-row">
+        <button class="btn btn-primary" onclick="startParsing()">
+          <span>▶️</span> 开始解析
+        </button>
+        <button class="btn btn-danger" onclick="stopParsing()">
+          <span>⏹️</span> 停止解析
+        </button>
+        <button class="btn btn-secondary" onclick="clearData()">
+          <span>🗑️</span> 清空数据
+        </button>
+        <button class="btn btn-success" onclick="exportData()">
+          <span>📊</span> 导出数据
+        </button>
+        <button class="btn btn-secondary" onclick="clearCache()">
+          <span>🗑️</span> 清空缓存
+        </button>
+        <button class="btn btn-secondary" onclick="showCacheStatus()">
+          <span>📋</span> 缓存状态
+        </button>
+        <button class="btn btn-primary" onclick="openDbcModal()">
+          <span>📁</span> DBC 导入/管理
+        </button>
+        <label>
+          自动刷新间隔：
+          <select id="refreshInterval" onchange="updateRefreshInterval()">
+            <option value="1000">1秒</option>
+            <option value="2000" selected>2秒</option>
+            <option value="5000">5秒</option>
+            <option value="10000">10秒</option>
+          </select>
+        </label>
+      </div>
+    </div>
+
+    <!-- 数据网格 -->
+    <div class="data-grid">
+      <!-- 电池数据面板 -->
+      <div class="data-panel">
+        <div class="panel-header">
+          <div class="panel-title">
+            🔋 电池系统数据
+            <span class="panel-badge" id="batteryCount">0</span>
+          </div>
+        </div>
+        <div id="batteryData">
+          <div class="no-data">
+            <div class="icon">🔋</div>
+            <div>暂无电池数据</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 其他系统数据面板 -->
+      <div class="data-panel">
+        <div class="panel-header">
+          <div class="panel-title">
+            ⚙️ 其他系统数据
+            <span class="panel-badge" id="otherCount">0</span>
+          </div>
+        </div>
+        <div id="otherData">
+          <div class="no-data">
+            <div class="icon">⚙️</div>
+            <div>暂无其他系统数据</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 解析日志 -->
+    <div class="log-panel">
+      <div class="panel-header">
+        <div class="panel-title">
+          📋 解析日志
+          <span class="panel-badge" id="logCount">0</span>
+        </div>
+        <button class="btn btn-secondary" onclick="clearLogs()">清空日志</button>
+      </div>
+      <div class="log-content" id="logContent">
+        <div class="log-entry">
+          <span class="log-timestamp">[系统启动]</span>
+          <span class="log-level-info">CAN数据解析系统已就绪</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- DBC 导入/存储 Modal -->
+  <div id="dbcModal" class="modal hidden">
+    <div class="modal-content">
+      <div class="modal-head">
+        <div>DBC 导入与管理</div>
+        <button class="modal-close" onclick="closeDbcModal()">关闭</button>
+      </div>
+      <div style="display:flex; gap:16px; flex-wrap:wrap; align-items:center; margin-bottom:10px;">
+        <input id="dbcFile" type="file" accept=".dbc,.DBC,.kcd"/>
+        <button class="btn btn-success" onclick="uploadDbc()">上传DBC</button>
+        <span id="dbcMsg" style="color:#6c757d;"></span>
+      </div>
+      <div class="dbc-list" id="dbcList"></div>
+    </div>
+  </div>
+
+  <script>
+    // 全局状态
+    let isParsingActive = false;
+    let refreshTimer = null;
+    let refreshInterval = 2000;
+    let parsedDataHistory = [];
+    let logEntries = [];
+    
+    // 统计数据
+    let stats = {
+      total: 0,
+      parsed: 0,
+      errors: 0
+    };
+
+    // 初始化
+    document.addEventListener('DOMContentLoaded', function() {
+      checkServerStatus();
+      addLog('系统初始化完成', 'info');
+    });
+
+    // 检查服务器状态
+    async function checkServerStatus() {
+      try {
+        const response = await fetch('/api/can/config/parser');
+        const data = await response.json();
+        
+        if (data.ok) {
+          document.getElementById('connectionStatus').textContent = '服务器在线';
+          document.getElementById('connectionStatus').className = 'status-badge status-online';
+          addLog(`解析器配置加载成功，支持 ${data.rules_count} 种CAN ID`, 'info');
+        } else {
+          throw new Error(data.error);
+        }
+      } catch (error) {
+        document.getElementById('connectionStatus').textContent = '服务器离线';
+        document.getElementById('connectionStatus').className = 'status-badge status-offline';
+        addLog(`服务器连接失败: ${error.message}`, 'error');
+      }
+    }
+
+    // 开始解析
+    function startParsing() {
+      if (isParsingActive) return;
+      
+      isParsingActive = true;
+      addLog('开始CAN数据解析', 'info');
+      
+      // 启动定时刷新
+      refreshTimer = setInterval(fetchAndParseData, refreshInterval);
+      
+      // 立即执行一次
+      fetchAndParseData();
+      
+      // 更新按钮状态
+      updateButtonStates();
+    }
+
+    // 停止解析
+    function stopParsing() {
+      if (!isParsingActive) return;
+      
+      isParsingActive = false;
+      addLog('停止CAN数据解析', 'info');
+      
+      if (refreshTimer) {
+        clearInterval(refreshTimer);
+        refreshTimer = null;
+      }
+      
+      updateButtonStates();
+    }
+
+    // 获取并解析数据
+    async function fetchAndParseData() {
+      try {
+        // 从服务器获取实时CAN数据
+        const liveResponse = await fetch('/api/can/live_data');
+        const liveData = await liveResponse.json();
+        let frames = [];
+        if (liveData && liveData.ok && Array.isArray(liveData.frames) && liveData.frames.length > 0) {
+          frames = liveData.frames;
+        } else {
+          // Fallback：若 WS 缓存没有数据，改为向设备端请求最近帧
+          try {
+            const alt = await fetch('/api/can/frames?limit=50');
+            const altData = await alt.json();
+            const arr = (altData && (altData.data && altData.data.frames)) || (altData && altData.frames) || [];
+            if (Array.isArray(arr) && arr.length > 0) {
+              frames = arr;
+              addLog('使用设备端最近帧作为数据源', 'warn');
+            }
+          } catch (e) {
+            // 忽略备用获取异常
+          }
+        }
+        if (frames.length === 0) return; // 没有新数据
+        
+        // 解析获取到的CAN帧
+        const parseResponse = await fetch('/api/can/parse', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ frames })
+        });
+        
+        const parseData = await parseResponse.json();
+        
+        if (parseData.ok) {
+          stats.total += parseData.total_frames;
+          stats.parsed += parseData.parsed_count;
+          stats.errors += (parseData.total_frames - parseData.parsed_count);
+          
+          updateStats();
+          updateDataPanels(parseData.results);
+          
+          const source = liveData.source === 'websocket_cache' ? 'WebSocket' : '模拟';
+          addLog(`解析完成: ${parseData.parsed_count}/${parseData.total_frames} 帧 (数据源: ${source})`, 'info');
+        } else {
+          throw new Error(parseData.error);
+        }
+      } catch (error) {
+        addLog(`数据获取失败: ${error.message}`, 'error');
+        stats.errors++;
+        updateStats();
+      }
+    }
+
+    // 更新统计数据
+    function updateStats() {
+      document.getElementById('totalFrames').textContent = stats.total;
+      document.getElementById('parsedFrames').textContent = stats.parsed;
+      document.getElementById('errorFrames').textContent = stats.errors;
+    }
+
+    // 更新数据面板
+    function updateDataPanels(results) {
+      const batteryData = results.filter(r => r.type === 'battery_voltage');
+      const otherData = results.filter(r => r.type !== 'battery_voltage');
+      
+      updateBatteryPanel(batteryData);
+      updateOtherPanel(otherData);
+      
+      // 保存到历史记录
+      parsedDataHistory.push(...results.map(r => ({
+        ...r,
+        timestamp: new Date().toISOString()
+      })));
+      
+      // 限制历史记录长度
+      if (parsedDataHistory.length > 1000) {
+        parsedDataHistory = parsedDataHistory.slice(-1000);
+      }
+    }
+
+    // 更新电池面板
+    function updateBatteryPanel(batteryData) {
+      const panel = document.getElementById('batteryData');
+      const countBadge = document.getElementById('batteryCount');
+      
+      countBadge.textContent = batteryData.length;
+      
+      if (batteryData.length === 0) {
+        panel.innerHTML = `
+          <div class="no-data">
+            <div class="icon">🔋</div>
+            <div>暂无电池数据</div>
+          </div>
+        `;
+        return;
+      }
+      
+      let html = '';
+      batteryData.forEach((data, index) => {
+        const timestamp = new Date().toLocaleString();
+        html += `
+          <div class="data-item fade-in">
+            <div>
+              <div class="data-label">
+                🔋 电池总电压
+              </div>
+              <div class="data-timestamp">${timestamp}</div>
+            </div>
+            <div>
+              <div class="data-value">
+                ${data.voltage.toFixed(1)}<span class="data-unit">${data.unit}</span>
+              </div>
+              <div class="raw-data">
+                原始值: ${data.raw_value} | CAN ID: 0x${data.can_id.toString(16).toUpperCase()}
+              </div>
+            </div>
+          </div>
+        `;
+      });
+      
+      panel.innerHTML = html;
+    }
+
+    // 更新其他系统面板
+    function updateOtherPanel(otherData) {
+      const panel = document.getElementById('otherData');
+      const countBadge = document.getElementById('otherCount');
+      
+      countBadge.textContent = otherData.length;
+      
+      if (otherData.length === 0) {
+        panel.innerHTML = `
+          <div class="no-data">
+            <div class="icon">⚙️</div>
+            <div>暂无其他系统数据</div>
+          </div>
+        `;
+        return;
+      }
+      
+      let html = '';
+      otherData.forEach((data, index) => {
+        const timestamp = new Date().toLocaleString();
+        html += `
+          <div class="data-item fade-in">
+            <div>
+              <div class="data-label">
+                ⚙️ ${data.type}
+              </div>
+              <div class="data-timestamp">${timestamp}</div>
+            </div>
+            <div>
+              <div class="data-value">
+                ${JSON.stringify(data)}
+              </div>
+            </div>
+          </div>
+        `;
+      });
+      
+      panel.innerHTML = html;
+    }
+
+    // 添加日志
+    function addLog(message, level = 'info') {
+      const timestamp = new Date().toLocaleTimeString();
+      const logEntry = {
+        timestamp,
+        message,
+        level
+      };
+      
+      logEntries.unshift(logEntry);
+      
+      // 限制日志条数
+      if (logEntries.length > 100) {
+        logEntries = logEntries.slice(0, 100);
+      }
+      
+      updateLogDisplay();
+    }
+
+    // 更新日志显示
+    function updateLogDisplay() {
+      const logContent = document.getElementById('logContent');
+      const logCount = document.getElementById('logCount');
+      
+      logCount.textContent = logEntries.length;
+      
+      let html = '';
+      logEntries.forEach(entry => {
+        html += `
+          <div class="log-entry">
+            <span class="log-timestamp">[${entry.timestamp}]</span>
+            <span class="log-level-${entry.level}">${entry.message}</span>
+          </div>
+        `;
+      });
+      
+      logContent.innerHTML = html;
+      logContent.scrollTop = 0;
+    }
+
+    // 更新按钮状态
+    function updateButtonStates() {
+      const startBtn = document.querySelector('button[onclick="startParsing()"]');
+      const stopBtn = document.querySelector('button[onclick="stopParsing()"]');
+      
+      if (isParsingActive) {
+        startBtn.disabled = true;
+        startBtn.innerHTML = '<span class="loading"></span> 解析中...';
+        stopBtn.disabled = false;
+      } else {
+        startBtn.disabled = false;
+        startBtn.innerHTML = '<span>▶️</span> 开始解析';
+        stopBtn.disabled = true;
+      }
+    }
+
+    // 更新刷新间隔
+    function updateRefreshInterval() {
+      const select = document.getElementById('refreshInterval');
+      refreshInterval = parseInt(select.value);
+      
+      if (isParsingActive) {
+        stopParsing();
+        startParsing();
+      }
+      
+      addLog(`刷新间隔已更新为 ${refreshInterval/1000} 秒`, 'info');
+    }
+
+    // 清空数据
+    function clearData() {
+      stats = { total: 0, parsed: 0, errors: 0 };
+      parsedDataHistory = [];
+      
+      updateStats();
+      document.getElementById('batteryData').innerHTML = `
+        <div class="no-data">
+          <div class="icon">🔋</div>
+          <div>暂无电池数据</div>
+        </div>
+      `;
+      document.getElementById('otherData').innerHTML = `
+        <div class="no-data">
+          <div class="icon">⚙️</div>
+          <div>暂无其他系统数据</div>
+        </div>
+      `;
+      
+      document.getElementById('batteryCount').textContent = '0';
+      document.getElementById('otherCount').textContent = '0';
+      
+      addLog('数据已清空', 'info');
+    }
+
+    // 清空日志
+    function clearLogs() {
+      logEntries = [];
+      updateLogDisplay();
+      addLog('日志已清空', 'info');
+    }
+
+    // 导出数据
+    function exportData() {
+      if (parsedDataHistory.length === 0) {
+        addLog('没有数据可导出', 'warn');
+        return;
+      }
+      
+      const dataStr = JSON.stringify(parsedDataHistory, null, 2);
+      const dataBlob = new Blob([dataStr], { type: 'application/json' });
+      
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(dataBlob);
+      link.download = `can_parsed_data_${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.json`;
+      link.click();
+      
+      addLog(`已导出 ${parsedDataHistory.length} 条解析数据`, 'info');
+    }
+
+    // 清空缓存
+    async function clearCache() {
+      try {
+        const response = await fetch('/api/can/cache/clear', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' }
+        });
+        
+        const data = await response.json();
+        
+        if (data.ok) {
+          addLog('WebSocket CAN数据缓存已清空', 'info');
+        } else {
+          addLog(`清空缓存失败: ${data.error}`, 'error');
+        }
+      } catch (error) {
+        addLog(`清空缓存网络错误: ${error.message}`, 'error');
+      }
+    }
+
+    // -------------- DBC 管理 --------------
+    function openDbcModal(){ document.getElementById('dbcMsg').textContent=''; document.getElementById('dbcModal').classList.remove('hidden'); refreshDbcList(); }
+    function closeDbcModal(){ document.getElementById('dbcModal').classList.add('hidden'); }
+    async function refreshDbcList(){
+      const listEl = document.getElementById('dbcList');
+      listEl.innerHTML = '<div class="dbc-empty">加载中...</div>';
+      try{
+        const r = await fetch('/api/dbc/list');
+        const j = await r.json();
+        if(!j || !j.ok){ listEl.innerHTML = '<div class="dbc-empty">获取失败: '+(j && (j.error||JSON.stringify(j)))+'</div>'; return; }
+        if(!j.items || j.items.length===0){ listEl.innerHTML = '<div class="dbc-empty">暂无 DBC 文件</div>'; return; }
+        listEl.innerHTML = '';
+        j.items.forEach(it=>{
+          const row = document.createElement('div'); row.className='dbc-item';
+          const left = document.createElement('div'); left.textContent = it.name + '  ('+it.size+'B)';
+          const right = document.createElement('div');
+          const del = document.createElement('button'); del.className='btn btn-danger'; del.textContent='删除'; del.onclick = async ()=>{ await deleteDbc(it.name); };
+          right.appendChild(del);
+          row.appendChild(left); row.appendChild(right);
+          listEl.appendChild(row);
+        });
+      }catch(e){ listEl.innerHTML = '<div class="dbc-empty">异常: '+e+'</div>'; }
+    }
+    async function uploadDbc(){
+      const f = document.getElementById('dbcFile').files[0];
+      if(!f){ document.getElementById('dbcMsg').textContent='请选择 DBC 文件'; return; }
+      const fd = new FormData(); fd.append('file', f);
+      const r = await fetch('/api/dbc/upload', { method:'POST', body: fd });
+      const j = await r.json().catch(()=>({}));
+      if(j && j.ok){ document.getElementById('dbcMsg').textContent='上传成功: '+j.name; refreshDbcList(); }
+      else { document.getElementById('dbcMsg').textContent='上传失败: '+(j && (j.error||JSON.stringify(j))); }
+    }
+    async function deleteDbc(name){
+      if(!confirm('确定删除 '+name+' ?')) return;
+      const r = await fetch('/api/dbc/delete', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ name }) });
+      const j = await r.json().catch(()=>({}));
+      if(j && j.ok){ refreshDbcList(); }
+      else { alert('删除失败: '+(j && (j.error||JSON.stringify(j)))); }
+    }
+
+    // 显示缓存状态
+    async function showCacheStatus() {
+      try {
+        const response = await fetch('/api/can/cache/status');
+        const data = await response.json();
+        
+        if (data.ok) {
+          const timestamp = data.latest_timestamp ? 
+            new Date(data.latest_timestamp * 1000).toLocaleString() : '无';
+          
+          addLog(`缓存状态 - 大小: ${data.cache_size}/${data.max_cache}, 最新数据: ${timestamp}`, 'info');
+        } else {
+          addLog(`获取缓存状态失败: ${data.error}`, 'error');
+        }
+      } catch (error) {
+        addLog(`获取缓存状态网络错误: ${error.message}`, 'error');
+      }
+    }
+  </script>
+</body>
+</html>

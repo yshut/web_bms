@@ -1,0 +1,50 @@
+import { createRouter, createWebHistory, RouteRecordRaw } from 'vue-router';
+
+const routes: RouteRecordRaw[] = [
+  {
+    path: '/',
+    name: 'Layout',
+    component: () => import('@/views/Layout.vue'),
+    redirect: '/dashboard',
+    children: [
+      {
+        path: '/dashboard',
+        name: 'Dashboard',
+        component: () => import('@/views/Dashboard.vue'),
+        meta: { title: '仪表盘', icon: 'Odometer' },
+      },
+      {
+        path: '/can',
+        name: 'Can',
+        component: () => import('@/views/Can.vue'),
+        meta: { title: 'CAN监控', icon: 'Monitor' },
+      },
+      {
+        path: '/uds',
+        name: 'Uds',
+        component: () => import('@/views/Uds.vue'),
+        meta: { title: 'UDS诊断', icon: 'Setting' },
+      },
+      {
+        path: '/dbc',
+        name: 'Dbc',
+        component: () => import('@/views/Dbc.vue'),
+        meta: { title: 'DBC管理', icon: 'Files' },
+      },
+      {
+        path: '/devices',
+        name: 'Devices',
+        component: () => import('@/views/Devices.vue'),
+        meta: { title: '设备管理', icon: 'Connection' },
+      },
+    ],
+  },
+];
+
+const router = createRouter({
+  history: createWebHistory(),
+  routes,
+});
+
+export default router;
+

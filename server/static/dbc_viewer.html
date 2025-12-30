@@ -1,0 +1,672 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DBC信号实时解析</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Microsoft YaHei', sans-serif;
+            background: #1a1a1a;
+            color: #e0e0e0;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1600px;
+            margin: 0 auto;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 10px;
+            padding: 20px 30px;
+            margin-bottom: 20px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+        }
+
+        .header h1 {
+            color: white;
+            font-size: 28px;
+            margin-bottom: 10px;
+        }
+
+        .status-bar {
+            display: flex;
+            gap: 20px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        .status-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 15px;
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 5px;
+        }
+
+        .status-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #666;
+        }
+
+        .status-dot.active {
+            background: #10b981;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .controls {
+            background: #2a2a2a;
+            border-radius: 10px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+        }
+
+        .controls h3 {
+            color: #667eea;
+            margin-bottom: 15px;
+        }
+
+        .button-group {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            transition: all 0.3s;
+        }
+
+        .btn-primary {
+            background: #667eea;
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: #5568d3;
+        }
+
+        .btn-danger {
+            background: #ef4444;
+            color: white;
+        }
+
+        .btn-danger:hover {
+            background: #dc2626;
+        }
+
+        .signals-container {
+            background: #2a2a2a;
+            border-radius: 10px;
+            padding: 20px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+        }
+
+        .signals-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+            gap: 15px;
+            max-height: 70vh;
+            overflow-y: auto;
+        }
+
+        .message-card {
+            background: #1a1a1a;
+            border-radius: 8px;
+            padding: 15px;
+            border-left: 4px solid #667eea;
+            transition: all 0.3s;
+        }
+
+        .message-card:hover {
+            background: #252525;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.4);
+        }
+
+        .message-card.updated {
+            animation: highlight 0.5s;
+        }
+
+        @keyframes highlight {
+            0%, 100% { background: #1a1a1a; }
+            50% { background: #2d3748; }
+        }
+
+        .message-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid #374151;
+        }
+
+        .message-id {
+            font-size: 16px;
+            font-weight: bold;
+            color: #f59e0b;
+        }
+
+        .message-name {
+            font-size: 14px;
+            color: #10b981;
+            font-style: italic;
+        }
+
+        .message-meta {
+            display: flex;
+            gap: 10px;
+            font-size: 11px;
+            color: #9ca3af;
+            margin-bottom: 10px;
+        }
+
+        .message-channel {
+            background: #374151;
+            padding: 2px 8px;
+            border-radius: 3px;
+        }
+
+        .message-time {
+            background: #374151;
+            padding: 2px 8px;
+            border-radius: 3px;
+        }
+
+        .signals-list {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .signal-item {
+            display: grid;
+            grid-template-columns: 1fr auto;
+            gap: 10px;
+            padding: 8px;
+            background: #2a2a2a;
+            border-radius: 5px;
+            align-items: center;
+        }
+
+        .signal-name {
+            color: #a78bfa;
+            font-weight: 500;
+            font-size: 13px;
+        }
+
+        .signal-value-group {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .signal-value {
+            color: #fbbf24;
+            font-weight: bold;
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+        }
+
+        .signal-unit {
+            color: #9ca3af;
+            font-size: 11px;
+        }
+
+        .signal-raw {
+            color: #6b7280;
+            font-size: 11px;
+            font-family: 'Courier New', monospace;
+        }
+
+        .no-signals {
+            text-align: center;
+            color: #6b7280;
+            padding: 30px;
+            font-style: italic;
+        }
+
+        .stats-bar {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+
+        .stat-card {
+            background: #2a2a2a;
+            border-radius: 8px;
+            padding: 15px;
+            text-align: center;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+        }
+
+        .stat-value {
+            font-size: 28px;
+            font-weight: bold;
+            color: #667eea;
+        }
+
+        .stat-label {
+            font-size: 12px;
+            color: #9ca3af;
+            margin-top: 5px;
+        }
+
+        .filter-bar {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 15px;
+            align-items: center;
+        }
+
+        .filter-input {
+            flex: 1;
+            padding: 10px;
+            background: #1a1a1a;
+            border: 1px solid #444;
+            border-radius: 5px;
+            color: #e0e0e0;
+            font-size: 14px;
+        }
+
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: #1a1a1a;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: #444;
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: #555;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- 头部 -->
+        <div class="header">
+            <h1>🔍 DBC信号实时解析</h1>
+            <div class="status-bar">
+                <div class="status-item">
+                    <div class="status-dot" id="wsStatus"></div>
+                    <span id="wsText">WebSocket: 未连接</span>
+                </div>
+                <div class="status-item">
+                    <div class="status-dot" id="dbcStatus"></div>
+                    <span id="dbcText">DBC: 未加载</span>
+                </div>
+                <div class="status-item">
+                    <span id="updateRate">更新率: 0 msg/s</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- 统计卡片 -->
+        <div class="stats-bar">
+            <div class="stat-card">
+                <div class="stat-value" id="statTotalMessages">0</div>
+                <div class="stat-label">消息类型</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="statTotalSignals">0</div>
+                <div class="stat-label">总信号数</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="statMatchedFrames">0</div>
+                <div class="stat-label">已匹配帧</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="statUpdateRate">0</div>
+                <div class="stat-label">更新次数/秒</div>
+            </div>
+        </div>
+
+        <!-- 控制面板 -->
+        <div class="controls">
+            <h3>🎛️ 控制</h3>
+            <div class="button-group">
+                <button class="btn btn-primary" onclick="connectWS()">连接WebSocket</button>
+                <button class="btn btn-danger" onclick="clearSignals()">清空数据</button>
+                <button class="btn btn-primary" onclick="toggleAutoScroll()">
+                    <span id="autoScrollText">自动滚动: 开</span>
+                </button>
+            </div>
+            <div class="filter-bar" style="margin-top: 15px;">
+                <input type="text" class="filter-input" id="filterInput" placeholder="过滤消息名称或ID (例如: 0x100 或 EngineSpeed)">
+                <button class="btn btn-primary" onclick="applyFilter()">应用过滤</button>
+            </div>
+        </div>
+
+        <!-- 信号显示区域 -->
+        <div class="signals-container">
+            <h3 style="color: #667eea; margin-bottom: 15px;">📊 实时信号</h3>
+            <div class="signals-grid" id="signalsGrid">
+                <div class="no-signals">
+                    等待接收CAN数据...<br>
+                    <small>请确保CAN监控已启动并上传了DBC文件</small>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = window.location.origin;
+        let ws = null;
+        let messagesMap = new Map(); // 存储消息ID -> 消息数据
+        let autoScroll = true;
+        let filterText = '';
+        let updateCount = 0;
+        let lastUpdateTime = Date.now();
+        let updateRateTimer = null;
+
+        // 连接WebSocket
+        function connectWS() {
+            const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${wsProtocol}//${window.location.host.split(':')[0]}:5052/ui`;
+            
+            console.log('连接WebSocket:', wsUrl);
+            
+            try {
+                ws = new WebSocket(wsUrl);
+                
+                ws.onopen = () => {
+                    console.log('✓ WebSocket已连接');
+                    document.getElementById('wsStatus').classList.add('active');
+                    document.getElementById('wsText').textContent = 'WebSocket: 已连接';
+                };
+                
+                ws.onmessage = (event) => {
+                    try {
+                        const msg = JSON.parse(event.data);
+                        handleMessage(msg);
+                    } catch (e) {
+                        console.error('解析消息失败:', e);
+                    }
+                };
+                
+                ws.onerror = (error) => {
+                    console.error('WebSocket错误:', error);
+                    document.getElementById('wsStatus').classList.remove('active');
+                    document.getElementById('wsText').textContent = 'WebSocket: 错误';
+                };
+                
+                ws.onclose = () => {
+                    console.log('WebSocket已断开');
+                    document.getElementById('wsStatus').classList.remove('active');
+                    document.getElementById('wsText').textContent = 'WebSocket: 断开';
+                    
+                    // 5秒后重连
+                    setTimeout(connectWS, 5000);
+                };
+            } catch (e) {
+                console.error('创建WebSocket失败:', e);
+            }
+        }
+
+        // 处理消息
+        function handleMessage(msg) {
+            if (!msg || !msg.event) return;
+            
+            if (msg.event === 'can_parsed') {
+                handleCANParsed(msg.data);
+            }
+        }
+
+        // 处理DBC解析后的CAN数据
+        function handleCANParsed(data) {
+            if (!data || !data.results) return;
+            
+            const results = data.results || [];
+            
+            results.forEach(result => {
+                if (!result.id && result.id !== 0) return;
+                if (!result.matched) return; // 只显示匹配到DBC的消息
+                
+                updateCount++;
+                
+                // 更新或添加消息
+                const msgId = result.id;
+                messagesMap.set(msgId, {
+                    id: msgId,
+                    id_hex: result.id_hex || `0x${msgId.toString(16).toUpperCase()}`,
+                    name: result.name || '未知消息',
+                    channel: result.channel || '-',
+                    signals: result.signals || {},
+                    timestamp: result.timestamp || Date.now() / 1000,
+                    source_file: result.source_file || '',
+                    updated: true
+                });
+            });
+            
+            // 更新DBC状态
+            if (messagesMap.size > 0) {
+                document.getElementById('dbcStatus').classList.add('active');
+                document.getElementById('dbcText').textContent = 'DBC: 已加载';
+            }
+            
+            // 更新显示
+            renderSignals();
+            updateStats();
+        }
+
+        // 渲染信号
+        function renderSignals() {
+            const grid = document.getElementById('signalsGrid');
+            
+            if (messagesMap.size === 0) {
+                grid.innerHTML = '<div class="no-signals">暂无DBC解析数据<br><small>等待接收匹配的CAN消息</small></div>';
+                return;
+            }
+            
+            // 应用过滤
+            let filteredMessages = Array.from(messagesMap.values());
+            if (filterText) {
+                const filter = filterText.toLowerCase();
+                filteredMessages = filteredMessages.filter(msg => 
+                    msg.name.toLowerCase().includes(filter) ||
+                    msg.id_hex.toLowerCase().includes(filter) ||
+                    msg.id.toString().includes(filter)
+                );
+            }
+            
+            // 按最后更新时间排序
+            filteredMessages.sort((a, b) => b.timestamp - a.timestamp);
+            
+            // 生成HTML
+            grid.innerHTML = '';
+            
+            filteredMessages.forEach(msg => {
+                const card = createMessageCard(msg);
+                grid.appendChild(card);
+                
+                // 重置更新标记
+                if (msg.updated) {
+                    msg.updated = false;
+                    setTimeout(() => {
+                        messagesMap.set(msg.id, msg);
+                    }, 500);
+                }
+            });
+        }
+
+        // 创建消息卡片
+        function createMessageCard(msg) {
+            const card = document.createElement('div');
+            card.className = 'message-card' + (msg.updated ? ' updated' : '');
+            
+            // 格式化时间
+            const time = new Date(msg.timestamp * 1000).toLocaleTimeString('zh-CN', {
+                hour12: false,
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit'
+            });
+            
+            // 生成信号列表HTML
+            let signalsHTML = '';
+            const signals = Object.entries(msg.signals || {});
+            
+            if (signals.length === 0) {
+                signalsHTML = '<div style="text-align: center; color: #6b7280; padding: 10px;">无信号数据</div>';
+            } else {
+                signals.forEach(([name, value]) => {
+                    let displayValue = value;
+                    let rawValue = value;
+                    let unit = '';
+                    
+                    // 处理新格式的信号数据
+                    if (typeof value === 'object' && value !== null) {
+                        displayValue = value.display_value !== undefined ? value.display_value : value.raw_value;
+                        rawValue = value.raw_value !== undefined ? value.raw_value : displayValue;
+                        unit = value.unit || '';
+                    }
+                    
+                    // 格式化数值
+                    if (typeof displayValue === 'number') {
+                        displayValue = displayValue.toFixed(2);
+                    }
+                    if (typeof rawValue === 'number') {
+                        rawValue = rawValue.toFixed(2);
+                    }
+                    
+                    signalsHTML += `
+                        <div class="signal-item">
+                            <div class="signal-name">${name}</div>
+                            <div class="signal-value-group">
+                                <span class="signal-value">${displayValue}</span>
+                                ${unit ? `<span class="signal-unit">${unit}</span>` : ''}
+                                ${rawValue !== displayValue ? `<span class="signal-raw">(${rawValue})</span>` : ''}
+                            </div>
+                        </div>
+                    `;
+                });
+            }
+            
+            card.innerHTML = `
+                <div class="message-header">
+                    <div>
+                        <div class="message-id">${msg.id_hex}</div>
+                        <div class="message-name">${msg.name}</div>
+                    </div>
+                </div>
+                <div class="message-meta">
+                    <span class="message-channel">${msg.channel}</span>
+                    <span class="message-time">${time}</span>
+                    ${msg.source_file ? `<span class="message-channel">${msg.source_file}</span>` : ''}
+                </div>
+                <div class="signals-list">
+                    ${signalsHTML}
+                </div>
+            `;
+            
+            return card;
+        }
+
+        // 更新统计
+        function updateStats() {
+            document.getElementById('statTotalMessages').textContent = messagesMap.size;
+            
+            let totalSignals = 0;
+            messagesMap.forEach(msg => {
+                totalSignals += Object.keys(msg.signals || {}).length;
+            });
+            document.getElementById('statTotalSignals').textContent = totalSignals;
+            document.getElementById('statMatchedFrames').textContent = updateCount;
+        }
+
+        // 更新更新率
+        function updateUpdateRate() {
+            const now = Date.now();
+            const elapsed = (now - lastUpdateTime) / 1000;
+            const rate = Math.round(updateCount / Math.max(elapsed, 1));
+            
+            document.getElementById('statUpdateRate').textContent = rate;
+            document.getElementById('updateRate').textContent = `更新率: ${rate} msg/s`;
+            
+            updateCount = 0;
+            lastUpdateTime = now;
+        }
+
+        // 清空数据
+        function clearSignals() {
+            messagesMap.clear();
+            updateCount = 0;
+            renderSignals();
+            updateStats();
+            console.log('✓ 已清空信号数据');
+        }
+
+        // 切换自动滚动
+        function toggleAutoScroll() {
+            autoScroll = !autoScroll;
+            document.getElementById('autoScrollText').textContent = `自动滚动: ${autoScroll ? '开' : '关'}`;
+        }
+
+        // 应用过滤
+        function applyFilter() {
+            filterText = document.getElementById('filterInput').value.trim();
+            renderSignals();
+        }
+
+        // 页面加载时初始化
+        window.addEventListener('load', () => {
+            console.log('DBC信号实时解析页面已加载');
+            
+            // 连接WebSocket
+            connectWS();
+            
+            // 定时更新更新率
+            updateRateTimer = setInterval(updateUpdateRate, 1000);
+            
+            // 绑定过滤输入框的回车事件
+            document.getElementById('filterInput').addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') {
+                    applyFilter();
+                }
+            });
+        });
+        
+        // 页面卸载时停止定时器
+        window.addEventListener('beforeunload', () => {
+            if (updateRateTimer) {
+                clearInterval(updateRateTimer);
+            }
+            if (ws) {
+                ws.close();
+            }
+        });
+    </script>
+</body>
+</html>
+

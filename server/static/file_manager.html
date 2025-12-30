@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>文件管理</title>
+  <style>
+    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;margin:0;background:#f6f8fb;color:#222}
+    .container{max-width:1100px;margin:20px auto;padding:0 16px}
+    .card{background:#fff;border:1px solid #e5e7eb;border-radius:10px;box-shadow:0 1px 3px rgba(0,0,0,.05);padding:14px;margin-bottom:14px}
+    .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+    input[type=text]{padding:8px 10px;border:1px solid #d1d5db;border-radius:6px;min-width:280px}
+    button{padding:8px 12px;border:1px solid #cbd5e1;border-radius:6px;background:#fff;cursor:pointer}
+    button.primary{background:#1a73e8;border-color:#1a73e8;color:#fff}
+    table{width:100%;border-collapse:collapse}
+    th,td{border-bottom:1px solid #eef2f7;padding:8px 6px;text-align:left}
+    th{background:#f3f6fb;color:#0b3d91}
+    .mono{font-family:ui-monospace,Menlo,Consolas,monospace}
+    .actions button{margin-right:6px}
+    .crumbs{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
+    .crumbs a{color:#1a73e8;text-decoration:none}
+    .crumbs .sep{opacity:.6}
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="card">
+      <div class="row">
+        <input id="path" type="text" value="/" class="mono"/>
+        <button onclick="listDir()" class="primary">浏览</button>
+        <button onclick="goUp()">上一级</button>
+        <button onclick="mkdir()">新建文件夹</button>
+        <input id="uploadFile" type="file"/>
+        <button onclick="uploadFile()">上传</button>
+        <button onclick="listDir()">刷新</button>
+      </div>
+      <div id="crumbs" class="crumbs"></div>
+    </div>
+    <div class="card">
+      <table>
+        <thead><tr><th>名称</th><th>类型</th><th class="mono">大小</th><th class="mono">修改时间</th><th>操作</th></tr></thead>
+        <tbody id="tbody"></tbody>
+      </table>
+    </div>
+    <div class="card mono" id="log"></div>
+  </div>
+
+<script>
+const log = (m)=>{ const el=document.getElementById('log'); el.textContent += `[${new Date().toLocaleTimeString()}] ${m}\n`; el.scrollTop = el.scrollHeight; };
+const q = (id)=>document.getElementById(id);
+let BASE_DIR = '/';
+function formatSize(bytes){
+  let n = Number(bytes)||0;
+  if (n < 1024) return n + ' B';
+  n = n / 1024; // to KB
+  if (n < 1024) return (n < 10 ? n.toFixed(2) : (n < 100 ? n.toFixed(1) : Math.round(n))) + ' KB';
+  n = n / 1024; // to MB
+  if (n < 1024) return (n < 10 ? n.toFixed(2) : (n < 100 ? n.toFixed(1) : Math.round(n))) + ' MB';
+  n = n / 1024; // to GB
+  return (n < 10 ? n.toFixed(2) : (n < 100 ? n.toFixed(1) : Math.round(n))) + ' GB';
+}
+function joinPosix(a,b){ if(!a) return b||''; if(!b) return a; return a.endsWith('/') ? (a+b) : (a+'/'+b); }
+function setCrumbs(path){
+  const root = BASE_DIR;
+  let rel = path.replace(root,''); if(rel.startsWith('/')) rel = rel.slice(1);
+  const parts = rel ? rel.split('/') : [];
+  const box = document.getElementById('crumbs'); if(!box) return; box.innerHTML='';
+  const add = (html)=>{ const span=document.createElement('span'); span.innerHTML=html; box.appendChild(span); };
+  let cur = root;
+  add(`<a href="#" onclick="enterDir('${cur.replace(/'/g,"%27")}')">${root}</a>`);
+  for(const p of parts){ if(!p) continue; cur = joinPosix(cur, p); add('<span class="sep">/</span>'); add(`<a href="#" onclick="enterDir('${cur.replace(/'/g,"%27")}')">${p}</a>`); }
+}
+async function getBase(){ try{ const r = await fetch('/api/fs/base'); const j = await r.json(); if(j && j.ok && j.base){ BASE_DIR = j.base; q('path').value = BASE_DIR; } }catch(e){} }
+async function listDir(){
+  const p = q('path').value.trim()||'/';
+  setCrumbs(p);
+  // 统一将历史目录名 CAN_mess 兼容为小写 can_mess
+  const compatP = p.replace('/CAN_mess', '/can_mess');
+  const r = await fetch(`/api/fs/list?path=${encodeURIComponent(compatP)}`);
+  const j = await r.json().catch(()=>({}));
+  let items = [];
+  if (j) {
+    if (Array.isArray(j.items)) items = j.items;
+    else if (j.data && Array.isArray(j.data.items)) items = j.data.items;
+  }
+  if(!Array.isArray(items)) items = [];
+  if(items.length===0){ q('tbody').innerHTML=''; return; }
+  items = items.map(it => (typeof it === 'string') ? { name: it, is_dir: false, size: 0, mtime: 0 } : it);
+  items = items.slice().sort((a,b)=> (b.is_dir?1:0)-(a.is_dir?1:0) || String(a.name).localeCompare(String(b.name)) );
+  q('tbody').innerHTML = items.map(it=>{
+    const name = it.name;
+    const isDir = it.is_dir ? '目录' : '文件';
+    const size = it.size || 0;
+    const mtime = it.mtime ? new Date(it.mtime*1000).toLocaleString() : '';
+  const full = compatP.endsWith('/') ? (compatP+name) : (compatP+'/'+name);
+    const rowDbl = it.is_dir ? `ondblclick="enterDir('${full.replace(/'/g,"%27")}')"` : '';
+    return `<tr ${rowDbl}>
+      <td class="mono">${name}</td>
+      <td>${isDir}</td>
+      <td class="mono">${it.is_dir ? '-' : formatSize(size)}</td>
+      <td class="mono">${mtime}</td>
+      <td class="actions">
+        ${it.is_dir ? `<button onclick=\"enterDir('${full.replace(/'/g,"%27")}')\">进入</button>` : `<button onclick=\"download('${full.replace(/'/g,"%27")}')\">下载</button>`}
+        <button onclick=\"renamePath('${full.replace(/'/g,"%27")}')\">重命名</button>
+        <button onclick=\"del('${full.replace(/'/g,"%27")}')\" style=\"color:#dc2626\">删除</button>
+      </td>
+    </tr>`;
+  }).join('');
+}
+function enterDir(p){ q('path').value = p; listDir(); }
+function goUp(){ const p = q('path').value.trim(); if(!p || p===BASE_DIR) return; const up = p.substring(0, p.lastIndexOf('/')) || '/'; q('path').value = up; listDir(); }
+async function mkdir(){
+  const base = q('path').value.trim()||'/';
+  const name = prompt('新建文件夹名称:');
+  if(!name) return;
+  const r = await fetch('/api/fs/mkdir', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ base, name })});
+  const j = await r.json(); if(!j || j.ok===false){ alert('失败: '+(j&&j.error)); } else { listDir(); }
+}
+async function renamePath(path){
+  const seg = path.split('/'); const curName = seg.pop(); const base = seg.join('/')||'/';
+  const new_name = prompt('重命名为:', curName||''); if(!new_name || new_name===curName) return;
+  const r = await fetch('/api/fs/rename', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ path, new_name })});
+  const j = await r.json(); if(!j || j.ok===false){ alert('重命名失败: '+(j&&j.error)); } else { listDir(); }
+}
+async function uploadFile(){
+  const f = q('uploadFile').files[0]; if(!f){ alert('请选择文件'); return; }
+  const base = q('path').value.trim()||'/';
+  const fd = new FormData(); fd.append('file', f); fd.append('base', base); fd.append('path', base);
+  const r = await fetch('/api/fs/upload', { method:'POST', body: fd });
+  const j = await r.json(); if(!j || j.ok===false){ alert('上传失败: '+(j&&j.error)); } else { listDir(); }
+}
+async function del(path){
+  if(!confirm('确认删除:\n'+path)) return;
+  const r = await fetch('/api/fs/delete', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ path })});
+  const j = await r.json(); if(!j || j.ok===false){ alert('删除失败: '+(j&&j.error)); } else { listDir(); }
+}
+function download(path){
+  window.location.href = '/api/fs/download?path=' + encodeURIComponent(path);
+}
+document.addEventListener('DOMContentLoaded', async ()=>{ await getBase(); listDir(); });
+</script>
+</body>
+</html>
+
+

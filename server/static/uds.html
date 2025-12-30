@@ -1,0 +1,306 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>UDS 固件下载</title>
+  <link rel="icon" href="/static/dashboard/favicon.ico">
+  <style>
+    :root { --bg:#0b2447; --panel:#0d366b40; --border:#3f8cff4d; --text:#d7e3ff; --acc:#7fb3ff; }
+    html, body { height:100%; margin:0; background: radial-gradient(ellipse at center, #0b2447 0%, #061427 70%); color:var(--text); font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+    a { color: var(--acc); text-decoration: none; }
+    .container { max-width: 1080px; margin: 28px auto; padding: 0 16px; }
+    .title { display:flex; align-items:center; justify-content:space-between; gap:16px; margin-bottom: 16px; }
+    .title h1 { margin:0; font-size: 22px; }
+    .panel { background: var(--panel); border:1px solid var(--border); border-radius:12px; padding:16px; box-shadow: 0 0 20px rgba(63,140,255,0.12) inset; }
+    .grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap:16px; }
+    .row { display:flex; gap:12px; align-items:center; flex-wrap: wrap; }
+    label { opacity: .9; }
+    input[type="text"], input[type="number"], select { width: 280px; max-width: 100%; padding:8px 10px; border-radius:8px; border:1px solid #2a4c88; background:#091a33; color:#b8d5ff; }
+    input[type="file"] { color: #b8d5ff; }
+    button { padding:8px 12px; border-radius:8px; border:1px solid rgba(255,255,255,0.15); background:#1a73e8; color:#fff; cursor:pointer; box-shadow:0 6px 14px rgba(26,115,232,0.35); }
+    button.secondary { background:#244a87; }
+    button:disabled { opacity:.6; cursor:not-allowed; }
+    .hint { opacity:.75; font-size: 12px; margin-top: 6px; }
+    .section-title { font-weight:bold; margin-bottom:8px; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
+    .logs { height: 220px; overflow:auto; background: rgba(0,0,0,0.25); padding:10px; border-radius:8px; border:1px solid #254a8a; }
+    .progress { display:flex; gap:12px; align-items:center; }
+    .badge { display:inline-flex; align-items:center; gap:8px; font-weight:bold; }
+    .dot { width:10px; height:10px; border-radius:50%; background:#df3b3b; box-shadow:0 0 8px #df3b3b; }
+    .dot.on { background:#2ecc71; box-shadow:0 0 8px #2ecc71; }
+    .spacer { height: 16px; }
+    /* 设备文件选择器 */
+    .modal { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.55); z-index: 1000; }
+    .modal.hidden { display: none; }
+    .modal-content { width: min(820px, 92vw); max-height: 80vh; overflow: auto; background: #0d2a52; border: 1px solid #2a4c88; border-radius: 12px; padding: 12px; box-shadow: 0 12px 40px rgba(0,0,0,0.45); }
+    .modal-head { display:flex; align-items:center; justify-content:space-between; gap:8px; font-weight:bold; margin-bottom:8px; }
+    .modal-close { background:#244a87; border:1px solid rgba(255,255,255,0.15); color:#fff; border-radius:6px; padding:4px 8px; cursor:pointer; }
+    .picker-list { border:1px solid #254a8a; border-radius:8px; overflow:hidden; }
+    .picker-item { padding:10px 12px; border-bottom:1px solid #17335f; cursor:pointer; }
+    .picker-item:hover { background:#0f3a74; }
+    .picker-empty { padding:12px; opacity:.8; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="title">
+      <h1>UDS 固件下载</h1>
+      <div class="row">
+        <a href="/dashboard">返回仪表盘</a>
+      </div>
+    </div>
+
+    <div class="grid">
+      <div class="panel">
+        <div class="section-title">CAN 配置</div>
+        <div class="row">
+          <label for="iface">接口</label>
+          <select id="iface">
+            <option value="can0">CAN1</option>
+            <option value="can1">CAN2</option>
+          </select>
+          <label for="bitrate">波特率</label>
+          <input id="bitrate" type="number" value="500000" min="10000" step="10000">
+          <button id="btnApply">应用配置</button>
+        </div>
+        <div id="applyMsg" class="hint"></div>
+      </div>
+
+      <div class="panel">
+        <div class="section-title">固件文件（.s19）</div>
+        <div class="row">
+          <input id="file" type="file" accept=".s19">
+          <button id="btnUpload">上传到设备</button>
+        </div>
+        <div id="uploadMsg" class="hint"></div>
+        <div class="spacer"></div>
+        <div class="row">
+          <label for="s19path">设备文件路径</label>
+          <input id="s19path" type="text" placeholder="/mnt/udisk/firmware.s19">
+          <button id="btnSetPath" class="secondary">设置路径</button>
+          <button id="btnPick" class="secondary">从设备选择</button>
+        </div>
+        <div id="pathMsg" class="hint"></div>
+      </div>
+    </div>
+
+    <div class="spacer"></div>
+
+    <div class="grid">
+      <div class="panel">
+        <div class="section-title">下载控制</div>
+        <div class="row">
+          <button id="btnStart">开始下载</button>
+          <button id="btnStop" class="secondary">停止下载</button>
+          <span id="statusBadge" class="badge" style="margin-left:8px"><span id="statusDot" class="dot"></span><span id="statusText">空闲</span></span>
+        </div>
+        <div class="spacer"></div>
+        <div class="progress">
+          <label>进度</label>
+          <div id="progressText" class="mono">0%</div>
+        </div>
+        <div id="progressRaw" class="hint mono" style="margin-top:8px"></div>
+      </div>
+
+      <div class="panel">
+        <div class="section-title">日志</div>
+        <div class="row" style="margin-bottom:8px">
+          <button id="btnRefreshLogs" class="secondary">刷新日志</button>
+        </div>
+        <div id="logs" class="logs mono">日志尚无内容</div>
+      </div>
+    </div>
+
+    <div class="spacer"></div>
+
+    <!-- 文件管理已迁移至独立页面：/static/file_manager.html -->
+  </div>
+
+  <!-- 设备文件选择器 -->
+  <div id="pickerModal" class="modal hidden">
+    <div class="modal-content">
+      <div class="modal-head">
+        <div>从设备选择 .s19 文件</div>
+        <button id="btnClosePicker" class="modal-close">关闭</button>
+      </div>
+      <div id="pickerInfo" class="hint" style="margin-bottom:8px"></div>
+      <div id="pickerList" class="picker-list"></div>
+    </div>
+  </div>
+
+  <script>
+    const qs = (id)=>document.getElementById(id);
+    const ifaceEl = qs('iface');
+    const bitrateEl = qs('bitrate');
+    const fileEl = qs('file');
+    const s19PathEl = qs('s19path');
+    const statusText = qs('statusText');
+    const statusDot = qs('statusDot');
+    const progressText = qs('progressText');
+    const progressRaw = qs('progressRaw');
+    const logsEl = qs('logs');
+  // 文件管理已迁移
+
+  let BASE_DIR = '';
+    let progressTimer = null;
+
+    function setStatus(txt, on) {
+      statusText.textContent = txt || '';
+      statusDot.className = 'dot' + (on ? ' on' : '');
+    }
+
+    async function applyCan() {
+      const body = { iface: ifaceEl.value || 'can0', bitrate: parseInt(bitrateEl.value||'500000', 10) };
+      const r = await fetch('/api/uds/can_apply', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+      const j = await r.json().catch(()=>({}));
+      qs('applyMsg').textContent = j && j.ok ? '已应用' : ('失败: ' + (j && (j.error||j.msg||JSON.stringify(j))));
+    }
+
+    async function upload() {
+      const f = fileEl.files && fileEl.files[0];
+      if (!f) { qs('uploadMsg').textContent = '请选择 .s19 文件'; return; }
+      const fd = new FormData();
+      fd.append('file', f);
+      if (BASE_DIR) fd.append('base', BASE_DIR);
+      const r = await fetch('/api/uds/upload', { method:'POST', body: fd });
+      const j = await r.json().catch(()=>({}));
+      if (j && j.ok) {
+        qs('uploadMsg').textContent = '上传成功';
+        if (BASE_DIR) s19PathEl.value = (BASE_DIR.endsWith('/')?BASE_DIR:BASE_DIR+'/') + (f.name || 'firmware.s19');
+      } else {
+        qs('uploadMsg').textContent = '上传失败: ' + (j && (j.error||j.msg||JSON.stringify(j)));
+      }
+    }
+
+    async function setPath() {
+      const path = (s19PathEl.value || '').trim();
+      if (!path) { qs('pathMsg').textContent = '请输入设备文件路径'; return; }
+      const r = await fetch('/api/uds/set_file', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ path }) });
+      const j = await r.json().catch(()=>({}));
+      qs('pathMsg').textContent = j && j.ok ? '已设置: ' + path : ('失败: ' + (j && (j.error||j.msg||JSON.stringify(j))));
+    }
+
+    function joinPosix(a, b) { if (!a) return b||''; if (!b) return a; return a.endsWith('/') ? (a + b) : (a + '/' + b); }
+
+    function showPicker(open) { qs('pickerModal').classList[open? 'remove':'add']('hidden'); }
+
+    async function openDevicePicker() {
+      try {
+        qs('pickerInfo').textContent = '正在扫描设备上的固件文件 (.s19)...';
+        qs('pickerList').innerHTML = '';
+        showPicker(true);
+        const r = await fetch('/api/uds/list');
+        const j = await r.json().catch(()=>({}));
+        const files = (j && j.data && j.data.files) || j.files || [];
+        if (!j || !j.ok) {
+          qs('pickerInfo').textContent = '获取文件列表失败：' + JSON.stringify(j);
+          return;
+        }
+        qs('pickerInfo').textContent = files.length ? ('共找到 ' + files.length + ' 个固件文件') : '未找到 .s19 文件';
+        if (!files.length) {
+          qs('pickerList').innerHTML = '<div class="picker-empty">在 ' + (BASE_DIR||'/mnt') + ' 及其子目录未发现 .s19 文件</div>';
+          return;
+        }
+        const listEl = qs('pickerList');
+        listEl.innerHTML = '';
+        files.forEach(rel => {
+          const full = joinPosix(BASE_DIR, rel);
+          const div = document.createElement('div');
+          div.className = 'picker-item';
+          div.textContent = rel;
+          div.title = full;
+          div.addEventListener('click', async ()=>{
+            s19PathEl.value = full;
+            await setPath();
+            showPicker(false);
+          });
+          listEl.appendChild(div);
+        });
+      } catch (e) {
+        qs('pickerInfo').textContent = '异常：' + e;
+      }
+    }
+
+    function startProgressPolling() {
+      stopProgressPolling();
+      progressTimer = setInterval(async ()=>{
+        try {
+          const r = await fetch('/api/uds/progress');
+          const j = await r.json();
+          if (j && j.ok) {
+            setStatus('下载中', true);
+            const percent = j.percent ?? j.progress ?? j.pct ?? 0;
+            progressText.textContent = String(percent) + '%';
+            progressRaw.textContent = JSON.stringify(j);
+          } else {
+            progressRaw.textContent = JSON.stringify(j);
+          }
+        } catch(e) {}
+      }, 1000);
+    }
+
+    function stopProgressPolling() {
+      if (progressTimer) { clearInterval(progressTimer); progressTimer = null; }
+    }
+
+    async function startDownload() {
+      const r = await fetch('/api/uds/start', { method:'POST' });
+      const j = await r.json().catch(()=>({}));
+      if (j && j.ok) {
+        setStatus('下载已启动', true);
+        startProgressPolling();
+        setTimeout(refreshLogs, 300);
+      } else {
+        setStatus('启动失败', false);
+        progressRaw.textContent = JSON.stringify(j);
+      }
+    }
+
+    async function stopDownload() {
+      const r = await fetch('/api/uds/stop', { method:'POST' });
+      const j = await r.json().catch(()=>({}));
+      setStatus('已停止', false);
+      stopProgressPolling();
+      progressRaw.textContent = JSON.stringify(j);
+      setTimeout(refreshLogs, 300);
+    }
+
+    async function refreshLogs() {
+      const r = await fetch('/api/uds/logs?limit=200');
+      const j = await r.json().catch(()=>({}));
+      if (j && j.ok) {
+        const logs = (j.logs || j.data || j.items || []).map(x => (typeof x === 'string'? x : JSON.stringify(x)));
+        logsEl.textContent = logs.length ? logs.join('\n') : '暂无日志';
+      } else {
+        logsEl.textContent = JSON.stringify(j);
+      }
+    }
+
+  async function getBase() {
+    const r = await fetch('/api/fs/base');
+    const j = await r.json().catch(()=>({}));
+    if (j && j.ok && j.base) {
+      BASE_DIR = j.base;
+      if (!s19PathEl.value) s19PathEl.value = (BASE_DIR.endsWith('/')?BASE_DIR:BASE_DIR+'/') + 'firmware.s19';
+    }
+  }
+
+  // listBase() 移除
+
+    // Wire events
+    qs('btnApply').addEventListener('click', applyCan);
+    qs('btnUpload').addEventListener('click', upload);
+    qs('btnSetPath').addEventListener('click', setPath);
+    qs('btnPick').addEventListener('click', openDevicePicker);
+    qs('btnClosePicker').addEventListener('click', ()=> showPicker(false));
+    qs('btnStart').addEventListener('click', startDownload);
+    qs('btnStop').addEventListener('click', stopDownload);
+    qs('btnRefreshLogs').addEventListener('click', refreshLogs);
+  // 文件管理按钮已移除
+
+    // Init
+    getBase();
+  </script>
+</body>
+</html> 

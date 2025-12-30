@@ -1,0 +1,22 @@
+{
+  "frames": {
+    "0X051": {
+      "signals": [
+        {
+          "name": "Volet",
+          "byte_order": "motorola",
+          "start_bit": 15,
+          "length": 16,
+          "signed": false,
+          "factor": 0.1,
+          "offset": 0.0,
+          "min": 0.0,
+          "max": 6553.5,
+          "unit": "V",
+          "desc": "电压",
+          "enabled": true
+        }
+      ]
+    }
+  }
+}

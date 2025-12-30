@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>WebSocket数据调试工具</title>
+    <style>
+        body {
+            font-family: 'Courier New', monospace;
+            background: #1e1e1e;
+            color: #d4d4d4;
+            padding: 20px;
+        }
+        h1 { color: #4ec9b0; }
+        .status {
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 5px;
+        }
+        .status.connected { background: #0e639c; }
+        .status.disconnected { background: #f44747; }
+        .log {
+            background: #252526;
+            padding: 15px;
+            border-radius: 5px;
+            max-height: 600px;
+            overflow-y: auto;
+            margin-top: 20px;
+        }
+        .log-entry {
+            margin: 10px 0;
+            padding: 10px;
+            background: #2d2d30;
+            border-left: 3px solid #007acc;
+        }
+        .log-entry.error {
+            border-left-color: #f44747;
+        }
+        .log-entry.success {
+            border-left-color: #4ec9b0;
+        }
+        .log-entry pre {
+            margin: 5px 0;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+        .btn {
+            padding: 10px 20px;
+            margin: 5px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        .btn-primary { background: #0e639c; color: white; }
+        .btn-danger { background: #f44747; color: white; }
+        .btn-success { background: #0e639c; color: white; }
+    </style>
+</head>
+<body>
+    <h1>🔍 WebSocket CAN数据调试工具</h1>
+    
+    <div id="status" class="status disconnected">
+        ❌ 未连接
+    </div>
+    
+    <div>
+        <button class="btn btn-primary" onclick="connect()">连接WebSocket</button>
+        <button class="btn btn-danger" onclick="disconnect()">断开</button>
+        <button class="btn btn-success" onclick="clearLog()">清除日志</button>
+    </div>
+    
+    <div class="log" id="log">
+        <div class="log-entry">等待连接...</div>
+    </div>
+    
+    <script>
+        let ws = null;
+        let messageCount = 0;
+        
+        function log(message, type = 'info') {
+            const logDiv = document.getElementById('log');
+            const entry = document.createElement('div');
+            entry.className = `log-entry ${type}`;
+            
+            const time = new Date().toLocaleTimeString();
+            entry.innerHTML = `<strong>[${time}]</strong> ${message}`;
+            
+            logDiv.appendChild(entry);
+            logDiv.scrollTop = logDiv.scrollHeight;
+        }
+        
+        function updateStatus(connected) {
+            const statusDiv = document.getElementById('status');
+            if (connected) {
+                statusDiv.className = 'status connected';
+                statusDiv.textContent = '✓ 已连接到 ws://localhost:5052/ui';
+            } else {
+                statusDiv.className = 'status disconnected';
+                statusDiv.textContent = '❌ 未连接';
+            }
+        }
+        
+        function connect() {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                log('已经连接了', 'error');
+                return;
+            }
+            
+            const wsUrl = 'ws://localhost:5052/ui';
+            log(`尝试连接: ${wsUrl}`, 'info');
+            
+            ws = new WebSocket(wsUrl);
+            
+            ws.onopen = () => {
+                log('✓ WebSocket连接成功', 'success');
+                updateStatus(true);
+            };
+            
+            ws.onmessage = (event) => {
+                messageCount++;
+                
+                try {
+                    const data = JSON.parse(event.data);
+                    
+                    if (data.event === 'can_frames') {
+                        log(`<strong>收到第${messageCount}条CAN帧消息:</strong>`, 'success');
+                        
+                        // 显示原始数据结构
+                        log(`<pre>完整数据结构:\n${JSON.stringify(data, null, 2)}</pre>`);
+                        
+                        // 显示lines
+                        if (data.data && data.data.lines) {
+                            log(`<strong>Lines数组 (${data.data.lines.length}条):</strong>`);
+                            data.data.lines.slice(0, 5).forEach((line, idx) => {
+                                log(`<pre>[${idx}] ${line}</pre>`);
+                            });
+                            if (data.data.lines.length > 5) {
+                                log(`... 还有 ${data.data.lines.length - 5} 条`);
+                            }
+                        }
+                        
+                        // 显示frames
+                        if (data.data && data.data.frames) {
+                            log(`<strong>Frames数组 (${data.data.frames.length}条):</strong>`);
+                            data.data.frames.slice(0, 3).forEach((frame, idx) => {
+                                log(`<pre>[${idx}] ${JSON.stringify(frame, null, 2)}</pre>`);
+                            });
+                            if (data.data.frames.length > 3) {
+                                log(`... 还有 ${data.data.frames.length - 3} 条`);
+                            }
+                        }
+                        
+                        // 显示buf
+                        if (data.data && data.data.buf) {
+                            const bufPreview = data.data.buf.substring(0, 200);
+                            log(`<strong>Buf内容 (前200字符):</strong>`);
+                            log(`<pre>${bufPreview}${data.data.buf.length > 200 ? '...' : ''}</pre>`);
+                        }
+                    } else {
+                        log(`收到其他事件: <strong>${data.event}</strong>`, 'info');
+                        log(`<pre>${JSON.stringify(data, null, 2).substring(0, 500)}</pre>`);
+                    }
+                } catch (e) {
+                    log(`解析JSON失败: ${e.message}`, 'error');
+                    log(`<pre>原始数据: ${event.data.substring(0, 500)}</pre>`);
+                }
+            };
+            
+            ws.onerror = (error) => {
+                log(`WebSocket错误: ${error}`, 'error');
+            };
+            
+            ws.onclose = () => {
+                log('WebSocket连接关闭', 'error');
+                updateStatus(false);
+            };
+        }
+        
+        function disconnect() {
+            if (ws) {
+                ws.close();
+                ws = null;
+                log('手动断开连接', 'info');
+            }
+        }
+        
+        function clearLog() {
+            document.getElementById('log').innerHTML = '';
+            messageCount = 0;
+        }
+        
+        // 页面加载时自动连接
+        window.addEventListener('load', () => {
+            log('页面已加载，点击"连接WebSocket"按钮开始', 'info');
+        });
+    </script>
+</body>
+</html>
+

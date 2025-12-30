@@ -1,0 +1,533 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>UDS固件下载 - WebSocket直连</title>
+    <style>
+        :root {
+            --bg: #0b2447;
+            --panel: #0d366b40;
+            --border: #3f8cff4d;
+            --text: #d7e3ff;
+            --acc: #7fb3ff;
+        }
+        
+        * { box-sizing: border-box; }
+        
+        html, body {
+            height: 100%;
+            margin: 0;
+            background: radial-gradient(ellipse at center, #0b2447 0%, #061427 70%);
+            color: var(--text);
+            font-family: "Segoe UI", Roboto, sans-serif;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 20px auto;
+            padding: 0 20px;
+        }
+        
+        .title {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 20px;
+        }
+        
+        .title h1 {
+            margin: 0;
+            font-size: 24px;
+        }
+        
+        .status-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 12px;
+            background: rgba(0,0,0,0.3);
+            border-radius: 8px;
+        }
+        
+        .dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #df3b3b;
+            box-shadow: 0 0 8px #df3b3b;
+        }
+        
+        .dot.on {
+            background: #2ecc71;
+            box-shadow: 0 0 8px #2ecc71;
+        }
+        
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+            gap: 16px;
+            margin-bottom: 16px;
+        }
+        
+        .panel {
+            background: var(--panel);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 16px;
+            box-shadow: 0 0 20px rgba(63,140,255,0.12) inset;
+        }
+        
+        .panel h3 {
+            margin: 0 0 12px 0;
+            font-size: 16px;
+            font-weight: bold;
+        }
+        
+        .form-row {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            margin-bottom: 12px;
+        }
+        
+        label {
+            opacity: 0.9;
+            font-size: 14px;
+        }
+        
+        input, select {
+            width: 100%;
+            padding: 8px 10px;
+            border-radius: 8px;
+            border: 1px solid #2a4c88;
+            background: #091a33;
+            color: #b8d5ff;
+            font-size: 14px;
+        }
+        
+        .button-group {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+        
+        button {
+            padding: 10px 16px;
+            border-radius: 8px;
+            border: 1px solid rgba(255,255,255,0.15);
+            background: #1a73e8;
+            color: #fff;
+            cursor: pointer;
+            box-shadow: 0 6px 14px rgba(26,115,232,0.35);
+            font-size: 14px;
+            font-weight: 500;
+        }
+        
+        button.secondary {
+            background: #244a87;
+        }
+        
+        button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+        
+        button:hover:not(:disabled) {
+            transform: translateY(-1px);
+            box-shadow: 0 8px 16px rgba(26,115,232,0.45);
+        }
+        
+        .logs {
+            height: 300px;
+            overflow: auto;
+            background: rgba(0,0,0,0.3);
+            padding: 12px;
+            border-radius: 8px;
+            border: 1px solid #254a8a;
+            font-family: monospace;
+            font-size: 12px;
+            line-height: 1.5;
+        }
+        
+        .progress-bar {
+            width: 100%;
+            height: 24px;
+            background: rgba(0,0,0,0.3);
+            border-radius: 8px;
+            overflow: hidden;
+            margin: 8px 0;
+        }
+        
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #1a73e8, #2ecc71);
+            transition: width 0.3s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 12px;
+            font-weight: bold;
+        }
+        
+        .hint {
+            opacity: 0.75;
+            font-size: 12px;
+            margin-top: 4px;
+        }
+        
+        .error {
+            color: #ff6b6b;
+        }
+        
+        .success {
+            color: #2ecc71;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="title">
+            <h1>🔧 UDS固件下载</h1>
+            <div class="status-badge">
+                <span id="statusDot" class="dot"></span>
+                <span id="statusText">未连接</span>
+            </div>
+        </div>
+        
+        <div class="grid">
+            <!-- 连接设置 -->
+            <div class="panel">
+                <h3>设备连接</h3>
+                <div class="form-row">
+                    <label>设备IP地址</label>
+                    <input type="text" id="deviceHost" value="172.17.237.241" placeholder="172.17.237.241">
+                </div>
+                <div class="form-row">
+                    <label>WebSocket端口</label>
+                    <input type="number" id="devicePort" value="5052" placeholder="5052">
+                </div>
+                <div class="button-group">
+                    <button onclick="connect()" id="btnConnect">连接设备</button>
+                    <button onclick="disconnect()" id="btnDisconnect" class="secondary" disabled>断开连接</button>
+                </div>
+                <div id="connectMsg" class="hint"></div>
+            </div>
+            
+            <!-- CAN配置 -->
+            <div class="panel">
+                <h3>CAN配置</h3>
+                <div class="form-row">
+                    <label>CAN接口</label>
+                    <select id="canInterface">
+                        <option value="can0">CAN0 (CAN1)</option>
+                        <option value="can1">CAN1 (CAN2)</option>
+                    </select>
+                </div>
+                <div class="form-row">
+                    <label>波特率</label>
+                    <select id="canBitrate">
+                        <option value="125000">125 Kbps</option>
+                        <option value="250000">250 Kbps</option>
+                        <option value="500000" selected>500 Kbps</option>
+                        <option value="1000000">1 Mbps</option>
+                    </select>
+                </div>
+                <button onclick="applyCAN()">应用CAN配置</button>
+                <div id="canMsg" class="hint"></div>
+            </div>
+        </div>
+        
+        <!-- S19文件设置 -->
+        <div class="panel" style="margin-bottom: 16px;">
+            <h3>S19固件文件</h3>
+            <div class="form-row">
+                <label>设备上的文件路径</label>
+                <input type="text" id="s19Path" value="/mnt/SDCARD/firmware.s19" placeholder="/mnt/SDCARD/firmware.s19">
+            </div>
+            <div class="button-group">
+                <button onclick="setFilePath()">设置文件路径</button>
+                <button onclick="listS19Files()" class="secondary">列出可用文件</button>
+            </div>
+            <div id="fileMsg" class="hint"></div>
+            <div id="fileList" style="margin-top:8px;"></div>
+        </div>
+        
+        <div class="grid">
+            <!-- 下载控制 -->
+            <div class="panel">
+                <h3>下载控制</h3>
+                <div class="button-group">
+                    <button onclick="startDownload()" id="btnStart">开始下载</button>
+                    <button onclick="stopDownload()" id="btnStop" class="secondary">停止下载</button>
+                </div>
+                <div class="form-row" style="margin-top:12px;">
+                    <label>下载进度</label>
+                    <div class="progress-bar">
+                        <div id="progressFill" class="progress-fill" style="width: 0%">0%</div>
+                    </div>
+                </div>
+                <div id="downloadMsg" class="hint"></div>
+            </div>
+            
+            <!-- 系统状态 -->
+            <div class="panel">
+                <h3>系统状态</h3>
+                <div class="button-group">
+                    <button onclick="getStatus()" class="secondary">刷新状态</button>
+                    <button onclick="clearLogs()" class="secondary">清除日志</button>
+                </div>
+                <div id="statusInfo" class="hint" style="margin-top:12px;"></div>
+            </div>
+        </div>
+        
+        <!-- 日志 -->
+        <div class="panel">
+            <h3>操作日志</h3>
+            <div id="logs" class="logs"></div>
+        </div>
+    </div>
+    
+    <script>
+        let ws = null;
+        let reqId = 1;
+        let progressTimer = null;
+        
+        function log(msg, type = 'info') {
+            const logs = document.getElementById('logs');
+            const time = new Date().toLocaleTimeString();
+            const prefix = type === 'error' ? '❌' : type === 'success' ? '✅' : '📝';
+            logs.innerHTML += `<div class="${type}">[${time}] ${prefix} ${msg}</div>`;
+            logs.scrollTop = logs.scrollHeight;
+        }
+        
+        function setStatus(text, connected) {
+            document.getElementById('statusText').textContent = text;
+            document.getElementById('statusDot').className = 'dot' + (connected ? ' on' : '');
+        }
+        
+        function connect() {
+            const host = document.getElementById('deviceHost').value;
+            const port = document.getElementById('devicePort').value;
+            const url = `ws://${host}:${port}`;
+            
+            try {
+                ws = new WebSocket(url);
+                
+                ws.onopen = () => {
+                    setStatus('已连接', true);
+                    log(`成功连接到 ${url}`, 'success');
+                    document.getElementById('btnConnect').disabled = true;
+                    document.getElementById('btnDisconnect').disabled = false;
+                    document.getElementById('connectMsg').textContent = '✅ 连接成功';
+                    document.getElementById('connectMsg').className = 'hint success';
+                };
+                
+                ws.onmessage = (event) => {
+                    try {
+                        const response = JSON.parse(event.data);
+                        handleResponse(response);
+                    } catch (e) {
+                        log('解析响应失败: ' + e.message, 'error');
+                    }
+                };
+                
+                ws.onerror = (error) => {
+                    log('WebSocket错误', 'error');
+                    document.getElementById('connectMsg').textContent = '❌ 连接错误';
+                    document.getElementById('connectMsg').className = 'hint error';
+                };
+                
+                ws.onclose = () => {
+                    setStatus('已断开', false);
+                    log('连接已关闭', 'info');
+                    document.getElementById('btnConnect').disabled = false;
+                    document.getElementById('btnDisconnect').disabled = true;
+                    stopProgressPolling();
+                };
+                
+            } catch (e) {
+                log('连接失败: ' + e.message, 'error');
+                document.getElementById('connectMsg').textContent = '❌ ' + e.message;
+                document.getElementById('connectMsg').className = 'hint error';
+            }
+        }
+        
+        function disconnect() {
+            if (ws) {
+                ws.close();
+                ws = null;
+            }
+            stopProgressPolling();
+        }
+        
+        function sendCommand(cmd, params = {}) {
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                log('设备未连接', 'error');
+                return;
+            }
+            
+            const msg = {
+                cmd: cmd,
+                id: `req_${reqId++}`,
+                ...params
+            };
+            
+            ws.send(JSON.stringify(msg));
+            log(`发送命令: ${cmd}`, 'info');
+        }
+        
+        function handleResponse(response) {
+            log(`收到响应: ${response.id || 'unknown'}`, 'info');
+            
+            if (response.ok) {
+                // 处理成功响应
+                if (response.data) {
+                    // UDS进度更新
+                    if (response.data.total_percent !== undefined) {
+                        updateProgress(response.data.total_percent);
+                        document.getElementById('downloadMsg').textContent = 
+                            `状态: ${response.data.status || 'unknown'}, 进度: ${response.data.total_percent}%`;
+                    }
+                    
+                    // 文件列表
+                    if (response.data.files) {
+                        displayFileList(response.data.files);
+                    }
+                    
+                    // 状态信息
+                    if (response.data.can0_bitrate || response.data.can1_bitrate) {
+                        document.getElementById('statusInfo').innerHTML = `
+                            CAN0: ${response.data.can0_bitrate || 'N/A'} bps<br>
+                            CAN1: ${response.data.can1_bitrate || 'N/A'} bps
+                        `;
+                    }
+                }
+            } else {
+                // 处理错误响应
+                log(`命令失败: ${response.error || 'unknown error'}`, 'error');
+            }
+        }
+        
+        function applyCAN() {
+            const iface = document.getElementById('canInterface').value;
+            const bitrate = parseInt(document.getElementById('canBitrate').value);
+            
+            sendCommand('can_configure', {
+                interface: iface,
+                bitrate: bitrate
+            });
+            
+            document.getElementById('canMsg').textContent = '⏳ 正在配置CAN...';
+            
+            setTimeout(() => {
+                document.getElementById('canMsg').textContent = '✅ CAN配置已发送';
+            }, 1000);
+        }
+        
+        function setFilePath() {
+            const path = document.getElementById('s19Path').value.trim();
+            
+            if (!path) {
+                document.getElementById('fileMsg').textContent = '❌ 请输入文件路径';
+                document.getElementById('fileMsg').className = 'hint error';
+                return;
+            }
+            
+            sendCommand('uds_set_file', { path: path });
+            document.getElementById('fileMsg').textContent = '⏳ 正在设置文件路径...';
+            
+            setTimeout(() => {
+                document.getElementById('fileMsg').textContent = '✅ 文件路径已发送';
+                document.getElementById('fileMsg').className = 'hint success';
+            }, 1000);
+        }
+        
+        function listS19Files() {
+            sendCommand('uds_list', { dir: '/mnt/SDCARD' });
+            document.getElementById('fileMsg').textContent = '⏳ 正在列出文件...';
+        }
+        
+        function displayFileList(files) {
+            const fileListEl = document.getElementById('fileList');
+            
+            if (!files || files.length === 0) {
+                fileListEl.innerHTML = '<div class="hint">未找到.s19文件</div>';
+                return;
+            }
+            
+            fileListEl.innerHTML = '<div class="hint">找到 ' + files.length + ' 个文件（点击选择）：</div>';
+            files.forEach(file => {
+                const btn = document.createElement('button');
+                btn.textContent = file;
+                btn.className = 'secondary';
+                btn.style.margin = '4px';
+                btn.style.fontSize = '12px';
+                btn.onclick = () => {
+                    document.getElementById('s19Path').value = file;
+                    setFilePath();
+                };
+                fileListEl.appendChild(btn);
+            });
+        }
+        
+        function startDownload() {
+            sendCommand('uds_start');
+            document.getElementById('downloadMsg').textContent = '⏳ 正在启动下载...';
+            startProgressPolling();
+            
+            setTimeout(() => {
+                document.getElementById('downloadMsg').textContent = '✅ 下载命令已发送';
+            }, 1000);
+        }
+        
+        function stopDownload() {
+            sendCommand('uds_stop');
+            document.getElementById('downloadMsg').textContent = '⏳ 正在停止下载...';
+            stopProgressPolling();
+            
+            setTimeout(() => {
+                document.getElementById('downloadMsg').textContent = '✅ 停止命令已发送';
+            }, 1000);
+        }
+        
+        function startProgressPolling() {
+            stopProgressPolling();
+            progressTimer = setInterval(() => {
+                sendCommand('uds_progress');
+            }, 1000);
+        }
+        
+        function stopProgressPolling() {
+            if (progressTimer) {
+                clearInterval(progressTimer);
+                progressTimer = null;
+            }
+        }
+        
+        function updateProgress(percent) {
+            const fill = document.getElementById('progressFill');
+            fill.style.width = percent + '%';
+            fill.textContent = percent + '%';
+        }
+        
+        function getStatus() {
+            sendCommand('get_status');
+            sendCommand('get_bitrates');
+        }
+        
+        function clearLogs() {
+            document.getElementById('logs').innerHTML = '';
+            log('日志已清除', 'info');
+        }
+        
+        // 页面加载时的提示
+        window.onload = () => {
+            log('欢迎使用UDS固件下载工具（WebSocket直连版）', 'success');
+            log('请先连接到设备，然后配置CAN和S19文件', 'info');
+        };
+    </script>
+</body>
+</html>
+

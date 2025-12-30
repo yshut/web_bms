@@ -1,0 +1,814 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>远程控制API测试工具</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Microsoft YaHei', sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 20px;
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        .header {
+            background: white;
+            border-radius: 10px;
+            padding: 20px 30px;
+            margin-bottom: 20px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+
+        .header h1 {
+            color: #667eea;
+            font-size: 28px;
+            margin-bottom: 10px;
+        }
+
+        .status-bar {
+            display: flex;
+            gap: 20px;
+            align-items: center;
+        }
+
+        .status-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 15px;
+            background: #f5f5f5;
+            border-radius: 5px;
+        }
+
+        .status-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #ccc;
+        }
+
+        .status-dot.connected {
+            background: #10b981;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .main-grid {
+            display: grid;
+            grid-template-columns: 300px 1fr;
+            gap: 20px;
+        }
+
+        .sidebar {
+            background: white;
+            border-radius: 10px;
+            padding: 20px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            height: fit-content;
+        }
+
+        .nav-section {
+            margin-bottom: 25px;
+        }
+
+        .nav-section h3 {
+            color: #667eea;
+            font-size: 16px;
+            margin-bottom: 10px;
+            padding-bottom: 8px;
+            border-bottom: 2px solid #667eea;
+        }
+
+        .nav-item {
+            padding: 10px 15px;
+            margin: 5px 0;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: all 0.3s;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .nav-item:hover {
+            background: #f0f0f0;
+        }
+
+        .nav-item.active {
+            background: #667eea;
+            color: white;
+        }
+
+        .content {
+            background: white;
+            border-radius: 10px;
+            padding: 30px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+
+        .test-section {
+            display: none;
+        }
+
+        .test-section.active {
+            display: block;
+        }
+
+        .test-group {
+            margin-bottom: 30px;
+        }
+
+        .test-group h3 {
+            color: #333;
+            font-size: 20px;
+            margin-bottom: 15px;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #e0e0e0;
+        }
+
+        .test-item {
+            background: #f9f9f9;
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 15px;
+        }
+
+        .test-item h4 {
+            color: #667eea;
+            font-size: 16px;
+            margin-bottom: 10px;
+        }
+
+        .test-controls {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            margin-bottom: 10px;
+        }
+
+        .btn {
+            padding: 8px 20px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.3s;
+            font-weight: 500;
+        }
+
+        .btn-primary {
+            background: #667eea;
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: #5568d3;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(102, 126, 234, 0.3);
+        }
+
+        .btn-success {
+            background: #10b981;
+            color: white;
+        }
+
+        .btn-danger {
+            background: #ef4444;
+            color: white;
+        }
+
+        .btn-warning {
+            background: #f59e0b;
+            color: white;
+        }
+
+        input[type="text"],
+        input[type="number"],
+        textarea {
+            width: 100%;
+            padding: 8px 12px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            font-size: 14px;
+            font-family: inherit;
+        }
+
+        textarea {
+            resize: vertical;
+            min-height: 80px;
+        }
+
+        .input-group {
+            margin-bottom: 10px;
+        }
+
+        .input-group label {
+            display: block;
+            margin-bottom: 5px;
+            color: #666;
+            font-size: 14px;
+        }
+
+        .result {
+            background: #f0f0f0;
+            border-left: 4px solid #667eea;
+            padding: 15px;
+            margin-top: 10px;
+            border-radius: 5px;
+            font-family: 'Courier New', monospace;
+            font-size: 13px;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+
+        .result.success {
+            border-left-color: #10b981;
+            background: #ecfdf5;
+        }
+
+        .result.error {
+            border-left-color: #ef4444;
+            background: #fef2f2;
+        }
+
+        .result pre {
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+
+        .quick-actions {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 3px;
+            font-size: 12px;
+            font-weight: 500;
+        }
+
+        .badge-get {
+            background: #10b981;
+            color: white;
+        }
+
+        .badge-post {
+            background: #3b82f6;
+            color: white;
+        }
+
+        .loading {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 2px solid #f3f3f3;
+            border-top: 2px solid #667eea;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- 头部 -->
+        <div class="header">
+            <h1>🚀 远程控制API测试工具</h1>
+            <div class="status-bar">
+                <div class="status-item">
+                    <div class="status-dot" id="serverStatus"></div>
+                    <span id="serverText">服务器: 检查中...</span>
+                </div>
+                <div class="status-item">
+                    <div class="status-dot" id="deviceStatus"></div>
+                    <span id="deviceText">设备: 检查中...</span>
+                </div>
+                <button class="btn btn-primary" onclick="checkStatus()">刷新状态</button>
+                <button class="btn btn-success" onclick="runAllTests()">运行所有测试</button>
+            </div>
+        </div>
+
+        <!-- 主体网格 -->
+        <div class="main-grid">
+            <!-- 侧边栏导航 -->
+            <div class="sidebar">
+                <div class="nav-section">
+                    <h3>📡 系统测试</h3>
+                    <div class="nav-item active" onclick="showSection('system')">
+                        系统状态
+                    </div>
+                </div>
+
+                <div class="nav-section">
+                    <h3>🖥️ 页面控制</h3>
+                    <div class="nav-item" onclick="showSection('navigation')">
+                        页面导航
+                    </div>
+                </div>
+
+                <div class="nav-section">
+                    <h3>🚗 CAN总线</h3>
+                    <div class="nav-item" onclick="showSection('can')">
+                        CAN控制
+                    </div>
+                </div>
+
+                <div class="nav-section">
+                    <h3>🔧 UDS诊断</h3>
+                    <div class="nav-item" onclick="showSection('uds')">
+                        UDS刷写
+                    </div>
+                </div>
+
+                <div class="nav-section">
+                    <h3>📁 文件管理</h3>
+                    <div class="nav-item" onclick="showSection('file')">
+                        文件操作
+                    </div>
+                </div>
+
+                <div class="nav-section">
+                    <h3>📶 WiFi管理</h3>
+                    <div class="nav-item" onclick="showSection('wifi')">
+                        WiFi控制
+                    </div>
+                </div>
+            </div>
+
+            <!-- 主内容区 -->
+            <div class="content">
+                <!-- 系统状态测试 -->
+                <div id="section-system" class="test-section active">
+                    <div class="test-group">
+                        <h3>系统状态测试</h3>
+                        
+                        <div class="test-item">
+                            <h4><span class="badge badge-get">GET</span> Ping测试</h4>
+                            <div class="test-controls">
+                                <button class="btn btn-primary" onclick="testAPI('GET', '/api/ping', null, 'ping-result')">
+                                    执行测试
+                                </button>
+                            </div>
+                            <div id="ping-result"></div>
+                        </div>
+
+                        <div class="test-item">
+                            <h4><span class="badge badge-get">GET</span> 系统信息</h4>
+                            <div class="test-controls">
+                                <button class="btn btn-primary" onclick="testAPI('GET', '/api/system/info', null, 'sysinfo-result')">
+                                    获取系统信息
+                                </button>
+                            </div>
+                            <div id="sysinfo-result"></div>
+                        </div>
+
+                        <div class="test-item">
+                            <h4><span class="badge badge-get">GET</span> 系统日志</h4>
+                            <div class="test-controls">
+                                <button class="btn btn-primary" onclick="testAPI('GET', '/api/system/logs?limit=20', null, 'syslogs-result')">
+                                    获取日志
+                                </button>
+                            </div>
+                            <div id="syslogs-result"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 页面导航测试 -->
+                <div id="section-navigation" class="test-section">
+                    <div class="test-group">
+                        <h3>页面导航控制</h3>
+                        
+                        <div class="test-item">
+                            <h4><span class="badge badge-post">POST</span> 切换页面</h4>
+                            <div class="test-controls">
+                                <button class="btn btn-primary" onclick="testAPI('POST', '/api/show', {page:'home'}, 'nav-home-result')">
+                                    主页
+                                </button>
+                                <button class="btn btn-primary" onclick="testAPI('POST', '/api/show', {page:'can'}, 'nav-can-result')">
+                                    CAN监控
+                                </button>
+                                <button class="btn btn-primary" onclick="testAPI('POST', '/api/show', {page:'uds'}, 'nav-uds-result')">
+                                    UDS诊断
+                                </button>
+                                <button class="btn btn-primary" onclick="testAPI('POST', '/api/show', {page:'wifi'}, 'nav-wifi-result')">
+                                    WiFi
+                                </button>
+                            </div>
+                            <div id="nav-home-result"></div>
+                            <div id="nav-can-result"></div>
+                            <div id="nav-uds-result"></div>
+                            <div id="nav-wifi-result"></div>
+                        </div>
+
+                        <div class="test-item">
+                            <h4><span class="badge badge-get">GET</span> 获取当前页面</h4>
+                            <div class="test-controls">
+                                <button class="btn btn-primary" onclick="testAPI('GET', '/api/ui/get_current_page', null, 'current-page-result')">
+                                    查询当前页面
+                                </button>
+                            </div>
+                            <div id="current-page-result"></div>
+                        </div>
+
+                        <div class="test-item">
+                            <h4><span class="badge badge-get">GET</span> 获取UI状态</h4>
+                            <div class="test-controls">
+                                <button class="btn btn-primary" onclick="testAPI('GET', '/api/ui/get_state', null, 'ui-state-result')">
+                                    查询UI状态
+                                </button>
+                            </div>
+                            <div id="ui-state-result"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- CAN控制测试 -->
+                <div id="section-can" class="test-section">
+                    <div class="test-group">
+                        <h3>CAN总线控制</h3>
+                        
+                        <div class="test-item">
+                            <h4><span class="badge badge-post">POST</span> CAN基本控制</h4>
+                            <div class="test-controls">
+                                <button class="btn btn-success" onclick="testAPI('POST', '/api/can/start', null, 'can-start-result')">
+                                    启动
+                                </button>
+                                <button class="btn btn-danger" onclick="testAPI('POST', '/api/can/stop', null, 'can-stop-result')">
+                                    停止
+                                </button>
+                                <button class="btn btn-warning" onclick="testAPI('POST', '/api/can/clear', null, 'can-clear-result')">
+                                    清除
+                                </button>
+                            </div>
+                            <div id="can-start-result"></div>
+                            <div id="can-stop-result"></div>
+                            <div id="can-clear-result"></div>
+                        </div>
+
+                        <div class="test-item">
+                            <h4><span class="badge badge-post">POST</span> 设置波特率</h4>
+                            <div class="input-group">
+                                <label>CAN1波特率:</label>
+                                <input type="number" id="can1-bitrate" value="500000" placeholder="500000">
+                            </div>
+                            <div class="input-group">
+                                <label>CAN2波特率:</label>
+                                <input type="number" id="can2-bitrate" value="500000" placeholder="500000">
+                            </div>
+                            <div class="test-controls">
+                                <button class="btn btn-primary" onclick="setCANBitrates()">
+                                    设置波特率
+                                </button>
+                            </div>
+                            <div id="can-bitrate-result"></div>
+                        </div>
+
+                        <div class="test-item">
+                            <h4><span class="badge badge-post">POST</span> 发送CAN帧</h4>
+                            <div class="input-group">
+                                <label>CAN帧 (格式: ID#DATA, 例如: 123#0102030405060708):</label>
+                                <input type="text" id="can-frame" value="123#0102030405060708" placeholder="123#0102030405060708">
+                            </div>
+                            <div class="test-controls">
+                                <button class="btn btn-primary" onclick="sendCANFrame()">
+                                    发送
+                                </button>
+                            </div>
+                            <div id="can-send-result"></div>
+                        </div>
+
+                        <div class="test-item">
+                            <h4><span class="badge badge-get">GET</span> 获取CAN帧</h4>
+                            <div class="test-controls">
+                                <button class="btn btn-primary" onclick="testAPI('GET', '/api/can/frames?limit=20', null, 'can-frames-result')">
+                                    获取最近帧
+                                </button>
+                            </div>
+                            <div id="can-frames-result"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- UDS控制测试 -->
+                <div id="section-uds" class="test-section">
+                    <div class="test-group">
+                        <h3>UDS诊断控制</h3>
+                        
+                        <div class="test-item">
+                            <h4><span class="badge badge-get">GET</span> UDS状态查询</h4>
+                            <div class="test-controls">
+                                <button class="btn btn-primary" onclick="testAPI('GET', '/api/uds/progress', null, 'uds-progress-result')">
+                                    查询进度
+                                </button>
+                                <button class="btn btn-primary" onclick="testAPI('GET', '/api/uds/logs?limit=20', null, 'uds-logs-result')">
+                                    查询日志
+                                </button>
+                                <button class="btn btn-primary" onclick="testAPI('GET', '/api/uds/list', null, 'uds-list-result')">
+                                    列出文件
+                                </button>
+                            </div>
+                            <div id="uds-progress-result"></div>
+                            <div id="uds-logs-result"></div>
+                            <div id="uds-list-result"></div>
+                        </div>
+
+                        <div class="test-item">
+                            <h4><span class="badge badge-post">POST</span> UDS刷写控制</h4>
+                            <div class="input-group">
+                                <label>S19文件路径:</label>
+                                <input type="text" id="uds-file-path" value="/mnt/SDCARD/firmware.s19" placeholder="/mnt/SDCARD/firmware.s19">
+                            </div>
+                            <div class="test-controls">
+                                <button class="btn btn-primary" onclick="setUDSFile()">
+                                    设置文件
+                                </button>
+                                <button class="btn btn-success" onclick="testAPI('POST', '/api/uds/start', null, 'uds-start-result')">
+                                    开始刷写
+                                </button>
+                                <button class="btn btn-danger" onclick="testAPI('POST', '/api/uds/stop', null, 'uds-stop-result')">
+                                    停止刷写
+                                </button>
+                            </div>
+                            <div id="uds-file-result"></div>
+                            <div id="uds-start-result"></div>
+                            <div id="uds-stop-result"></div>
+                        </div>
+
+                        <div class="test-item">
+                            <h4><span class="badge badge-get">GET</span> 读取DTC</h4>
+                            <div class="test-controls">
+                                <button class="btn btn-primary" onclick="testAPI('GET', '/api/diagnostic/dtc', null, 'dtc-read-result')">
+                                    读取故障码
+                                </button>
+                                <button class="btn btn-warning" onclick="testAPI('POST', '/api/diagnostic/clear_dtc', null, 'dtc-clear-result')">
+                                    清除故障码
+                                </button>
+                            </div>
+                            <div id="dtc-read-result"></div>
+                            <div id="dtc-clear-result"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 文件管理测试 -->
+                <div id="section-file" class="test-section">
+                    <div class="test-group">
+                        <h3>文件管理</h3>
+                        
+                        <div class="test-item">
+                            <h4><span class="badge badge-get">GET</span> 文件浏览</h4>
+                            <div class="input-group">
+                                <label>目录路径:</label>
+                                <input type="text" id="file-list-path" value="/mnt/SDCARD" placeholder="/mnt/SDCARD">
+                            </div>
+                            <div class="test-controls">
+                                <button class="btn btn-primary" onclick="listFiles()">
+                                    列出文件
+                                </button>
+                                <button class="btn btn-primary" onclick="testAPI('GET', '/api/fs/base', null, 'fs-base-result')">
+                                    获取基础目录
+                                </button>
+                            </div>
+                            <div id="file-list-result"></div>
+                            <div id="fs-base-result"></div>
+                        </div>
+
+                        <div class="test-item">
+                            <h4><span class="badge badge-post">POST</span> 文件操作</h4>
+                            <div class="input-group">
+                                <label>目录名:</label>
+                                <input type="text" id="mkdir-name" value="test_folder" placeholder="test_folder">
+                            </div>
+                            <div class="test-controls">
+                                <button class="btn btn-primary" onclick="createDirectory()">
+                                    创建目录
+                                </button>
+                            </div>
+                            <div id="mkdir-result"></div>
+                        </div>
+
+                        <div class="test-item">
+                            <h4><span class="badge badge-get">GET</span> 上传进度</h4>
+                            <div class="test-controls">
+                                <button class="btn btn-primary" onclick="testAPI('GET', '/api/file/upload_progress', null, 'upload-progress-result')">
+                                    查询上传进度
+                                </button>
+                            </div>
+                            <div id="upload-progress-result"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- WiFi管理测试 -->
+                <div id="section-wifi" class="test-section">
+                    <div class="test-group">
+                        <h3>WiFi管理</h3>
+                        
+                        <div class="test-item">
+                            <h4><span class="badge badge-get">GET</span> WiFi状态</h4>
+                            <div class="test-controls">
+                                <button class="btn btn-primary" onclick="testAPI('GET', '/api/wifi/status', null, 'wifi-status-result')">
+                                    查询状态
+                                </button>
+                            </div>
+                            <div id="wifi-status-result"></div>
+                        </div>
+
+                        <div class="test-item">
+                            <h4><span class="badge badge-post">POST</span> WiFi控制</h4>
+                            <div class="test-controls">
+                                <button class="btn btn-primary" onclick="testAPI('POST', '/api/wifi/scan', null, 'wifi-scan-result')">
+                                    扫描WiFi
+                                </button>
+                                <button class="btn btn-danger" onclick="testAPI('POST', '/api/wifi/disconnect', null, 'wifi-disconnect-result')">
+                                    断开连接
+                                </button>
+                            </div>
+                            <div id="wifi-scan-result"></div>
+                            <div id="wifi-disconnect-result"></div>
+                        </div>
+
+                        <div class="test-item">
+                            <h4><span class="badge badge-post">POST</span> 连接WiFi</h4>
+                            <div class="input-group">
+                                <label>SSID:</label>
+                                <input type="text" id="wifi-ssid" placeholder="WiFi名称">
+                            </div>
+                            <div class="input-group">
+                                <label>密码:</label>
+                                <input type="text" id="wifi-password" placeholder="WiFi密码">
+                            </div>
+                            <div class="test-controls">
+                                <button class="btn btn-primary" onclick="connectWiFi()">
+                                    连接
+                                </button>
+                            </div>
+                            <div id="wifi-connect-result"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // API基础地址
+        const API_BASE = window.location.origin;
+
+        // 显示指定区域
+        function showSection(sectionName) {
+            // 隐藏所有区域
+            document.querySelectorAll('.test-section').forEach(section => {
+                section.classList.remove('active');
+            });
+            
+            // 移除所有导航项的active类
+            document.querySelectorAll('.nav-item').forEach(item => {
+                item.classList.remove('active');
+            });
+            
+            // 显示指定区域
+            document.getElementById('section-' + sectionName).classList.add('active');
+            
+            // 激活对应导航项
+            event.target.classList.add('active');
+        }
+
+        // 测试API
+        async function testAPI(method, endpoint, data, resultId) {
+            const resultElement = document.getElementById(resultId);
+            resultElement.innerHTML = '<div class="loading"></div> 请求中...';
+            
+            try {
+                const options = {
+                    method: method,
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                };
+                
+                if (data) {
+                    options.body = JSON.stringify(data);
+                }
+                
+                const response = await fetch(API_BASE + endpoint, options);
+                const result = await response.json();
+                
+                const isSuccess = result.ok !== false;
+                resultElement.className = 'result ' + (isSuccess ? 'success' : 'error');
+                resultElement.innerHTML = '<pre>' + JSON.stringify(result, null, 2) + '</pre>';
+            } catch (error) {
+                resultElement.className = 'result error';
+                resultElement.innerHTML = '<pre>错误: ' + error.message + '</pre>';
+            }
+        }
+
+        // 检查状态
+        async function checkStatus() {
+            try {
+                const response = await fetch(API_BASE + '/api/status');
+                const result = await response.json();
+                
+                // 更新服务器状态
+                const serverStatus = document.getElementById('serverStatus');
+                const serverText = document.getElementById('serverText');
+                serverStatus.classList.add('connected');
+                serverText.textContent = '服务器: 运行中';
+                
+                // 更新设备状态
+                const deviceStatus = document.getElementById('deviceStatus');
+                const deviceText = document.getElementById('deviceText');
+                if (result.hub && result.hub.connected) {
+                    deviceStatus.classList.add('connected');
+                    deviceText.textContent = '设备: 已连接 (' + (result.hub.devices ? result.hub.devices.length : 0) + ')';
+                } else {
+                    deviceStatus.classList.remove('connected');
+                    deviceText.textContent = '设备: 未连接';
+                }
+            } catch (error) {
+                document.getElementById('serverStatus').classList.remove('connected');
+                document.getElementById('serverText').textContent = '服务器: 离线';
+                document.getElementById('deviceStatus').classList.remove('connected');
+                document.getElementById('deviceText').textContent = '设备: 未知';
+            }
+        }
+
+        // CAN相关函数
+        function setCANBitrates() {
+            const can1 = parseInt(document.getElementById('can1-bitrate').value);
+            const can2 = parseInt(document.getElementById('can2-bitrate').value);
+            testAPI('POST', '/api/can/set_bitrates', {can1, can2}, 'can-bitrate-result');
+        }
+
+        function sendCANFrame() {
+            const frame = document.getElementById('can-frame').value;
+            testAPI('POST', '/api/can/send', {text: frame}, 'can-send-result');
+        }
+
+        // UDS相关函数
+        function setUDSFile() {
+            const path = document.getElementById('uds-file-path').value;
+            testAPI('POST', '/api/uds/set_file', {path}, 'uds-file-result');
+        }
+
+        // 文件相关函数
+        function listFiles() {
+            const path = document.getElementById('file-list-path').value;
+            testAPI('GET', '/api/fs/list?path=' + encodeURIComponent(path), null, 'file-list-result');
+        }
+
+        function createDirectory() {
+            const name = document.getElementById('mkdir-name').value;
+            const base = document.getElementById('file-list-path').value;
+            testAPI('POST', '/api/fs/mkdir', {path: base + '/' + name}, 'mkdir-result');
+        }
+
+        // WiFi相关函数
+        function connectWiFi() {
+            const ssid = document.getElementById('wifi-ssid').value;
+            const password = document.getElementById('wifi-password').value;
+            testAPI('POST', '/api/wifi/connect', {ssid, password}, 'wifi-connect-result');
+        }
+
+        // 运行所有测试
+        async function runAllTests() {
+            if (!confirm('这将执行所有测试，可能会影响设备状态。是否继续？')) {
+                return;
+            }
+            
+            alert('批量测试功能开发中...');
+        }
+
+        // 页面加载时检查状态
+        window.addEventListener('load', () => {
+            checkStatus();
+            setInterval(checkStatus, 5000); // 每5秒刷新状态
+        });
+    </script>
+</body>
+</html>
+

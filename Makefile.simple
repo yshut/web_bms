@@ -1,0 +1,49 @@
+# 简单的 Makefile，用于本地编译测试
+
+CC ?= gcc
+CFLAGS = -Wall -Wextra -O2 -g -pthread
+LDFLAGS = -lpthread -lm
+
+# 包含路径
+INCLUDES = -I./src \
+           -I$(LVGL_DIR) \
+           -I$(LV_DRIVERS_DIR)
+
+# 源文件
+SOURCES = $(wildcard src/*.c) \
+          $(wildcard src/*/*.c) \
+          $(wildcard src/*/*/*.c)
+
+# LVGL 源文件 (需要根据实际路径调整)
+LVGL_SOURCES = $(wildcard $(LVGL_DIR)/src/*.c) \
+               $(wildcard $(LVGL_DIR)/src/*/*.c) \
+               $(wildcard $(LVGL_DIR)/src/*/*/*.c)
+
+# LV_DRIVERS 源文件
+LV_DRIVERS_SOURCES = $(LV_DRIVERS_DIR)/display/fbdev.c \
+                     $(LV_DRIVERS_DIR)/indev/evdev.c
+
+# 目标文件
+OBJECTS = $(SOURCES:.c=.o) \
+          $(LVGL_SOURCES:.c=.o) \
+          $(LV_DRIVERS_SOURCES:.c=.o)
+
+# 可执行文件
+TARGET = app_lvgl
+
+.PHONY: all clean
+
+all: $(TARGET)
+
+$(TARGET): $(OBJECTS)
+	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
+
+%.o: %.c
+	$(CC) $(CFLAGS) $(INCLUDES) -c $< -o $@
+
+clean:
+	rm -f $(OBJECTS) $(TARGET)
+
+install:
+	install -D -m 0755 $(TARGET) $(DESTDIR)/usr/bin/$(TARGET)
+

@@ -1,0 +1,417 @@
+VERSION ""
+
+
+NS_ : 
+	NS_DESC_
+	CM_
+	BA_DEF_
+	BA_
+	VAL_
+	CAT_DEF_
+	CAT_
+	FILTER
+	BA_DEF_DEF_
+	EV_DATA_
+	ENVVAR_DATA_
+	SGTYPE_
+	SGTYPE_VAL_
+	BA_DEF_SGTYPE_
+	BA_SGTYPE_
+	SIG_TYPE_REF_
+	VAL_TABLE_
+	SIG_GROUP_
+	SIG_VALTYPE_
+	SIGTYPE_VALTYPE_
+	BO_TX_BU_
+	BA_DEF_REL_
+	BA_REL_
+	BA_DEF_DEF_REL_
+	BU_SG_REL_
+	BU_EV_REL_
+	BU_BO_REL_
+	SG_MUL_VAL_
+
+BS_:
+
+BU_:
+VAL_TABLE_ B2V_ST2_HighVoltOff 1 "Request" 0 "NoRequest" ;
+VAL_TABLE_ B2V_ST2_FultLecel 3 "Err_Level3" 2 "Err_Level2" 1 "Err_Level1" 0 "Normal" ;
+VAL_TABLE_ B2V_ST1_ChrgStatus 3 "Charge_completed" 2 "Charge_end" 1 "Charging" 0 "Reversed" ;
+VAL_TABLE_ B2V_ST1_TMSErrLevel 3 "Err_Level3" 2 "Err_Level2" 1 "Err_Level1" 0 "Invalid" ;
+VAL_TABLE_ B2V_ST1_TMSErr 17 "Reverse" 16 "Err_Level2_DC24V异常" 15 "Err_Level3_水箱缺水" 14 "Err_Level1_整车CAN通讯异常" 13 "Err_Level3_PTC或加热器故障" 12 "Err_Level2_水泵故障" 11 "Err_Level3_防冻结温度传感器异常" 10 "Err_Level3_进水温度传感器异常" 9 "Err_Level2_出水温度传感器异常" 8 "Err_Level3_蒸发器防冻结保护" 7 "Err_Level3_系统压力保护" 6 "Err_Level3_压缩机异常" 5 "Err_Level3_压缩机失速" 4 "Err_Level3_压缩机CAN通讯异常" 3 "Err_Level3_压缩机自身工作过流" 2 "Err_Level3_直流母线过压" 1 "Err_Level3_直流母线欠压" 0 "Normal" ;
+VAL_TABLE_ B2V_ST1_TMSInletWaterTemp 255 "Invalid" ;
+VAL_TABLE_ B2V_ST1_TMSWorkST 3 "Auto-Circulation_Mode" 2 "Heating_Mode" 1 "Cooling_Mode" 0 "PowerOff_Mode" ;
+VAL_TABLE_ B2V_ST1_TMS_ACC 1 "Valid_HighVoltOutput" 0 "Invalid_LowVoltOutput" ;
+VAL_TABLE_ B2V_ST1_CoolingWaterLevel 1 "LackWater" 0 "Normal" ;
+VAL_TABLE_ B2V_ST1_TMSRlyST 2 "Invalid" 1 "Close" 0 "Open" ;
+VAL_TABLE_ B2V_ST1_ChrgConnectST 3 "reserve" 2 "AC_connect_completed" 1 "DC_connect_completed" 0 "Disconnet" ;
+VAL_TABLE_ B2V_ST1_Dis_ChrgST 2 "Invalid" 1 "Charging" 0 "Discharging" ;
+VAL_TABLE_ B2V_ST1_MSDST 2 "Invalid" 1 "Close" 0 "Open" ;
+VAL_TABLE_ B2V_ST1_ChrgRlyST 2 "Invalid" 1 "Close" 0 "Open" ;
+VAL_TABLE_ B2V_ST1_DCDCRlyST 2 "Invalid" 1 "Close" 0 "Open" ;
+VAL_TABLE_ B2V_ST1_FanPrechrgRlyST 2 "Invalid" 1 "Close" 0 "Open" ;
+VAL_TABLE_ B2V_ST1_FanRlyST 2 "Invalid" 1 "Close" 0 "Open" ;
+VAL_TABLE_ B2V_ST1_TravelPrechrgRlyST 2 "Invalid" 1 "Close" 0 "Open" ;
+VAL_TABLE_ B2V_ST1_TravelRlyST 2 "Invalid" 1 "Close" 0 "Open" ;
+VAL_TABLE_ B2V_ST1_ExRangePrechrgRlyST 2 "Invalid" 1 "Close" 0 "Open" ;
+VAL_TABLE_ B2V_ST1_ExRangeRlyST 2 "Invalid" 1 "Close" 0 "Open" ;
+VAL_TABLE_ B2V_ST1_MainPNegRlyST 2 "Invalid" 1 "Close" 0 "Open" ;
+VAL_TABLE_ B2V_Fult2_SOCDiffErr 1 "Fult" 0 "Normal" ;
+VAL_TABLE_ B2V_Fult2_ContiChrgCurrOverLoad 1 "Fult" 0 "Normal" ;
+VAL_TABLE_ B2V_Fult2_ChrgNTCTempOver 3 "Level3-Most severe Fult" 2 "Level 2-More severe Fult" 1 "Level 1-Light Fult" 0 "Normal" ;
+VAL_TABLE_ B2V_Fult2_ChrgNTCErr 1 "Fult" 0 "Normal" ;
+VAL_TABLE_ B2V_Fult2_OverChrgCurrInTheChrg 1 "Fult" 0 "Normal" ;
+VAL_TABLE_ B2V_Fult2_OverDischrgCurrChrging 1 "Fult" 0 "Normal" ;
+VAL_TABLE_ B2V_Fult2_ChrgConnectErr 1 "Fult" 0 "Normal" ;
+VAL_TABLE_ B2V_Fult2_ChrgRlyWeldErr 1 "Fult" 0 "Normal" ;
+VAL_TABLE_ B2V_Fult2_FanRlyWeldErr 1 "Fult" 0 "Normal" ;
+VAL_TABLE_ B2V_Fult2_TravelRlyWeldErr 1 "Fult" 0 "Normal" ;
+VAL_TABLE_ B2V_Fult2_ExRangeRlyWeldErr 1 "Fult" 0 "Normal" ;
+VAL_TABLE_ B2V_Fult2_MainNegRlyWeldErr 1 "Fult" 0 "Normal" ;
+VAL_TABLE_ B2V_Fult2_DCDCRlyWeldErr 1 "Fult" 0 "Normal" ;
+VAL_TABLE_ B2V_Fult2_HeatRlyOpenErr 1 "Fult" 0 "Normal" ;
+VAL_TABLE_ B2V_Fult2_InnerCommunicationErr 1 "Fult" 0 "Normal" ;
+VAL_TABLE_ B2V_Fult2_CANLost 1 "Fult" 0 "Normal" ;
+VAL_TABLE_ B2V_Fult2_ChrgInsLowErr 1 "Fult" 0 "Normal" ;
+VAL_TABLE_ B2V_Fult2_PackSelfProtect 1 "Fult" 0 "Normal" ;
+VAL_TABLE_ B2V_Fult2_HeatungFilmErr 1 "Fult" 0 "Normal" ;
+VAL_TABLE_ B2V_Fult2_TMSErr 1 "Fult" 0 "Normal" ;
+VAL_TABLE_ B2V_Fult2_PowerSupplyErr 1 "Fult" 0 "Normal" ;
+VAL_TABLE_ B2V_Fult2_CurrSensorErr 1 "Fult" 0 "Normal" ;
+VAL_TABLE_ B2V_Fult2_OverChrgCurrInTheDrive 3 "Level3-Most severe Fult" 2 "Level 2-More severe Fult" 1 "Level 1-Light Fult" 0 "Normal" ;
+VAL_TABLE_ B2V_Fult2_OverDischrgCurr 3 "Level3-Most severe Fult" 2 "Level 2-More severe Fult" 1 "Level 1-Light Fult" 0 "Normal" ;
+VAL_TABLE_ B2V_Fult2_PackFireWarning 1 "Description for the value '0x1'" 0 "Normal" ;
+VAL_TABLE_ B2V_Fult2_TempSensorErr 1 "Fult" 0 "Normal" ;
+VAL_TABLE_ B2V_Fult2_CellOverDischrg 1 "Fult" 0 "Normal" ;
+VAL_TABLE_ B2V_Fult1_HVILFult 1 "Fult" 0 "Normal" ;
+VAL_TABLE_ B2V_Fult1_SOCChangeFast 1 "Fult" 0 "Normal" ;
+VAL_TABLE_ B2V_Fult1_OverSOC 3 "Level3-Most severe Fult" 2 "Level 2-More severe Fult" 1 " Level 1-Light Fult" 0 "Normal" ;
+VAL_TABLE_ B2V_Fult1_UCellUniformity 3 "Level3-Most severe Fult" 2 "Level 2-More severe Fult" 1 "Level 1-Light Fult" 0 "Normal" ;
+VAL_TABLE_ B2V_Fult1_LowInsRes 3 "Level3-Most severe Fult" 2 "Level 2-More severe Fult" 1 "Level 1-Light Fult" 0 " Normal" ;
+VAL_TABLE_ B2V_Fult1_LowUCell 3 "Level3-Most severe Fult" 2 "Level 2-More severe Fult" 1 "Level 1-Light Fult" 0 "Normal" ;
+VAL_TABLE_ B2V_Fult1_OverUCell 3 "Level3-Most severe Fult" 2 "Level 2-More severe Fult" 1 "Level 1-Light Fult" 0 "Normal" ;
+VAL_TABLE_ B2V_Fult1_LowSOC 3 "Level3-Most severe Fult" 2 "Level 2-More severe Fult" 1 "Level 1-Light Fult" 0 "Normal" ;
+VAL_TABLE_ B2V_Fult1_PackLowVolt 3 "Level3-Most severe Fult" 2 "Level 2-More severe Fult" 1 "Level 1-Light Fult" 0 "Normal" ;
+VAL_TABLE_ B2V_Fult1_PackOverVolt 3 "Level3-Most severe Fult" 2 "Level 2-More severe Fult" 1 "Level 1-Light Fult" 0 "Normal" ;
+VAL_TABLE_ B2V_Fult1_OverTemp 3 "Level3-Most severe Fult" 2 "Level 2-More severe Fult" 1 "Level 1-Light Fult" 0 "Normal" ;
+VAL_TABLE_ B2V_Fult1_DelTemp 3 "Level3-Most severe Fult" 2 "Level 2-More severe Fult" 1 "Level 1-Light Fult" 0 "Normal" ;
+VAL_TABLE_ B2V_Fult1_LowTemp 3 "Description for the value '0x3'" 2 "Level 2-More severe Fult" 1 "Level 1-Light Fult" 0 "Normal" ;
+VAL_TABLE_ B2V_PowerLimit_SelfCheck 1 "Completed" 0 "Incomplete" ;
+VAL_TABLE_ V2B_HighVoltCtrl_Off 1 "AllHighVoltOff" 0 "Invalid" ;
+VAL_TABLE_ V2B_HighVoltCtrl_DCDCRlyST 2 "DCDCRlyOpen" 1 "DCDCRlyClose" 0 "Invalid" ;
+VAL_TABLE_ V2B_HighVoltCtrl_FanRlyST 2 "FanRlyOpen" 1 "FanRlyClose" 0 "Invalid" ;
+VAL_TABLE_ V2B_HighVoltCtrl_TravelRlyST 2 "TravelRlyOpen" 1 "TravelRlyClose" 0 "Invalid" ;
+VAL_TABLE_ V2B_HighVoltCtrl_ExRangeRlyST 2 "ExRangeRlyOpen" 1 "ExRangeRlyClose" 0 "Invalid" ;
+VAL_TABLE_ V2B_HighVoltCtrl_MainNegRlyST 2 "MainNegRlyOpen" 1 "MainNegRlyClose" 0 "Invalid" ;
+
+
+BO_ 3221225472 VECTOR__INDEPENDENT_SIG_MSG: 0 Vector__XXX
+ SG_ V2B_HighVoltCtrl_Reserve : 0|16@1+ (1,0) [0|0] "" Vector__XXX
+
+BO_ 2558980083 B2V_Cell_Temp: 8 Vector__XXX
+ SG_ B2V_Cell_Temp_Avg : 31|12@0- (0.1,-40) [-40|369.5] "℃" Vector__XXX
+ SG_ B2V_Cell_Temp_Min : 11|12@0- (0.1,-40) [-40|369.5] "℃" Vector__XXX
+ SG_ B2V_Cell_Temp_Max : 7|12@0- (0.1,-40) [-40|369.5] "℃" Vector__XXX
+
+BO_ 2559045619 B2V_Cell_Volt: 8 Vector__XXX
+ SG_ B2V_RemainChrgTime : 48|16@1+ (1,0) [0|0] "min" Vector__XXX
+ SG_ B2V_Cell_Volt_Avg : 32|16@1+ (0.001,0) [0|65.535] "V" Vector__XXX
+ SG_ B2V_Cell_Volt_Min : 16|16@1+ (0.001,0) [0|0] "V" Vector__XXX
+ SG_ B2V_Cell_Volt_Max : 0|16@1+ (0.001,0) [0|0] "V" Vector__XXX
+
+BO_ 2558914547 B2V_ISO_Info: 6 Vector__XXX
+ SG_ ISO_NegResis : 32|16@1+ (1,0) [0|0] "KΩ" Vector__XXX
+ SG_ ISO_NegResis : 16|16@1+ (1,0) [0|0] "KΩ" Vector__XXX
+ SG_ ISO_PosResis : 0|16@1+ (1,0) [0|0] "KΩ" Vector__XXX
+
+BO_ 2558849011 B2V_ST2: 8 Vector__XXX
+ SG_ B2V_ST2_Life : 60|4@1+ (1,0) [0|0] "" Vector__XXX
+ SG_ B2V_ST2_HighVoltOff : 58|2@1+ (1,0) [0|0] "" Vector__XXX
+ SG_ B2V_ST2_FultLecel : 56|2@1+ (1,0) [0|0] "" Vector__XXX
+ SG_ B2V_ST2_FultCode : 48|8@1+ (1,0) [0|0] "" Vector__XXX
+ SG_ B2V_ST2_InsideVolt : 32|16@1+ (0.1,0) [0|1000] "V" Vector__XXX
+ SG_ B2V_ST2_Dis_ChrgCurr : 16|16@1- (0.1,-1000) [-1000|1000] "A" Vector__XXX
+ SG_ B2V_ST2_SOC : 8|8@1+ (1,0) [0|100] "%" Vector__XXX
+ SG_ B2V_ST2_SOH : 0|8@1+ (1,0) [0|100] "%" Vector__XXX
+
+BO_ 2558783475 B2V_ST1: 8 Vector__XXX
+ SG_ B2V_ST1_ChrgStatus : 56|8@1+ (1,0) [0|0] "" Vector__XXX
+ SG_ B2V_ST1_TMSErrLevel : 54|2@1+ (1,0) [0|0] "" Vector__XXX
+ SG_ B2V_ST1_TMSErr : 48|6@1+ (1,0) [0|0] "" Vector__XXX
+ SG_ B2V_ST1_TMSInletWaterTemp : 40|8@1- (1,-40) [-40|210] "℃" Vector__XXX
+ SG_ B2V_ST1_TMSOutletWaterTemp : 32|8@1- (1,-40) [-40|210] "℃" Vector__XXX
+ SG_ B2V_ST1_TMSWorkST : 30|2@1+ (1,0) [0|0] "" Vector__XXX
+ SG_ B2V_ST1_TMS_ACC : 28|2@1+ (1,0) [0|0] "" Vector__XXX
+ SG_ B2V_ST1_CoolingWaterLevel : 26|2@1+ (1,0) [0|100] "" Vector__XXX
+ SG_ B2V_ST1_TMSRlyST : 24|2@1+ (1,0) [0|0] "" Vector__XXX
+ SG_ B2V_ST1_ChrgConnectST : 22|2@1+ (1,0) [0|0] "" Vector__XXX
+ SG_ B2V_ST1_Dis_ChrgST : 20|2@1+ (1,0) [0|0] "" Vector__XXX
+ SG_ B2V_ST1_MSDST : 18|2@1+ (1,0) [0|0] "" Vector__XXX
+ SG_ B2V_ST1_ChrgRlyST : 16|2@1+ (1,0) [0|0] "" Vector__XXX
+ SG_ B2V_ST1_DCDCRlyST : 14|2@1+ (1,0) [0|0] "" Vector__XXX
+ SG_ B2V_ST1_FanPrechrgRlyST : 12|2@1+ (1,0) [0|0] "" Vector__XXX
+ SG_ B2V_ST1_FanRlyST : 10|2@1+ (1,0) [0|0] "" Vector__XXX
+ SG_ B2V_ST1_TravelPrechrgRlyST : 8|2@1+ (1,0) [0|0] "" Vector__XXX
+ SG_ B2V_ST1_TravelRlyST : 6|2@1+ (1,0) [0|0] "" Vector__XXX
+ SG_ B2V_ST1_ExRangePrechrgRlyST : 4|2@1+ (1,0) [0|0] "" Vector__XXX
+ SG_ B2V_ST1_ExRangeRlyST : 2|2@1+ (1,0) [0|0] "" Vector__XXX
+ SG_ B2V_ST1_MainPNegRlyST : 0|2@1+ (1,0) [0|0] "" Vector__XXX
+
+BO_ 2558717939 B2V_Fult2: 7 Vector__XXX
+ SG_ B2V_Fult2_TravelRlyWeldErr : 29|1@1+ (1,0) [0|0] "" Vector__XXX
+ SG_ B2V_Fult2_TMSErr : 17|1@1+ (1,0) [0|0] "" Vector__XXX
+ SG_ B2V_Fult2_TempSensorErr : 9|1@1+ (1,0) [0|0] "" Vector__XXX
+ SG_ B2V_Fult2_SOCDiffErr : 54|1@1+ (1,0) [0|0] "" Vector__XXX
+ SG_ B2V_Fult2_PowerSupplyErr : 16|1@1+ (1,0) [0|0] "" Vector__XXX
+ SG_ B2V_Fult2_PackSelfProtect : 19|1@1+ (1,0) [0|0] "" Vector__XXX
+ SG_ B2V_Fult2_PackFireWarning : 10|1@1+ (1,0) [0|0] "" Vector__XXX
+ SG_ B2V_Fult2_OverDischrgCurrChrging : 49|1@1+ (1,0) [0|0] "" Vector__XXX
+ SG_ B2V_Fult2_OverDischrgCurr : 11|2@1+ (1,0) [0|0] "" Vector__XXX
+ SG_ B2V_Fult2_OverChrgCurrInTheDrive : 13|2@1+ (1,0) [0|0] "" Vector__XXX
+ SG_ B2V_Fult2_OverChrgCurrInTheChrg : 50|1@1+ (1,0) [0|0] "" Vector__XXX
+ SG_ B2V_Fult2_MainNegRlyWeldErr : 27|1@1+ (1,0) [0|0] "" Vector__XXX
+ SG_ B2V_Fult2_InnerCommunicationErr : 24|1@1+ (1,0) [0|0] "" Vector__XXX
+ SG_ B2V_Fult2_HeatungFilmErr : 18|1@1+ (1,0) [0|0] "" Vector__XXX
+ SG_ B2V_Fult2_HeatRlyOpenErr : 25|1@1+ (1,0) [0|0] "" Vector__XXX
+ SG_ B2V_Fult2_FultNum : 0|8@1+ (1,0) [0|0] "" Vector__XXX
+ SG_ B2V_Fult2_FanRlyWeldErr : 30|1@1+ (1,0) [0|0] "" Vector__XXX
+ SG_ B2V_Fult2_ExRangeRlyWeldErr : 28|1@1+ (1,0) [0|0] "" Vector__XXX
+ SG_ B2V_Fult2_DCDCRlyWeldErr : 26|1@1+ (1,0) [0|0] "" Vector__XXX
+ SG_ B2V_Fult2_CurrSensorErr : 15|1@1+ (1,0) [0|0] "" Vector__XXX
+ SG_ B2V_Fult2_ContiChrgCurrOverLoad : 53|1@1+ (1,0) [0|0] "" Vector__XXX
+ SG_ B2V_Fult2_ChrgRlyWeldErr : 31|1@1+ (1,0) [0|0] "" Vector__XXX
+ SG_ B2V_Fult2_ChrgNTCTempOver : 52|1@1+ (1,0) [0|0] "" Vector__XXX
+ SG_ B2V_Fult2_ChrgNTCErr : 51|1@1+ (1,0) [0|0] "" Vector__XXX
+ SG_ B2V_Fult2_ChrgInsLowErr : 22|1@1+ (1,0) [0|0] "" Vector__XXX
+ SG_ B2V_Fult2_ChrgConnectErr : 48|1@1+ (1,0) [0|0] "" Vector__XXX
+ SG_ B2V_Fult2_CellOverDischrg : 8|1@1+ (1,0) [0|0] "" Vector__XXX
+ SG_ B2V_Fult2_CANLost : 23|1@1+ (1,0) [0|0] "" Vector__XXX
+
+BO_ 2558652403 B2V_Fult1: 3 Vector__XXX
+ SG_ B2V_Fult1_UCellUniformity : 18|2@1+ (1,0) [0|0] "" Vector__XXX
+ SG_ B2V_Fult1_SOCChangeFast : 22|1@1+ (1,0) [0|0] "" Vector__XXX
+ SG_ B2V_Fult1_PackOverVolt : 6|2@1+ (1,0) [0|0] "" Vector__XXX
+ SG_ B2V_Fult1_PackLowVolt : 8|2@1+ (1,0) [0|0] "" Vector__XXX
+ SG_ B2V_Fult1_OverUCell : 12|2@1+ (1,0) [0|0] "" Vector__XXX
+ SG_ B2V_Fult1_OverTemp : 4|2@1+ (1,0) [0|0] "" Vector__XXX
+ SG_ B2V_Fult1_OverSOC : 20|2@1+ (1,0) [0|0] "" Vector__XXX
+ SG_ B2V_Fult1_LowUCell : 14|2@1+ (1,0) [0|0] "" Vector__XXX
+ SG_ B2V_Fult1_LowTemp : 0|2@1+ (1,0) [0|0] "" Vector__XXX
+ SG_ B2V_Fult1_LowSOC : 10|2@1+ (1,0) [0|0] "" Vector__XXX
+ SG_ B2V_Fult1_LowInsRes : 16|2@1+ (1,0) [0|0] "" Vector__XXX
+ SG_ B2V_Fult1_HVILFult : 23|1@1+ (1,0) [0|0] "" Vector__XXX
+ SG_ B2V_Fult1_DelTemp : 2|2@1+ (1,0) [0|0] "" Vector__XXX
+
+BO_ 2563043315 B2V_CurrentLimit: 8 Vector__XXX
+ SG_ B2V_PulseDisChrgCurr : 0|16@1+ (0.1,0) [0|0] "A" Vector__XXX
+ SG_ B2V_PulseChrgCurr : 16|16@1+ (0.1,0) [0|0] "A" Vector__XXX
+ SG_ B2V_FollowDisChrgCurr : 32|16@1+ (0.1,0) [0|0] "A" Vector__XXX
+ SG_ B2V_FollowChrgCurr : 48|16@1+ (0.1,0) [0|0] "A" Vector__XXX
+
+BO_ 2562977779 B2V_PowerLimit: 8 Vector__XXX
+ SG_ B2V_PowerLimit_SelfCheck : 0|1@1+ (1,0) [0|0] "" Vector__XXX
+ SG_ B2V_PowerLimit_RealSOC : 56|8@1+ (1,0) [0|255] "" Vector__XXX
+ SG_ B2V_PowerLimit_DisChrg : 24|16@1+ (0.1,0) [0|0] "KW" Vector__XXX
+ SG_ B2V_PowerLimit_Chrg : 8|16@1+ (0.1,0) [0|0] "KW" Vector__XXX
+ SG_ B2V_PowerLimit_BMS_SubVer : 40|8@1+ (1,0) [0|0] "" Vector__XXX
+ SG_ B2V_PowerLimit_BMS_SubSubVer : 48|8@1+ (1,0) [0|0] "" Vector__XXX
+
+BO_ 2550330351 V2B_HighVoltCtrl: 8 Vector__XXX
+ SG_ V2B_HighVoltCtrl_rearDriverRlyST : 32|8@1+ (1,0) [0|0] "" Vector__XXX
+ SG_ V2B_HighVoltCtrl_collectRlyST : 16|8@1+ (1,0) [0|0] "" Vector__XXX
+ SG_ V2B_HighVoltCtrl_TravelRlyST : 24|8@1+ (1,0) [0|0] "" Vector__XXX
+ SG_ V2B_HighVoltCtrl_Off : 56|8@1+ (1,0) [0|0] "" Vector__XXX
+ SG_ V2B_HighVoltCtrl_MainNegRlyST : 0|8@1+ (1,0) [0|0] "" Vector__XXX
+ SG_ V2B_HighVoltCtrl_FanRlyST : 40|8@1+ (1,0) [0|0] "" Vector__XXX
+ SG_ V2B_HighVoltCtrl_ExRangeRlyST : 8|8@1+ (1,0) [0|0] "" Vector__XXX
+ SG_ V2B_HighVoltCtrl_DCDCRlyST : 48|8@1+ (1,0) [0|0] "" Vector__XXX
+
+BO_ 2566897978 TMS1_BMS: 8 Vector__XXX
+ SG_ w2_TMSWorkSts : 0|2@1+ (1,0) [0|4] "" Vector__XXX
+ SG_ w2_TMSHvRlySts : 2|2@1+ (1,0) [0|4] "" Vector__XXX
+ SG_ w2_TMSOuputWaterT : 8|8@1+ (1,-40) [-40|210] "" Vector__XXX
+ SG_ w2_TMSInputWaterT : 16|8@1+ (1,-40) [-40|210] "" Vector__XXX
+ SG_ w2_TMSQeqPwr : 40|16@1- (0.1,0) [0|100] "kwh" Vector__XXX
+ SG_ w2_TMSFltRnk : 62|2@1+ (1,0) [0|3] "" Vector__XXX
+ SG_ w2_TMSErrCode : 56|6@1+ (1,0) [0|63] "" Vector__XXX
+
+
+
+CM_ BO_ 3221225472 "This is a message for not used signals, created by Vector CANdb++ DBC OLE DB Provider.";
+CM_ SG_ 3221225472 V2B_HighVoltCtrl_Reserve "预留";
+CM_ SG_ 2558980083 B2V_Cell_Temp_Avg "单体电芯平均温度";
+CM_ SG_ 2558980083 B2V_Cell_Temp_Min "单体电芯最低温度";
+CM_ SG_ 2558980083 B2V_Cell_Temp_Max "单体电芯最高温度";
+CM_ SG_ 2559045619 B2V_RemainChrgTime "剩余充电时间";
+CM_ SG_ 2559045619 B2V_Cell_Volt_Avg "单体电芯平均电压";
+CM_ SG_ 2559045619 B2V_Cell_Volt_Min "单体电芯最低电压";
+CM_ SG_ 2559045619 B2V_Cell_Volt_Max "单体电芯最高电压";
+CM_ SG_ 2558914547 ISO_NegResis "系统绝缘值负极对地绝缘电阻";
+CM_ SG_ 2558914547 ISO_PosResis "正极对地绝缘电阻";
+CM_ SG_ 2558849011 B2V_ST2_Life "生命信号";
+CM_ SG_ 2558849011 B2V_ST2_HighVoltOff "下高压请求";
+CM_ SG_ 2558849011 B2V_ST2_FultLecel "最高故障等级";
+CM_ SG_ 2558849011 B2V_ST2_FultCode "故障码";
+CM_ SG_ 2558849011 B2V_ST2_InsideVolt "内部总电压";
+CM_ SG_ 2558849011 B2V_ST2_Dis_ChrgCurr "充放电电流";
+CM_ SG_ 2558849011 B2V_ST2_SOC "SOC";
+CM_ SG_ 2558849011 B2V_ST2_SOH "SOH";
+CM_ SG_ 2558783475 B2V_ST1_ChrgStatus "充电状态";
+CM_ SG_ 2558783475 B2V_ST1_TMSErrLevel "TMS 故障码等级";
+CM_ SG_ 2558783475 B2V_ST1_TMSErr "TMS 故障码";
+CM_ SG_ 2558783475 B2V_ST1_TMSInletWaterTemp "TMS回水温度（电池到
+机组）";
+CM_ SG_ 2558783475 B2V_ST1_TMSOutletWaterTemp "TMS出水温度（机组到
+电池）";
+CM_ SG_ 2558783475 B2V_ST1_TMSWorkST "TMS 工作状态";
+CM_ SG_ 2558783475 B2V_ST1_TMS_ACC "TMS_ACC信号状态";
+CM_ SG_ 2558783475 B2V_ST1_CoolingWaterLevel "液冷水箱水位状态";
+CM_ SG_ 2558783475 B2V_ST1_TMSRlyST "TMS继电器状态";
+CM_ SG_ 2558783475 B2V_ST1_ChrgConnectST "插枪状态";
+CM_ SG_ 2558783475 B2V_ST1_Dis_ChrgST "充放电状态";
+CM_ SG_ 2558783475 B2V_ST1_MSDST "MSD状态";
+CM_ SG_ 2558783475 B2V_ST1_ChrgRlyST "充电继电器状态";
+CM_ SG_ 2558783475 B2V_ST1_DCDCRlyST "DCDC继电器状态";
+CM_ SG_ 2558783475 B2V_ST1_FanPrechrgRlyST "风机预充继电器状态";
+CM_ SG_ 2558783475 B2V_ST1_FanRlyST "风机继电器状态";
+CM_ SG_ 2558783475 B2V_ST1_TravelPrechrgRlyST "行驶预充继电器状态";
+CM_ SG_ 2558783475 B2V_ST1_TravelRlyST "行驶继电器状态";
+CM_ SG_ 2558783475 B2V_ST1_ExRangePrechrgRlyST "増程预充继电器状态";
+CM_ SG_ 2558783475 B2V_ST1_ExRangeRlyST "増程继电器状态";
+CM_ SG_ 2558783475 B2V_ST1_MainPNegRlyST "主负极继电器状态";
+CM_ SG_ 2558717939 B2V_Fult2_TravelRlyWeldErr "行驶接触器粘连故障报警";
+CM_ SG_ 2558717939 B2V_Fult2_TMSErr "热管理机组故障";
+CM_ SG_ 2558717939 B2V_Fult2_TempSensorErr "温度传感器故障";
+CM_ SG_ 2558717939 B2V_Fult2_SOCDiffErr "SOC差异过大";
+CM_ SG_ 2558717939 B2V_Fult2_PowerSupplyErr "BMS低压供电电压异常报警";
+CM_ SG_ 2558717939 B2V_Fult2_PackSelfProtect "电池包自保护故障";
+CM_ SG_ 2558717939 B2V_Fult2_PackFireWarning "电池包火灾报警";
+CM_ SG_ 2558717939 B2V_Fult2_OverDischrgCurrChrging "充电时放电电流过大";
+CM_ SG_ 2558717939 B2V_Fult2_OverDischrgCurr "放电电流超限报警";
+CM_ SG_ 2558717939 B2V_Fult2_OverChrgCurrInTheDrive "回充电流超限报警";
+CM_ SG_ 2558717939 B2V_Fult2_OverChrgCurrInTheChrg "充电电流超限报警";
+CM_ SG_ 2558717939 B2V_Fult2_MainNegRlyWeldErr "主负接触器粘连故障报警";
+CM_ SG_ 2558717939 B2V_Fult2_InnerCommunicationErr "BMS内部通信故障";
+CM_ SG_ 2558717939 B2V_Fult2_HeatungFilmErr "加热膜加热回路故障";
+CM_ SG_ 2558717939 B2V_Fult2_HeatRlyOpenErr "加热膜或TMS接触器故障无法闭合报警";
+CM_ SG_ 2558717939 B2V_Fult2_FultNum "当前发生的故障总数";
+CM_ SG_ 2558717939 B2V_Fult2_FanRlyWeldErr "风机接触器粘连故障报警";
+CM_ SG_ 2558717939 B2V_Fult2_ExRangeRlyWeldErr "增程接触器粘连故障报警";
+CM_ SG_ 2558717939 B2V_Fult2_DCDCRlyWeldErr "DCDC接触器故障无法断开报警";
+CM_ SG_ 2558717939 B2V_Fult2_CurrSensorErr "电流传感器故障";
+CM_ SG_ 2558717939 B2V_Fult2_ContiChrgCurrOverLoad "持续回充过流故障";
+CM_ SG_ 2558717939 B2V_Fult2_ChrgRlyWeldErr "充电接触器粘连故障报警";
+CM_ SG_ 2558717939 B2V_Fult2_ChrgNTCTempOver "充电插座过温报警";
+CM_ SG_ 2558717939 B2V_Fult2_ChrgNTCErr "充电插座NTC故障";
+CM_ SG_ 2558717939 B2V_Fult2_ChrgInsLowErr "充电绝缘阻值低";
+CM_ SG_ 2558717939 B2V_Fult2_ChrgConnectErr "插枪连接信号异常";
+CM_ SG_ 2558717939 B2V_Fult2_CellOverDischrg "电芯过放故障";
+CM_ SG_ 2558717939 B2V_Fult2_CANLost "CAN通讯故障";
+CM_ SG_ 2558652403 B2V_Fult1_UCellUniformity "电池一致性差报警";
+CM_ SG_ 2558652403 B2V_Fult1_SOCChangeFast "SOC跳变报警";
+CM_ SG_ 2558652403 B2V_Fult1_PackOverVolt "PACK过压报警";
+CM_ SG_ 2558652403 B2V_Fult1_PackLowVolt "PACK欠压报警";
+CM_ SG_ 2558652403 B2V_Fult1_OverUCell "单体电压过高报警";
+CM_ SG_ 2558652403 B2V_Fult1_OverTemp "电芯温度过高报警
+";
+CM_ SG_ 2558652403 B2V_Fult1_OverSOC "SOC过高报警";
+CM_ SG_ 2558652403 B2V_Fult1_LowUCell "单体电压欠压报警";
+CM_ SG_ 2558652403 B2V_Fult1_LowTemp "电芯温度过低报警
+";
+CM_ SG_ 2558652403 B2V_Fult1_LowSOC "SOC过低报警";
+CM_ SG_ 2558652403 B2V_Fult1_LowInsRes "绝缘报警";
+CM_ SG_ 2558652403 B2V_Fult1_HVILFult "高压互锁报警";
+CM_ SG_ 2558652403 B2V_Fult1_DelTemp "电芯温差异常报警
+";
+CM_ SG_ 2563043315 B2V_PulseDisChrgCurr "BMS允许的脉冲放电电流";
+CM_ SG_ 2563043315 B2V_PulseChrgCurr "BMS允许的脉冲充电电流";
+CM_ SG_ 2563043315 B2V_FollowDisChrgCurr "BMS允许的持续放电电流";
+CM_ SG_ 2563043315 B2V_FollowChrgCurr "BMS允许的持续充电电流";
+CM_ SG_ 2562977779 B2V_PowerLimit_SelfCheck "自检状态";
+CM_ SG_ 2562977779 B2V_PowerLimit_RealSOC "真实SOC";
+CM_ SG_ 2562977779 B2V_PowerLimit_DisChrg "当前最大允许放电功率";
+CM_ SG_ 2562977779 B2V_PowerLimit_Chrg "当前最大允许充电功率";
+CM_ SG_ 2562977779 B2V_PowerLimit_BMS_SubVer "BMS软件版本子版本号";
+CM_ SG_ 2562977779 B2V_PowerLimit_BMS_SubSubVer "BMS软件版本子子版本号";
+CM_ SG_ 2550330351 V2B_HighVoltCtrl_rearDriverRlyST "总负继电器通断控制";
+CM_ SG_ 2550330351 V2B_HighVoltCtrl_collectRlyST "总负继电器通断控制";
+CM_ SG_ 2550330351 V2B_HighVoltCtrl_TravelRlyST "行驶电机通断控制";
+CM_ SG_ 2550330351 V2B_HighVoltCtrl_Off "下所有高压";
+CM_ SG_ 2550330351 V2B_HighVoltCtrl_MainNegRlyST "总负继电器通断控制";
+CM_ SG_ 2550330351 V2B_HighVoltCtrl_FanRlyST "风机电机继电器通断控制";
+CM_ SG_ 2550330351 V2B_HighVoltCtrl_ExRangeRlyST "增程继电器通断控制";
+CM_ SG_ 2550330351 V2B_HighVoltCtrl_DCDCRlyST "DCDC继电器通断控制";
+BA_DEF_  "BusType" STRING ;
+BA_DEF_DEF_  "BusType" "CAN";
+VAL_ 2558849011 B2V_ST2_HighVoltOff 1 "Request" 0 "NoRequest" ;
+VAL_ 2558849011 B2V_ST2_FultLecel 3 "Err_Level3" 2 "Err_Level2" 1 "Err_Level1" 0 "Normal" ;
+VAL_ 2558783475 B2V_ST1_ChrgStatus 3 "Charge_completed" 2 "Charge_end" 1 "Charging" 0 "Reversed" ;
+VAL_ 2558783475 B2V_ST1_TMSErrLevel 3 "Err_Level3" 2 "Err_Level2" 1 "Err_Level1" 0 "Invalid" ;
+VAL_ 2558783475 B2V_ST1_TMSErr 17 "Reverse" 16 "Err_Level2_DC24V异常" 15 "Err_Level3_水箱缺水" 14 "Err_Level1_整车CAN通讯异常" 13 "Err_Level3_PTC或加热器故障" 12 "Err_Level2_水泵故障" 11 "Err_Level3_防冻结温度传感器异常" 10 "Err_Level3_进水温度传感器异常" 9 "Err_Level2_出水温度传感器异常" 8 "Err_Level3_蒸发器防冻结保护" 7 "Err_Level3_系统压力保护" 6 "Err_Level3_压缩机异常" 5 "Err_Level3_压缩机失速" 4 "Err_Level3_压缩机CAN通讯异常" 3 "Err_Level3_压缩机自身工作过流" 2 "Err_Level3_直流母线过压" 1 "Err_Level3_直流母线欠压" 0 "Normal" ;
+VAL_ 2558783475 B2V_ST1_TMSInletWaterTemp 255 "Invalid" ;
+VAL_ 2558783475 B2V_ST1_TMSWorkST 3 "Auto-Circulation_Mode" 2 "Heating_Mode" 1 "Cooling_Mode" 0 "PowerOff_Mode" ;
+VAL_ 2558783475 B2V_ST1_TMS_ACC 1 "Valid_HighVoltOutput" 0 "Invalid_LowVoltOutput" ;
+VAL_ 2558783475 B2V_ST1_CoolingWaterLevel 1 "LackWater" 0 "Normal" ;
+VAL_ 2558783475 B2V_ST1_TMSRlyST 2 "Invalid" 1 "Close" 0 "Open" ;
+VAL_ 2558783475 B2V_ST1_ChrgConnectST 3 "reserve" 2 "AC_connect_completed" 1 "DC_connect_completed" 0 "Disconnet" ;
+VAL_ 2558783475 B2V_ST1_Dis_ChrgST 2 "Invalid" 1 "Charging" 0 "Discharging" ;
+VAL_ 2558783475 B2V_ST1_MSDST 2 "Invalid" 1 "Close" 0 "Open" ;
+VAL_ 2558783475 B2V_ST1_ChrgRlyST 2 "Invalid" 1 "Close" 0 "Open" ;
+VAL_ 2558783475 B2V_ST1_DCDCRlyST 2 "Invalid" 1 "Close" 0 "Open" ;
+VAL_ 2558783475 B2V_ST1_FanPrechrgRlyST 2 "Invalid" 1 "Close" 0 "Open" ;
+VAL_ 2558783475 B2V_ST1_FanRlyST 2 "Invalid" 1 "Close" 0 "Open" ;
+VAL_ 2558783475 B2V_ST1_TravelPrechrgRlyST 2 "Invalid" 1 "Close" 0 "Open" ;
+VAL_ 2558783475 B2V_ST1_TravelRlyST 2 "Invalid" 1 "Close" 0 "Open" ;
+VAL_ 2558783475 B2V_ST1_ExRangePrechrgRlyST 2 "Invalid" 1 "Close" 0 "Open" ;
+VAL_ 2558783475 B2V_ST1_ExRangeRlyST 2 "Invalid" 1 "Close" 0 "Open" ;
+VAL_ 2558783475 B2V_ST1_MainPNegRlyST 2 "Invalid" 1 "Close" 0 "Open" ;
+VAL_ 2558717939 B2V_Fult2_TravelRlyWeldErr 1 "Fult" 0 "Normal" ;
+VAL_ 2558717939 B2V_Fult2_TMSErr 1 "Fult" 0 "Normal" ;
+VAL_ 2558717939 B2V_Fult2_TempSensorErr 1 "Fult" 0 "Normal" ;
+VAL_ 2558717939 B2V_Fult2_SOCDiffErr 1 "Fult" 0 "Normal" ;
+VAL_ 2558717939 B2V_Fult2_PowerSupplyErr 1 "Fult" 0 "Normal" ;
+VAL_ 2558717939 B2V_Fult2_PackSelfProtect 1 "Fult" 0 "Normal" ;
+VAL_ 2558717939 B2V_Fult2_PackFireWarning 1 "Description for the value '0x1'" 0 "Normal" ;
+VAL_ 2558717939 B2V_Fult2_OverDischrgCurrChrging 1 "Fult" 0 "Normal" ;
+VAL_ 2558717939 B2V_Fult2_OverDischrgCurr 3 "Level3-Most severe Fult" 2 "Level 2-More severe Fult" 1 "Level 1-Light Fult" 0 "Normal" ;
+VAL_ 2558717939 B2V_Fult2_OverChrgCurrInTheDrive 3 "Level3-Most severe Fult" 2 "Level 2-More severe Fult" 1 "Level 1-Light Fult" 0 "Normal" ;
+VAL_ 2558717939 B2V_Fult2_OverChrgCurrInTheChrg 1 "Fult" 0 "Normal" ;
+VAL_ 2558717939 B2V_Fult2_MainNegRlyWeldErr 1 "Fult" 0 "Normal" ;
+VAL_ 2558717939 B2V_Fult2_InnerCommunicationErr 1 "Fult" 0 "Normal" ;
+VAL_ 2558717939 B2V_Fult2_HeatungFilmErr 1 "Fult" 0 "Normal" ;
+VAL_ 2558717939 B2V_Fult2_HeatRlyOpenErr 1 "Fult" 0 "Normal" ;
+VAL_ 2558717939 B2V_Fult2_FanRlyWeldErr 1 "Fult" 0 "Normal" ;
+VAL_ 2558717939 B2V_Fult2_ExRangeRlyWeldErr 1 "Fult" 0 "Normal" ;
+VAL_ 2558717939 B2V_Fult2_DCDCRlyWeldErr 1 "Fult" 0 "Normal" ;
+VAL_ 2558717939 B2V_Fult2_CurrSensorErr 1 "Fult" 0 "Normal" ;
+VAL_ 2558717939 B2V_Fult2_ContiChrgCurrOverLoad 1 "Fult" 0 "Normal" ;
+VAL_ 2558717939 B2V_Fult2_ChrgRlyWeldErr 1 "Fult" 0 "Normal" ;
+VAL_ 2558717939 B2V_Fult2_ChrgNTCTempOver 3 "Level3-Most severe Fult" 2 "Level 2-More severe Fult" 1 "Level 1-Light Fult" 0 "Normal" ;
+VAL_ 2558717939 B2V_Fult2_ChrgNTCErr 1 "Fult" 0 "Normal" ;
+VAL_ 2558717939 B2V_Fult2_ChrgInsLowErr 1 "Fult" 0 "Normal" ;
+VAL_ 2558717939 B2V_Fult2_ChrgConnectErr 1 "Fult" 0 "Normal" ;
+VAL_ 2558717939 B2V_Fult2_CellOverDischrg 1 "Fult" 0 "Normal" ;
+VAL_ 2558717939 B2V_Fult2_CANLost 1 "Fult" 0 "Normal" ;
+VAL_ 2558652403 B2V_Fult1_UCellUniformity 3 "Level3-Most severe Fult" 2 "Level 2-More severe Fult" 1 "Level 1-Light Fult" 0 "Normal" ;
+VAL_ 2558652403 B2V_Fult1_SOCChangeFast 1 "Fult" 0 "Normal" ;
+VAL_ 2558652403 B2V_Fult1_PackOverVolt 3 "Level3-Most severe Fult" 2 "Level 2-More severe Fult" 1 "Level 1-Light Fult" 0 "Normal" ;
+VAL_ 2558652403 B2V_Fult1_PackLowVolt 3 "Level3-Most severe Fult" 2 "Level 2-More severe Fult" 1 "Level 1-Light Fult" 0 "Normal" ;
+VAL_ 2558652403 B2V_Fult1_OverUCell 3 "Level3-Most severe Fult" 2 "Level 2-More severe Fult" 1 "Level 1-Light Fult" 0 "Normal" ;
+VAL_ 2558652403 B2V_Fult1_OverTemp 3 "Level3-Most severe Fult" 2 "Level 2-More severe Fult" 1 "Level 1-Light Fult" 0 "Normal" ;
+VAL_ 2558652403 B2V_Fult1_OverSOC 3 "Level3-Most severe Fult" 2 "Level 2-More severe Fult" 1 " Level 1-Light Fult" 0 "Normal" ;
+VAL_ 2558652403 B2V_Fult1_LowUCell 3 "Level3-Most severe Fult" 2 "Level 2-More severe Fult" 1 "Level 1-Light Fult" 0 "Normal" ;
+VAL_ 2558652403 B2V_Fult1_LowTemp 3 "Description for the value '0x3'" 2 "Level 2-More severe Fult" 1 "Level 1-Light Fult" 0 "Normal" ;
+VAL_ 2558652403 B2V_Fult1_LowSOC 3 "Level3-Most severe Fult" 2 "Level 2-More severe Fult" 1 "Level 1-Light Fult" 0 "Normal" ;
+VAL_ 2558652403 B2V_Fult1_LowInsRes 3 "Level3-Most severe Fult" 2 "Level 2-More severe Fult" 1 "Level 1-Light Fult" 0 " Normal" ;
+VAL_ 2558652403 B2V_Fult1_HVILFult 1 "Fult" 0 "Normal" ;
+VAL_ 2558652403 B2V_Fult1_DelTemp 3 "Level3-Most severe Fult" 2 "Level 2-More severe Fult" 1 "Level 1-Light Fult" 0 "Normal" ;
+VAL_ 2562977779 B2V_PowerLimit_SelfCheck 1 "Completed" 0 "Incomplete" ;
+VAL_ 2550330351 V2B_HighVoltCtrl_rearDriverRlyST 2 "MainNegRlyOpen" 1 "MainNegRlyClose" 0 "Invalid" ;
+VAL_ 2550330351 V2B_HighVoltCtrl_collectRlyST 2 "MainNegRlyOpen" 1 "MainNegRlyClose" 0 "Invalid" ;
+VAL_ 2550330351 V2B_HighVoltCtrl_TravelRlyST 2 "TravelRlyOpen" 1 "TravelRlyClose" 0 "Invalid" ;
+VAL_ 2550330351 V2B_HighVoltCtrl_Off 1 "AllHighVoltOff" 0 "Invalid" ;
+VAL_ 2550330351 V2B_HighVoltCtrl_MainNegRlyST 2 "MainNegRlyOpen" 1 "MainNegRlyClose" 0 "Invalid" ;
+VAL_ 2550330351 V2B_HighVoltCtrl_FanRlyST 2 "FanRlyOpen" 1 "FanRlyClose" 0 "Invalid" ;
+VAL_ 2550330351 V2B_HighVoltCtrl_ExRangeRlyST 2 "ExRangeRlyOpen" 1 "ExRangeRlyClose" 0 "Invalid" ;
+VAL_ 2550330351 V2B_HighVoltCtrl_DCDCRlyST 2 "DCDCRlyOpen" 1 "DCDCRlyClose" 0 "Invalid" ;
+

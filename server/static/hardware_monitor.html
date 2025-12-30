@@ -1,0 +1,527 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>硬件状态监控 - T113-S3</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        h1 {
+            text-align: center;
+            color: white;
+            margin-bottom: 30px;
+            font-size: 2.5em;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+
+        .status-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+
+        .card {
+            background: white;
+            border-radius: 15px;
+            padding: 25px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+            transition: transform 0.3s ease;
+        }
+
+        .card:hover {
+            transform: translateY(-5px);
+        }
+
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            border-bottom: 2px solid #f0f0f0;
+            padding-bottom: 15px;
+        }
+
+        .card-title {
+            font-size: 1.5em;
+            font-weight: bold;
+            color: #333;
+        }
+
+        .status-badge {
+            padding: 5px 15px;
+            border-radius: 20px;
+            font-size: 0.9em;
+            font-weight: bold;
+        }
+
+        .status-normal {
+            background: #10b981;
+            color: white;
+        }
+
+        .status-warning {
+            background: #f59e0b;
+            color: white;
+        }
+
+        .status-error {
+            background: #ef4444;
+            color: white;
+        }
+
+        .status-offline {
+            background: #6b7280;
+            color: white;
+        }
+
+        .info-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 10px 0;
+            border-bottom: 1px solid #f0f0f0;
+        }
+
+        .info-row:last-child {
+            border-bottom: none;
+        }
+
+        .info-label {
+            font-weight: 600;
+            color: #666;
+        }
+
+        .info-value {
+            color: #333;
+            font-family: 'Courier New', monospace;
+        }
+
+        .error-message {
+            background: #fef2f2;
+            border-left: 4px solid #ef4444;
+            padding: 10px;
+            margin-top: 15px;
+            border-radius: 5px;
+            color: #991b1b;
+        }
+
+        .progress-bar {
+            width: 100%;
+            height: 20px;
+            background: #e5e7eb;
+            border-radius: 10px;
+            overflow: hidden;
+            margin-top: 5px;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #10b981 0%, #059669 100%);
+            transition: width 0.3s ease;
+        }
+
+        .progress-fill.warning {
+            background: linear-gradient(90deg, #f59e0b 0%, #d97706 100%);
+        }
+
+        .progress-fill.error {
+            background: linear-gradient(90deg, #ef4444 0%, #dc2626 100%);
+        }
+
+        .refresh-info {
+            text-align: center;
+            color: white;
+            padding: 15px;
+            background: rgba(255,255,255,0.1);
+            border-radius: 10px;
+            backdrop-filter: blur(10px);
+        }
+
+        .last-update {
+            font-size: 0.9em;
+            margin-top: 5px;
+            opacity: 0.9;
+        }
+
+        .connection-status {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            margin-right: 8px;
+            animation: pulse 2s ease-in-out infinite;
+        }
+
+        .connection-status.connected {
+            background: #10b981;
+        }
+
+        .connection-status.disconnected {
+            background: #ef4444;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .metric-large {
+            font-size: 2.5em;
+            font-weight: bold;
+            color: #667eea;
+            text-align: center;
+            margin: 20px 0;
+        }
+
+        .metric-unit {
+            font-size: 0.4em;
+            color: #999;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🖥️ T113-S3 硬件状态监控</h1>
+        
+        <div class="refresh-info">
+            <div>
+                <span class="connection-status" id="connectionDot"></span>
+                <span id="connectionStatus">连接中...</span>
+            </div>
+            <div class="last-update">
+                最后更新: <span id="lastUpdate">--</span>
+            </div>
+        </div>
+
+        <div class="status-grid" style="margin-top: 20px;">
+            <!-- CAN0 状态 -->
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-title">🚌 CAN0 总线</div>
+                    <span class="status-badge" id="can0Status">--</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">波特率:</span>
+                    <span class="info-value" id="can0Bitrate">--</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">接收帧数:</span>
+                    <span class="info-value" id="can0RxCount">--</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">发送帧数:</span>
+                    <span class="info-value" id="can0TxCount">--</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">错误计数:</span>
+                    <span class="info-value" id="can0ErrorCount">--</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">状态标志:</span>
+                    <span class="info-value" id="can0Flags">--</span>
+                </div>
+                <div id="can0Error" class="error-message" style="display: none;"></div>
+            </div>
+
+            <!-- CAN1 状态 -->
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-title">🚌 CAN1 总线</div>
+                    <span class="status-badge" id="can1Status">--</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">波特率:</span>
+                    <span class="info-value" id="can1Bitrate">--</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">接收帧数:</span>
+                    <span class="info-value" id="can1RxCount">--</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">发送帧数:</span>
+                    <span class="info-value" id="can1TxCount">--</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">错误计数:</span>
+                    <span class="info-value" id="can1ErrorCount">--</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">状态标志:</span>
+                    <span class="info-value" id="can1Flags">--</span>
+                </div>
+                <div id="can1Error" class="error-message" style="display: none;"></div>
+            </div>
+
+            <!-- 存储状态 -->
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-title">💾 存储状态</div>
+                    <span class="status-badge" id="storageStatus">--</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">挂载点:</span>
+                    <span class="info-value" id="storageMountPoint">--</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">总容量:</span>
+                    <span class="info-value" id="storageTotal">--</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">已使用:</span>
+                    <span class="info-value" id="storageUsed">--</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">可用:</span>
+                    <span class="info-value" id="storageFree">--</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">使用率:</span>
+                    <span class="info-value">
+                        <div class="progress-bar">
+                            <div class="progress-fill" id="storageProgress"></div>
+                        </div>
+                    </span>
+                </div>
+                <div id="storageError" class="error-message" style="display: none;"></div>
+            </div>
+
+            <!-- 系统状态 -->
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-title">⚙️ 系统状态</div>
+                </div>
+                <div class="metric-large">
+                    <span id="systemCpuUsage">--</span><span class="metric-unit">%</span>
+                    <div style="font-size: 0.3em; color: #666;">CPU 使用率</div>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">内存使用:</span>
+                    <span class="info-value">
+                        <span id="systemMemoryUsed">--</span> / <span id="systemMemoryTotal">--</span>
+                        (<span id="systemMemoryUsage">--</span>%)
+                    </span>
+                </div>
+                <div class="progress-bar">
+                    <div class="progress-fill" id="memoryProgress"></div>
+                </div>
+                <div class="info-row" style="margin-top: 15px;">
+                    <span class="info-label">温度:</span>
+                    <span class="info-value" id="systemTemp">--</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">运行时间:</span>
+                    <span class="info-value" id="systemUptime">--</span>
+                </div>
+            </div>
+
+            <!-- 网络状态 -->
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-title">🌐 网络状态</div>
+                    <span class="status-badge" id="networkStatus">--</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">接口:</span>
+                    <span class="info-value" id="networkInterface">--</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">IP地址:</span>
+                    <span class="info-value" id="networkIp">--</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">MAC地址:</span>
+                    <span class="info-value" id="networkMac">--</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">接收流量:</span>
+                    <span class="info-value" id="networkRx">--</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">发送流量:</span>
+                    <span class="info-value" id="networkTx">--</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const statusNames = ['正常', '警告', '错误', '离线'];
+        const statusClasses = ['status-normal', 'status-warning', 'status-error', 'status-offline'];
+
+        function formatBytes(bytes) {
+            if (bytes === 0) return '0 B';
+            const k = 1024;
+            const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+        }
+
+        function formatUptime(seconds) {
+            const days = Math.floor(seconds / 86400);
+            const hours = Math.floor((seconds % 86400) / 3600);
+            const minutes = Math.floor((seconds % 3600) / 60);
+            return `${days}天 ${hours}时 ${minutes}分`;
+        }
+
+        function updateStatus(data) {
+            const now = new Date();
+            document.getElementById('lastUpdate').textContent = now.toLocaleTimeString('zh-CN');
+            
+            // CAN0
+            if (data.can0) {
+                const can0 = data.can0;
+                document.getElementById('can0Status').textContent = statusNames[can0.status] || '--';
+                document.getElementById('can0Status').className = 'status-badge ' + (statusClasses[can0.status] || '');
+                document.getElementById('can0Bitrate').textContent = can0.bitrate + ' bps';
+                document.getElementById('can0RxCount').textContent = can0.rx || '0';
+                document.getElementById('can0TxCount').textContent = can0.tx || '0';
+                document.getElementById('can0ErrorCount').textContent = can0.errors || '0';
+                
+                const flags = [];
+                if (can0.error_warning) flags.push('警告');
+                if (can0.error_passive) flags.push('被动');
+                if (can0.bus_off) flags.push('总线关闭');
+                document.getElementById('can0Flags').textContent = flags.length > 0 ? flags.join(', ') : '正常';
+                
+                const errorDiv = document.getElementById('can0Error');
+                if (can0.last_error && can0.last_error !== '') {
+                    errorDiv.textContent = '⚠️ ' + can0.last_error;
+                    errorDiv.style.display = 'block';
+                } else {
+                    errorDiv.style.display = 'none';
+                }
+            }
+            
+            // CAN1
+            if (data.can1) {
+                const can1 = data.can1;
+                document.getElementById('can1Status').textContent = statusNames[can1.status] || '--';
+                document.getElementById('can1Status').className = 'status-badge ' + (statusClasses[can1.status] || '');
+                document.getElementById('can1Bitrate').textContent = can1.bitrate + ' bps';
+                document.getElementById('can1RxCount').textContent = can1.rx || '0';
+                document.getElementById('can1TxCount').textContent = can1.tx || '0';
+                document.getElementById('can1ErrorCount').textContent = can1.errors || '0';
+                
+                const flags = [];
+                if (can1.error_warning) flags.push('警告');
+                if (can1.error_passive) flags.push('被动');
+                if (can1.bus_off) flags.push('总线关闭');
+                document.getElementById('can1Flags').textContent = flags.length > 0 ? flags.join(', ') : '正常';
+                
+                const errorDiv = document.getElementById('can1Error');
+                if (can1.last_error && can1.last_error !== '') {
+                    errorDiv.textContent = '⚠️ ' + can1.last_error;
+                    errorDiv.style.display = 'block';
+                } else {
+                    errorDiv.style.display = 'none';
+                }
+            }
+            
+            // 存储
+            if (data.storage) {
+                const storage = data.storage;
+                document.getElementById('storageStatus').textContent = statusNames[storage.status] || '--';
+                document.getElementById('storageStatus').className = 'status-badge ' + (statusClasses[storage.status] || '');
+                document.getElementById('storageMountPoint').textContent = storage.mount_point || '--';
+                document.getElementById('storageTotal').textContent = formatBytes(storage.total || 0);
+                document.getElementById('storageUsed').textContent = formatBytes(storage.used || 0);
+                document.getElementById('storageFree').textContent = formatBytes(storage.free || 0);
+                
+                const usagePercent = storage.total > 0 ? (storage.used / storage.total * 100) : 0;
+                const progressBar = document.getElementById('storageProgress');
+                progressBar.style.width = usagePercent + '%';
+                progressBar.className = 'progress-fill';
+                if (usagePercent > 90) {
+                    progressBar.classList.add('error');
+                } else if (usagePercent > 75) {
+                    progressBar.classList.add('warning');
+                }
+                
+                const errorDiv = document.getElementById('storageError');
+                if (storage.last_error && storage.last_error !== '') {
+                    errorDiv.textContent = '⚠️ ' + storage.last_error;
+                    errorDiv.style.display = 'block';
+                } else {
+                    errorDiv.style.display = 'none';
+                }
+            }
+            
+            // 系统
+            if (data.system) {
+                const system = data.system;
+                document.getElementById('systemCpuUsage').textContent = system.cpu_usage.toFixed(1);
+                document.getElementById('systemMemoryTotal').textContent = formatBytes((system.memory_total || 0) * 1024);
+                document.getElementById('systemMemoryUsed').textContent = formatBytes((system.memory_used || 0) * 1024);
+                document.getElementById('systemMemoryUsage').textContent = system.memory_usage.toFixed(1);
+                document.getElementById('systemTemp').textContent = system.temperature.toFixed(1) + ' °C';
+                document.getElementById('systemUptime').textContent = formatUptime(system.uptime || 0);
+                
+                const memProgress = document.getElementById('memoryProgress');
+                memProgress.style.width = system.memory_usage + '%';
+                memProgress.className = 'progress-fill';
+                if (system.memory_usage > 90) {
+                    memProgress.classList.add('error');
+                } else if (system.memory_usage > 75) {
+                    memProgress.classList.add('warning');
+                }
+            }
+            
+            // 网络
+            if (data.network) {
+                const network = data.network;
+                document.getElementById('networkStatus').textContent = statusNames[network.status] || '--';
+                document.getElementById('networkStatus').className = 'status-badge ' + (statusClasses[network.status] || '');
+                document.getElementById('networkInterface').textContent = network.interface || '--';
+                document.getElementById('networkIp').textContent = network.ip || '--';
+                document.getElementById('networkMac').textContent = network.mac || '--';
+                document.getElementById('networkRx').textContent = formatBytes(network.rx_bytes || 0);
+                document.getElementById('networkTx').textContent = formatBytes(network.tx_bytes || 0);
+            }
+        }
+
+        async function fetchStatus() {
+            try {
+                const response = await fetch('/api/hardware/status');
+                const result = await response.json();
+                
+                if (result.ok && result.data) {
+                    document.getElementById('connectionStatus').textContent = '已连接';
+                    document.getElementById('connectionDot').className = 'connection-status connected';
+                    updateStatus(result.data);
+                } else {
+                    document.getElementById('connectionStatus').textContent = '设备未连接或数据不可用';
+                    document.getElementById('connectionDot').className = 'connection-status disconnected';
+                }
+            } catch (error) {
+                console.error('获取硬件状态失败:', error);
+                document.getElementById('connectionStatus').textContent = '连接失败: ' + error.message;
+                document.getElementById('connectionDot').className = 'connection-status disconnected';
+            }
+        }
+
+        // 初始加载
+        fetchStatus();
+        
+        // 每3秒刷新一次
+        setInterval(fetchStatus, 3000);
+    </script>
+</body>
+</html>
+
