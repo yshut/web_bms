@@ -267,6 +267,62 @@ uint8_t* file_read_range(const char *path, size_t offset, size_t length, size_t 
 }
 
 /**
+ * @brief 分块写入文件（支持偏移写）
+ */
+int file_write_range(const char *path, size_t offset, const uint8_t *data, size_t len, bool truncate)
+{
+    if (!path || (!data && len > 0)) {
+        return -1;
+    }
+
+    /* 确保目录存在 */
+    char *path_copy = strdup(path);
+    if (path_copy) {
+        char *dir = dirname(path_copy);
+        file_mkdir_recursive(dir);
+        free(path_copy);
+    }
+
+    /* truncate 仅在 offset==0 时生效 */
+    const bool do_trunc = (truncate && offset == 0);
+
+    FILE *fp = NULL;
+    if (do_trunc) {
+        fp = fopen(path, "wb");
+    } else {
+        fp = fopen(path, "r+b");
+        if (!fp) {
+            /* 文件可能不存在，创建 */
+            fp = fopen(path, "wb+");
+        }
+    }
+    if (!fp) {
+        log_error("无法打开文件(分块写): %s (%s)", path, strerror(errno));
+        return -1;
+    }
+
+    if (fseek(fp, (long)offset, SEEK_SET) != 0) {
+        log_error("分块写定位失败: %s offset=%zu (%s)", path, offset, strerror(errno));
+        fclose(fp);
+        return -1;
+    }
+
+    size_t written = 0;
+    if (len > 0) {
+        written = fwrite(data, 1, len, fp);
+    }
+    fflush(fp);
+    fclose(fp);
+
+    if (written != len) {
+        log_error("分块写入失败: %s offset=%zu len=%zu written=%zu", path, offset, len, written);
+        return -1;
+    }
+
+    return 0;
+}
+
+/**
  * @brief 获取文件信息
  */
 int file_get_info(const char *path, file_info_t *info)

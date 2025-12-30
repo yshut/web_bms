@@ -1,10 +1,11 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-hide-shared-refresh="1">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>设备主页</title>
   <link rel="icon" href="/static/dashboard/favicon.ico">
+  <link rel="stylesheet" href="/static/shared.css">
   <style>
     :root { --bg:#0b2447; --panel:#0d366b40; --border:#3f8cff4d; --text:#d7e3ff; --acc:#7fb3ff; }
     html, body { height:100%; margin:0; background: radial-gradient(ellipse at center, #0b2447 0%, #061427 70%); color:var(--text); font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
@@ -35,15 +36,7 @@
 
     <div class="grid">
       <div class="panel">
-        <div class="row" style="justify-content:space-between">
-          <div class="badge"><span id="statusDot" class="dot"></span><span id="statusText">后端状态</span></div>
-          <button id="btnRefresh">刷新状态</button>
-        </div>
-        <div class="mono" id="statusOut" style="margin-top:8px">加载中...</div>
-      </div>
-
-      <div class="panel">
-        <div style="font-weight:bold; margin-bottom:8px">快速导航</div>
+        <div style="font-weight:bold; margin-bottom:8px">快速入口</div>
         <ul class="links">
           <li><a href="/can">🚗 CAN 监控</a> <span class="hint">(新)</span></li>
           <li><a href="/test">🧪 API 测试工具</a></li>
@@ -54,45 +47,12 @@
           <li><a href="/static/can_test.html">🔬 CAN 测试 (旧版)</a></li>
         </ul>
         <div class="hint" style="margin-top:12px">
-          💡 提示：新版CAN监控提供更专业的实时监控界面
+          💡 提示：主页仅提供入口导航；连接/设备状态请在各功能页查看（例如 CAN 监控页）。
         </div>
       </div>
     </div>
   </div>
 
-  <script>
-    // ⭐ 配置后端服务器地址 ⭐
-    const BACKEND_HOST = '10.132.18.233';  // ← 修改为您的后端服务器IP
-    const BACKEND_PORT = 18080;             // ← Web服务端口
-    const API_BASE = `http://${BACKEND_HOST}:${BACKEND_PORT}`;
-    // 如果需要自动获取，使用: const API_BASE = '';
-    
-    const $ = (id)=>document.getElementById(id);
-    const statusDot = $("statusDot");
-    const statusText = $("statusText");
-
-    function setStatus(connected) {
-      statusDot.className = 'dot' + (connected ? ' on' : '');
-      statusText.textContent = connected ? '后端状态：已连接' : '后端状态：未连接';
-    }
-
-    async function refreshStatus() {
-      try {
-        const r = await fetch(`${API_BASE}/api/status`);
-        const j = await r.json();
-        const hub = (j && j.hub) || {};
-        setStatus(!!hub.connected);
-        $("statusOut").textContent = JSON.stringify(j, null, 2);
-      } catch (e) {
-        setStatus(false);
-        $("statusOut").textContent = '获取状态失败：' + e;
-      }
-    }
-
-    $("btnRefresh").addEventListener('click', refreshStatus);
-
-    // 首屏加载状态
-    refreshStatus();
-  </script>
+  <script src="/static/shared.js"></script>
 </body>
 </html>

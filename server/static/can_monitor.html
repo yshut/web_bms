@@ -4,6 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>CAN总线监控</title>
+    <link rel="icon" href="/static/dashboard/favicon.ico">
+    <link rel="stylesheet" href="/static/shared.css">
     <style>
         * {
             margin: 0;
@@ -1400,7 +1402,8 @@
         // 检查服务器状态
         async function checkStatus() {
             try {
-                const response = await fetch(API_BASE + '/api/status');
+                // fast 状态：不 ping 设备，避免页面卡顿/误判
+                const response = await fetch(API_BASE + '/api/status_fast');
                 const result = await response.json();
                 
                 deviceOnline = !!(result && result.hub && result.hub.connected);
@@ -1419,20 +1422,28 @@
         // 更新CAN状态
         async function updateCANStatus() {
             try {
-                // 这里可以添加获取CAN状态的API调用
-                // 暂时检查是否有帧数据来判断CAN是否在运行
-                const response = await fetch(API_BASE + '/api/can/frames?limit=1');
+                // 使用设备端状态接口（稳定，不依赖“最近帧命令”是否实现）
+                const response = await fetch(API_BASE + '/api/can/status');
+                if (!response.ok) return;
                 const result = await response.json();
-                if (result.ok && result.data && result.data.frames && result.data.frames.length > 0) {
-                    if (!monitorActive) {
-                        monitorActive = true;
-                        document.getElementById('canStatus').classList.add('active');
-                        document.getElementById('canText').textContent = 'CAN: 监控中';
-                        document.getElementById('btnStart').disabled = true;
-                        document.getElementById('btnStop').disabled = false;
+                if (result && result.ok && result.data) {
+                    const d = result.data || {};
+                    const isMonitoring = !!(d.is_running || d.running);
+                    if (isMonitoring !== monitorActive) {
+                        monitorActive = isMonitoring;
+                        if (isMonitoring) {
+                            document.getElementById('canStatus').classList.add('active');
+                            document.getElementById('canText').textContent = 'CAN: 监控中';
+                            document.getElementById('btnStart').disabled = true;
+                            document.getElementById('btnStop').disabled = false;
+                        } else {
+                            document.getElementById('canStatus').classList.remove('active');
+                            document.getElementById('canText').textContent = 'CAN: 已停止';
+                            document.getElementById('btnStart').disabled = false;
+                            document.getElementById('btnStop').disabled = true;
+                        }
                     }
-                } else if (result && result.ok === false && !deviceOnline) {
-                    // 设备未连接时保持“未启动”并提示
+                } else if (!deviceOnline) {
                     monitorActive = false;
                     document.getElementById('canStatus').classList.remove('active');
                     document.getElementById('canText').textContent = 'CAN: 需要设备连接';
@@ -1737,45 +1748,33 @@
             if (monitorPaused) return;
             
             try {
-                const response = await fetch(API_BASE + '/api/can/frames?limit=50');
+                // 优先从后端 WebSocket 缓存取数据（不依赖设备“最近帧”命令）
+                const response = await fetch(API_BASE + '/api/can/live_data?limit=50');
                 if (!response.ok) {
                     console.error('HTTP错误:', response.status);
                     return;
                 }
                 
                 const result = await response.json();
-                console.log('收到CAN帧原始数据:', JSON.stringify(result).substring(0, 200));
+                // console.log('收到CAN帧原始数据:', JSON.stringify(result).substring(0, 200));
                 
                 // 兼容多种响应格式
                 let frames = [];
                 
-                // 格式1: {ok: true, data: {frames: [...]}} 或 {ok: true, data: "JSON字符串"}
-                if (result.ok && result.data) {
-                    if (typeof result.data === 'string') {
-                        // data是JSON字符串，需要再次解析
-                        try {
-                            const parsed = JSON.parse(result.data);
-                            frames = parsed.frames || parsed || [];
-                        } catch (e) {
-                            console.error('解析data字符串失败:', e);
-                        }
-                    } else if (result.data.frames) {
-                        frames = result.data.frames;
-                    } else if (Array.isArray(result.data)) {
-                        frames = result.data;
-                    }
-                }
-                // 格式2: {ok: true, frames: [...]}
-                else if (result.ok && result.frames) {
-                    frames = result.frames;
-                }
-                // 格式3: {frames: [...]}
-                else if (result.frames) {
-                    frames = result.frames;
-                }
-                // 格式4: 直接是数组
-                else if (Array.isArray(result)) {
-                    frames = result;
+                // 新格式：{ok:true, items:[{frame,timestamp}], lines:[...]}
+                if (result && result.ok && Array.isArray(result.items)) {
+                    frames = result.items.map(it => {
+                        const line = (it && it.frame) ? String(it.frame) : '';
+                        const parsed = parseCanLineToFrame(line);
+                        if (!parsed) return null;
+                        parsed.timestamp = it.timestamp || parsed.timestamp;
+                        return parsed;
+                    }).filter(Boolean);
+                } else if (result && result.ok && Array.isArray(result.lines)) {
+                    frames = result.lines.map(line => {
+                        const parsed = parseCanLineToFrame(String(line || ''));
+                        return parsed;
+                    }).filter(Boolean);
                 }
                 
                 console.log('解析出帧数量:', frames.length, frames.length > 0 ? '第一帧:' : '', frames[0]);
@@ -2554,6 +2553,7 @@
             stopAutoRefresh();
         });
     </script>
+    <script src="/static/shared.js"></script>
 </body>
 </html>
 

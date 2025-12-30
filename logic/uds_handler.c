@@ -66,6 +66,14 @@ typedef struct {
 static uds_ctx_t g_uds = {0};
 static bool second_block_cmd_sent = false; /* Flag to prevent duplicate second block command */
 
+/* 远程控制：持久化保存 S19 路径（避免 ws_command_handler 释放后悬空指针） */
+static char g_s19_path_buf[512] = {0};
+/* 远程控制：持久化保存 UDS 参数（便于网页端同步/配置） */
+static char g_uds_iface_buf[16] = "can0";
+static uint32_t g_uds_tx_id = 0x7F3;
+static uint32_t g_uds_rx_id = 0x7FB;
+static uint32_t g_uds_blk_size = 256;
+
 /* 日志级别定义 */
 typedef enum {
     UDS_LOG_ERROR = 0,    /* 只记录错误 */
@@ -1287,10 +1295,28 @@ int uds_set_file_path(const char *path)
         return -1;
     }
     
+    // 保存文件路径到持久缓冲区，避免调用者释放导致悬空指针
+    memset(g_s19_path_buf, 0, sizeof(g_s19_path_buf));
+    strncpy(g_s19_path_buf, path, sizeof(g_s19_path_buf) - 1);
     // 保存文件路径到配置
-    g_uds.cfg.s19_path = path;
+    g_uds.cfg.s19_path = g_s19_path_buf;
     
     log_info("已设置S19文件路径: %s", path);
+    return 0;
+}
+
+int uds_set_params(const char *iface, uint32_t tx_id, uint32_t rx_id, uint32_t block_size)
+{
+    if (iface && iface[0]) {
+        memset(g_uds_iface_buf, 0, sizeof(g_uds_iface_buf));
+        strncpy(g_uds_iface_buf, iface, sizeof(g_uds_iface_buf) - 1);
+    }
+    if (tx_id) g_uds_tx_id = tx_id;
+    if (rx_id) g_uds_rx_id = rx_id;
+    if (block_size) g_uds_blk_size = block_size;
+
+    log_info("UDS参数已设置: iface=%s tx=0x%X rx=0x%X blk=%u",
+             g_uds_iface_buf, g_uds_tx_id, g_uds_rx_id, g_uds_blk_size);
     return 0;
 }
 
@@ -1306,6 +1332,24 @@ int uds_start_flash(void)
         return -1;
     }
     
+    // 若尚未初始化（远程场景可能未进入设备UDS页面），用“网页端设置值/默认值”初始化一次
+    if (g_uds.interface[0] == '\0' || g_uds.cfg.tx_id == 0 || g_uds.cfg.rx_id == 0 || g_uds.cfg.block_size == 0) {
+        const char *iface = (g_uds_iface_buf[0] ? g_uds_iface_buf : "can0");
+        uint32_t tx = g_uds_tx_id ? g_uds_tx_id : 0x7F3;
+        uint32_t rx = g_uds_rx_id ? g_uds_rx_id : 0x7FB;
+        uint32_t blk = g_uds_blk_size ? g_uds_blk_size : 256;
+        uds_config_t cfg = { iface, tx, rx, blk, g_uds.cfg.s19_path };
+        if (uds_init(&cfg) != 0) {
+            log_error("UDS初始化失败（默认参数）");
+            return -1;
+        }
+        // 注意：uds_init 会清零 g_uds，再次绑定 s19_path 到持久缓冲
+        g_uds.cfg.s19_path = g_s19_path_buf[0] ? g_s19_path_buf : cfg.s19_path;
+    } else {
+        // 确保 cfg.s19_path 指向持久缓冲（防御性）
+        if (g_s19_path_buf[0]) g_uds.cfg.s19_path = g_s19_path_buf;
+    }
+
     // 开始刷写
     return uds_start();
 }

@@ -362,8 +362,8 @@
       try { if (wsConnection && (wsConnection.readyState === WebSocket.OPEN || wsConnection.readyState === WebSocket.CONNECTING)) return; } catch(e){}
       try {
         // ⭐ 配置后端服务器地址 ⭐
-        const BACKEND_HOST = '10.132.18.233';  // ← 修改为您的后端服务器IP
-        // 或使用自动获取: const BACKEND_HOST = location.hostname;
+        // 后端服务器地址：默认从浏览器 URL 自动获取（避免写死 IP）
+        const BACKEND_HOST = location.hostname;
         
         const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
         const wsUrl = `${protocol}//${BACKEND_HOST}:5052/ui`;

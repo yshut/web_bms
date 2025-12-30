@@ -34,4 +34,7 @@ int uds_set_file_path(const char *path);
 int uds_start_flash(void);
 void uds_stop_flash(void);
 
+/* 网页端/远程：设置 UDS 参数（不要求已选择文件） */
+int uds_set_params(const char *iface, uint32_t tx_id, uint32_t rx_id, uint32_t block_size);
+
 #endif /* UDS_HANDLER_H */

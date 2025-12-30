@@ -1,0 +1,163 @@
+(function () {
+  function el(tag, attrs, children) {
+    const n = document.createElement(tag);
+    if (attrs) {
+      for (const [k, v] of Object.entries(attrs)) {
+        if (k === "class") n.className = v;
+        else if (k === "text") n.textContent = v;
+        else if (k.startsWith("on") && typeof v === "function") n.addEventListener(k.slice(2), v);
+        else n.setAttribute(k, String(v));
+      }
+    }
+    (children || []).forEach((c) => n.appendChild(c));
+    return n;
+  }
+
+  function safePath(p) {
+    try { return String(p || "/"); } catch { return "/"; }
+  }
+
+  function navItems() {
+    // 路由优先用 server/web_server.py 提供的入口；工具页用 /static/*.html
+    return [
+      { href: "/", label: "主页" },
+      { href: "/dashboard", label: "仪表盘" },
+      { href: "/can", label: "CAN 监控" },
+      { href: "/dbc", label: "DBC 解析" },
+      { href: "/static/dbc_tool.html", label: "DBC 工具" },
+      { href: "/uds", label: "UDS" },
+      { href: "/hardware", label: "硬件监控" },
+      { href: "/static/file_manager.html", label: "文件管理" },
+      { href: "/test", label: "API 测试" },
+    ];
+  }
+
+  function matchActive(href, cur) {
+    const h = safePath(href);
+    const c = safePath(cur);
+    if (h === "/") return c === "/";
+    return c === h || c.startsWith(h + "/");
+  }
+
+  function insertHeader() {
+    if (document.documentElement.dataset.noSharedHeader === "1") return;
+    if (document.querySelector(".app-header")) return;
+
+    const title = (document.title || "Tina Web").trim();
+    const cur = safePath(location.pathname);
+    const hideStatus = document.documentElement.dataset.hideSharedStatus === "1";
+    const hideRefresh = document.documentElement.dataset.hideSharedRefresh === "1";
+
+    const brand = el("div", { class: "app-brand" }, [
+      el("div", { class: "app-brand__title", text: title }),
+    ]);
+
+    const nav = el("nav", { class: "app-nav" }, navItems().map((it) => {
+      const a = el("a", { href: it.href, text: it.label });
+      if (matchActive(it.href, cur)) a.classList.add("active");
+      return a;
+    }));
+
+    let status = null;
+    let btn = null;
+    if (!hideStatus) {
+      const serverDot = el("span", { class: "app-dot warn", id: "appDotServer" });
+      const deviceDot = el("span", { class: "app-dot warn", id: "appDotDevice" });
+      const serverText = el("span", { id: "appTxtServer", text: "服务器：检查中" });
+      const deviceText = el("span", { id: "appTxtDevice", text: "设备：检查中" });
+      if (!hideRefresh) {
+        btn = el("button", { class: "app-btn secondary", id: "appBtnRefresh", text: "刷新" });
+      }
+
+      const children = [
+        el("span", { class: "app-pill" }, [serverDot, serverText]),
+        el("span", { class: "app-pill" }, [deviceDot, deviceText]),
+      ];
+      if (btn) children.push(btn);
+      status = el("div", { class: "app-status" }, children);
+    }
+
+    const innerChildren = status ? [brand, nav, status] : [brand, nav];
+    const header = el("header", { class: "app-header" }, [
+      el("div", { class: "app-header__inner" }, innerChildren),
+    ]);
+
+    document.body.prepend(header);
+
+    // 大多数页面需要预留顶部空间；全屏类页面（dashboard 旧版）不强制 padding
+    const hasFullscreenStage = !!document.querySelector(".stage, canvas#bg");
+    document.documentElement.classList.add("app-has-header");
+    if (hasFullscreenStage) {
+      // 覆盖 padding（避免影响全屏画布布局）
+      document.documentElement.classList.remove("app-has-header");
+    }
+
+    if (!hideStatus) {
+      if (btn) btn.addEventListener("click", () => refreshStatus(true));
+      refreshStatus(false);
+      setInterval(() => refreshStatus(false), 5000);
+    }
+  }
+
+  async function fetchWithTimeout(url, ms) {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), ms);
+    try {
+      const r = await fetch(url, { signal: ctrl.signal, cache: "no-store" });
+      return r;
+    } finally {
+      clearTimeout(t);
+    }
+  }
+
+  let inFlight = false;
+  async function refreshStatus(force) {
+    if (inFlight && !force) return;
+    inFlight = true;
+    try {
+      const dotS = document.getElementById("appDotServer");
+      const dotD = document.getElementById("appDotDevice");
+      const txtS = document.getElementById("appTxtServer");
+      const txtD = document.getElementById("appTxtDevice");
+      if (!dotS || !dotD || !txtS || !txtD) return;
+
+      let okServer = false;
+      let okDevice = false;
+      let deviceAddr = "";
+      let deviceId = "";
+
+      try {
+        // 使用 fast 状态接口：不做 ping，不阻塞，刷新页面时不会卡 UI
+        const r = await fetchWithTimeout("/api/status_fast", 800);
+        okServer = r.ok;
+        const j = okServer ? await r.json().catch(() => ({})) : {};
+        okDevice = !!(j && j.hub && j.hub.connected);
+        deviceAddr = (j && j.hub && j.hub.client_addr) ? String(j.hub.client_addr) : "";
+        deviceId = (j && j.hub && j.hub.client_id) ? String(j.hub.client_id) : "";
+      } catch (e) {
+        okServer = false;
+      }
+
+      dotS.className = "app-dot " + (okServer ? "good" : "bad");
+      txtS.textContent = okServer ? "服务器：在线" : "服务器：离线";
+
+      dotD.className = "app-dot " + (okDevice ? "good" : "warn");
+      if (okDevice) {
+        const suffix = deviceAddr ? ` (${deviceAddr})` : (deviceId ? ` (${deviceId})` : "");
+        txtD.textContent = "设备：已连接" + suffix;
+      } else {
+        txtD.textContent = "设备：未连接";
+      }
+    } finally {
+      inFlight = false;
+    }
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", insertHeader);
+  } else {
+    insertHeader();
+  }
+})();
+
+

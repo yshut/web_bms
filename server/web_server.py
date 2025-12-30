@@ -9,6 +9,7 @@ import base64
 import posixpath
 from flask import Flask, request, jsonify, send_from_directory
 import re
+from typing import Optional
 
 # 支持作为包或脚本两种方式运行
 try:
@@ -77,6 +78,35 @@ except Exception:
 _wshub.set_dbc_parser(_dbc_service.parse_can_frame)
 _wshub.start()
 
+# 可选：状态库（SQLite），用于前端刷新后快速恢复“最近状态”
+_state_store = None
+try:
+    if getattr(cfg, 'STATE_DB_ENABLE', True):
+        try:
+            from .state_store import StateStore  # type: ignore
+        except Exception:
+            from state_store import StateStore  # type: ignore
+        _state_store = StateStore(getattr(cfg, 'STATE_DB_PATH', os.path.join(os.path.dirname(__file__), 'uploads', 'state.sqlite3')))
+        _state_store.start()
+        try:
+            _wshub.set_state_store(_state_store)
+        except Exception:
+            pass
+        try:
+            print(f"[Server] 状态库启用: {getattr(cfg, 'STATE_DB_PATH', '')}")
+        except Exception:
+            pass
+except Exception as e:
+    _state_store = None
+    try:
+        print(f"[Server] 状态库初始化失败: {e}")
+    except Exception:
+        pass
+
+# /api/status 缓存：减少每次刷新都 ping 设备导致卡顿/闪烁
+_status_cache = {"ts": 0.0, "resp": None}  # type: ignore
+_STATUS_CACHE_TTL = 0.5  # 秒
+
 UDISK_DIR = BASE_DIR
 
 # 通过 WebSocket 与 Qt 设备通信
@@ -89,6 +119,119 @@ def qt_request(payload: dict, timeout: float = None) -> dict:
         except Exception as e:
             return {"ok": False, "error": f"WebSocket request failed: {e}"}
     return {"ok": False, "error": "Device not connected via WebSocket"}
+
+_FS_BASE_CACHE = {"ts": 0.0, "base": None, "source": None}
+
+def _guess_device_base_dir() -> dict:
+    """尝试获取设备真实可写根目录（优先 storage_mount），用于文件上传/UDS固件路径。
+    兼容旧设备：没有 fs_base 时通过 fs_list 探测 /mnt/UDISK /mnt/SDCARD。
+    """
+    try:
+        now = time.time()
+        if _FS_BASE_CACHE.get("base") and (now - float(_FS_BASE_CACHE.get("ts") or 0.0)) < 3.0:
+            return {"ok": True, "base": _FS_BASE_CACHE["base"], "source": _FS_BASE_CACHE.get("source") or "cache"}
+    except Exception:
+        pass
+
+    # 1) 新设备：fs_base
+    try:
+        r = qt_request({"cmd": "fs_base"}, timeout=2.0)
+        if isinstance(r, dict) and r.get("ok") and isinstance(r.get("data"), dict):
+            base = str(r["data"].get("base") or "").strip()
+            if base.startswith("/mnt"):
+                _FS_BASE_CACHE.update({"ts": time.time(), "base": base, "source": "device"})
+                return {"ok": True, "base": base, "source": "device"}
+    except Exception:
+        pass
+
+    # 2) 旧设备：探测常见挂载点
+    def _probe(path: str) -> bool:
+        try:
+            rr = qt_request({"cmd": "fs_list", "path": path}, timeout=2.0)
+            return bool(isinstance(rr, dict) and rr.get("ok"))
+        except Exception:
+            return False
+
+    for cand in ("/mnt/UDISK", "/mnt/udisk", "/mnt/SDCARD", "/mnt/sdcard"):
+        if _probe(cand):
+            _FS_BASE_CACHE.update({"ts": time.time(), "base": cand, "source": "probe"})
+            return {"ok": True, "base": cand, "source": "probe"}
+
+    _FS_BASE_CACHE.update({"ts": time.time(), "base": UDISK_DIR, "source": "server_default"})
+    return {"ok": True, "base": UDISK_DIR, "source": "server_default"}
+
+
+def _device_write_file_chunked(dst_path: str, file_obj, total_size: int, chunk_size: int = 131072) -> dict:
+    """
+    将 HTTP 上传的文件分块写入到设备端文件系统。
+    依赖设备端支持命令：fs_write_range(path, offset, truncate, data[b64])
+    """
+    import time as _time
+    started = _time.time()
+    offset = 0
+    chunks = 0
+    # 保护：限制 chunk_size（避免 JSON 过大）
+    if chunk_size < 16 * 1024:
+        chunk_size = 16 * 1024
+    if chunk_size > 256 * 1024:
+        chunk_size = 256 * 1024
+
+    while True:
+        buf = file_obj.read(chunk_size)
+        if not buf:
+            break
+        b64 = base64.b64encode(buf).decode('ascii')
+        truncate = (offset == 0)
+        resp = qt_request({"cmd": "fs_write_range", "path": dst_path, "offset": int(offset), "truncate": bool(truncate), "data": b64},
+                          timeout=max(getattr(cfg, 'SOCKET_TIMEOUT', 3.0), 10.0))
+        if not resp or not resp.get("ok"):
+            return {
+                "ok": False,
+                "error": (resp.get("error") if isinstance(resp, dict) else "no response") or "write failed",
+                "offset": offset,
+                "chunks": chunks,
+            }
+        offset += len(buf)
+        chunks += 1
+
+    elapsed = _time.time() - started
+    return {"ok": True, "path": dst_path, "size": int(total_size), "written": int(offset), "chunks": int(chunks), "elapsed_s": float(elapsed)}
+
+
+def _sanitize_filename_ascii(name: str, default_name: str = "firmware.s19") -> str:
+    """将文件名规范为 ASCII 安全字符，避免设备端文件系统/工具对中文/空格不兼容。"""
+    try:
+        n = (name or "").strip()
+    except Exception:
+        n = ""
+    if not n:
+        return default_name
+    # 只保留文件名（去掉路径）
+    n = n.replace("\\", "/").split("/")[-1]
+    # 拆分扩展名
+    base = n
+    ext = ""
+    if "." in n:
+        base, ext = n.rsplit(".", 1)
+        ext = "." + ext
+    # 允许的字符集合
+    safe = []
+    for ch in base:
+        o = ord(ch)
+        if (48 <= o <= 57) or (65 <= o <= 90) or (97 <= o <= 122) or ch in ("-", "_", "."):
+            safe.append(ch)
+        else:
+            safe.append("_")
+    base2 = "".join(safe).strip("._-")
+    if not base2:
+        base2 = "firmware"
+    # 限制长度，避免设备端路径过长
+    if len(base2) > 80:
+        base2 = base2[:80]
+    # 扩展名校正
+    if not ext:
+        ext = os.path.splitext(default_name)[1] or ".s19"
+    return base2 + ext
 # 便捷路由：DBC 专用页面
 @app.route('/dbc')
 def dbc_page():
@@ -531,6 +674,15 @@ def dashboard():
 @app.route('/api/status', methods=['GET'])
 def api_status():
     """获取服务器和设备连接状态（仅通过WebSocket）"""
+    # fast=1：不做 ping，不阻塞，用于前端 UI 轮询/刷新
+    fast = str(request.args.get("fast", "")).strip() in ("1", "true", "True", "yes", "on")
+    try:
+        now = time.time()
+        if fast and _status_cache.get("resp") is not None and (now - float(_status_cache.get("ts") or 0.0)) < _STATUS_CACHE_TTL:
+            return jsonify(_status_cache["resp"])
+    except Exception:
+        pass
+
     ws_info = None
     try:
         ws_info = _wshub.info() if _wshub else {"connected": False}
@@ -540,14 +692,15 @@ def api_status():
     # 获取WebSocket连接地址
     client_addr = (ws_info or {}).get("client_addr")
 
-    # 健康检查：ping 一次设备
+    # 健康检查：ping 一次设备（fast=1 时跳过）
     device_id = None
     healthy = False
-    try:
-        r = qt_request({"cmd": "ping"})
-        healthy = bool(r and r.get("ok"))
-    except Exception as e:
-        healthy = False
+    if not fast:
+        try:
+            r = qt_request({"cmd": "ping"})
+            healthy = bool(r and r.get("ok"))
+        except Exception:
+            healthy = False
 
     # 获取设备ID
     try:
@@ -607,6 +760,84 @@ def api_status():
     #     _wshub._last_events['server_status'] = resp['hub']
     # except Exception:
     #     pass
+    try:
+        _status_cache["ts"] = time.time()
+        _status_cache["resp"] = resp
+        if _state_store:
+            _state_store.set("api.status", resp)
+    except Exception:
+        pass
+    return jsonify(resp)
+
+
+@app.route('/api/status_fast', methods=['GET'])
+def api_status_fast():
+    """快速状态：不 ping 设备、只返回后端缓存/WSHub状态（用于前端 UI）。"""
+    try:
+        now = time.time()
+        if _status_cache.get("resp") is not None and (now - float(_status_cache.get("ts") or 0.0)) < _STATUS_CACHE_TTL:
+            return jsonify(_status_cache["resp"])
+    except Exception:
+        pass
+
+    ws_info = None
+    try:
+        ws_info = _wshub.info() if _wshub else {"connected": False}
+    except Exception:
+        ws_info = {"connected": False}
+
+    client_addr = (ws_info or {}).get("client_addr")
+    device_id = None
+    try:
+        if _wshub:
+            device_id = (_wshub.info() or {}).get('device_id')
+    except Exception:
+        device_id = None
+
+    ws_connected = bool((ws_info or {}).get("connected"))
+
+    cached = None
+    try:
+        cached = _wshub.info().get('events') if _wshub else {}
+    except Exception:
+        cached = {}
+
+    devices = []
+    history = []
+    try:
+        if _wshub:
+            info = _wshub.info() or {}
+            devices = [str(x).strip() for x in (info.get('devices') or []) if str(x).strip()]
+            hist = [str(x).strip() for x in (info.get('history') or []) if str(x).strip()]
+            s = set(hist)
+            for d in devices:
+                s.add(d)
+            history = sorted(list(s))
+    except Exception:
+        devices = []
+        history = []
+
+    resp = {
+        "hub": {
+            "connected": bool(ws_connected),
+            "healthy": None,
+            "client_id": device_id,
+            "client_addr": client_addr,
+            "protocol": "websocket",
+            "ws_connected": bool(ws_connected),
+            "ui_clients": (ws_info or {}).get("ui_clients"),
+            "events": cached or {},
+            "devices": devices,
+            "history": history
+        }
+    }
+    try:
+        _status_cache["ts"] = time.time()
+        _status_cache["resp"] = resp
+        if _state_store:
+            _state_store.set("api.status_fast", resp)
+    except Exception:
+        pass
     return jsonify(resp)
 
 
@@ -1493,21 +1724,35 @@ def api_can_live_data():
     """获取实时CAN数据（从WebSocket接收的数据）"""
     try:
         import time
-        
-        frames = []
-        
+        try:
+            limit = int(request.args.get('limit', '50'))
+        except Exception:
+            limit = 50
+        limit = max(1, min(limit, 500))
+
         # 从WebSocket Hub获取缓存的CAN数据
+        can_data_list = []
         if _wshub:
-            # 获取最新的CAN帧数据
-            can_data_list = _wshub.get_can_data(limit=10)
-            frames = [item['frame'] for item in can_data_list if 'frame' in item]
-        
+            can_data_list = _wshub.get_can_data(limit=limit)
+
+        # 兼容：既返回结构化 items，也返回纯文本 lines
+        items = []
+        lines = []
+        for it in (can_data_list or []):
+            try:
+                if isinstance(it, dict) and it.get('frame'):
+                    items.append({"frame": it.get("frame"), "timestamp": it.get("timestamp")})
+                    lines.append(str(it.get("frame")))
+            except Exception:
+                continue
+
         return jsonify({
             "ok": True,
-            "frames": frames,
+            "items": items,
+            "lines": lines,
             "timestamp": time.time(),
             "source": "websocket_cache",
-            "count": len(frames)
+            "count": len(items)
         })
         
     except Exception as e:
@@ -1559,7 +1804,78 @@ def api_uds_can_apply():
     data = request.get_json(silent=True) or {}
     iface = data.get('iface', 'can0')
     bitrate = int(data.get('bitrate', 500000))
-    return jsonify(qt_request({"cmd": "uds_can_set", "iface": iface, "bitrate": bitrate}))
+    # 设备端支持的命令是 uds_set_bitrate（远程控制里默认使用 can0）
+    # 兼容：若用户选 can1，则使用通用 can_set_channel_bitrate 设置对应通道
+    try:
+        if str(iface).strip() == 'can1':
+            qt_request({"cmd": "can_set_channel_bitrate", "channel": 1, "bitrate": bitrate})
+        else:
+            qt_request({"cmd": "can_set_channel_bitrate", "channel": 0, "bitrate": bitrate})
+    except Exception:
+        pass
+    return jsonify(qt_request({"cmd": "uds_set_bitrate", "bitrate": bitrate}))
+
+
+@app.route('/api/uds/config', methods=['GET', 'POST'])
+def api_uds_config():
+    """
+    网页端 UDS 参数同步：
+    - GET: 返回当前建议值（优先从状态库/缓存，其次默认值）
+    - POST: 下发到设备（uds_set_params + can bitrate）
+    """
+    # 默认值与设备端 UDS 页面一致
+    default = {"iface": "can0", "bitrate": 500000, "tx_id": "7F3", "rx_id": "7FB", "block_size": 256}
+
+    if request.method == 'GET':
+        # 读取服务端缓存/状态库
+        try:
+            if _state_store:
+                v = _state_store.get("uds.config", None)
+                if isinstance(v, dict):
+                    merged = dict(default)
+                    merged.update({k: v.get(k, merged.get(k)) for k in merged.keys()})
+                    return jsonify({"ok": True, "config": merged})
+        except Exception:
+            pass
+        return jsonify({"ok": True, "config": default})
+
+    data = request.get_json(silent=True) or {}
+    iface = str(data.get("iface", default["iface"])).strip() or default["iface"]
+    bitrate = int(data.get("bitrate", default["bitrate"]) or default["bitrate"])
+    tx_id_str = str(data.get("tx_id", default["tx_id"])).strip().lower().replace("0x", "")
+    rx_id_str = str(data.get("rx_id", default["rx_id"])).strip().lower().replace("0x", "")
+    try:
+        tx_id = int(tx_id_str, 16)
+    except Exception:
+        tx_id = int(default["tx_id"], 16)
+    try:
+        rx_id = int(rx_id_str, 16)
+    except Exception:
+        rx_id = int(default["rx_id"], 16)
+    block_size = int(data.get("block_size", default["block_size"]) or default["block_size"])
+    block_size = max(8, min(block_size, 4096))
+
+    # 1) 下发 UDS 参数（不要求已选择文件）
+    r1 = qt_request({"cmd": "uds_set_params", "iface": iface, "tx_id": tx_id, "rx_id": rx_id, "block_size": block_size}, timeout=3.0)
+    # 2) 配置波特率（沿用已有 /api/uds/can_apply 逻辑）
+    try:
+        if iface == "can1":
+            qt_request({"cmd": "can_set_channel_bitrate", "channel": 1, "bitrate": bitrate})
+        else:
+            qt_request({"cmd": "can_set_channel_bitrate", "channel": 0, "bitrate": bitrate})
+    except Exception:
+        pass
+    r2 = qt_request({"cmd": "uds_set_bitrate", "bitrate": bitrate})
+
+    cfg_out = {"iface": iface, "bitrate": bitrate, "tx_id": f"{tx_id:X}", "rx_id": f"{rx_id:X}", "block_size": block_size}
+    try:
+        if _state_store:
+            _state_store.set("uds.config", cfg_out)
+    except Exception:
+        pass
+
+    ok = bool(isinstance(r1, dict) and r1.get("ok")) and bool(isinstance(r2, dict) and r2.get("ok"))
+    return jsonify({"ok": ok, "config": cfg_out, "device": {"uds_set_params": r1, "uds_set_bitrate": r2}})
 
 @app.route('/api/uds/upload', methods=['POST'])
 def api_uds_upload():
@@ -1568,15 +1884,66 @@ def api_uds_upload():
         return jsonify({"ok": False, "error": "no file"}), 400
     f = request.files['file']
     name = f.filename or 'firmware.s19'
-    safe_name = name.replace('\\', '_').replace('/', '_').replace('\r','').replace('\n','')
+    safe_name = _sanitize_filename_ascii(name, default_name="firmware.s19")
+    # 优先使用前端传入 base（来自 /api/fs/base）；若 base 为 /mnt（旧版/未探测成功），则自动改用设备真实 base
+    base = (request.form.get('base') or '').replace('\\', '/').strip()
+    if not base or base.rstrip('/') == '/mnt':
+        gb = _guess_device_base_dir()
+        base = gb.get("base") or UDISK_DIR
+    if not base.startswith('/mnt'):
+        base = UDISK_DIR
     # 使用 POSIX join，避免在 Windows 上产生反斜杠
-    path = posixpath.join(UDISK_DIR, safe_name)
-    content = f.read()
-    b64 = base64.b64encode(content).decode('ascii')
-    # 上传文件可能较大，增加超时到30秒
-    file_size_mb = len(content) / (1024 * 1024)
-    print(f"正在上传UDS固件: {safe_name} ({file_size_mb:.2f} MB)")
-    return jsonify(qt_request({"cmd": "fs_upload", "path": path, "data": b64}, timeout=30.0))
+    path = posixpath.join(base, safe_name)
+    # 优先走分块写入（更稳定，适合大文件）；如果设备端不支持则回退到旧 fs_upload
+    try:
+        total = 0
+        try:
+            # werkzeug FileStorage
+            total = int(getattr(f, 'content_length', 0) or 0)
+        except Exception:
+            total = 0
+        if not total:
+            try:
+                # 读取文件对象长度（不可靠则忽略）
+                pos = f.stream.tell()
+                f.stream.seek(0, 2)
+                total = int(f.stream.tell())
+                f.stream.seek(pos, 0)
+            except Exception:
+                total = 0
+
+        print(f"正在上传UDS固件(分块): {safe_name} ({(total/(1024*1024)):.2f} MB)" if total else f"正在上传UDS固件(分块): {safe_name}")
+        f.stream.seek(0)
+        resp = _device_write_file_chunked(path, f.stream, total_size=total, chunk_size=128 * 1024)
+        if resp.get("ok"):
+            # 上传成功后自动设置 UDS 文件路径，减少用户手工输入出错
+            try:
+                setr = qt_request({"cmd": "uds_set_file", "path": path}, timeout=5.0)
+            except Exception:
+                setr = {"ok": False, "error": "uds_set_file failed"}
+            out = dict(resp)
+            out["auto_set_file"] = bool(setr and setr.get("ok"))
+            if not out["auto_set_file"]:
+                out["auto_set_error"] = setr.get("error") if isinstance(setr, dict) else "uds_set_file failed"
+            return jsonify(out)
+        # 若提示 unknown cmd，则回退一次性上传（仅适合小文件）
+        if "fs_write_range" in str(resp.get("error", "")) or "unknown" in str(resp.get("error", "")).lower():
+            raise RuntimeError("device does not support fs_write_range")
+        return jsonify(resp), 500
+    except Exception:
+        content = f.read()
+        b64 = base64.b64encode(content).decode('ascii')
+        file_size_mb = len(content) / (1024 * 1024)
+        print(f"正在上传UDS固件(回退fs_upload): {safe_name} ({file_size_mb:.2f} MB)")
+        r = qt_request({"cmd": "fs_upload", "path": path, "data": b64}, timeout=30.0)
+        # 回退模式也尝试自动设置
+        if isinstance(r, dict) and r.get("ok"):
+            try:
+                qt_request({"cmd": "uds_set_file", "path": path}, timeout=5.0)
+            except Exception:
+                pass
+            return jsonify({"ok": True, "path": path, "data": r.get("data"), "fallback": "fs_upload"})
+        return jsonify(r)
 
 @app.route('/api/uds/list', methods=['GET'])
 def api_uds_list():
@@ -1594,8 +1961,20 @@ def api_uds_stop():
 
 @app.route('/api/uds/progress', methods=['GET'])
 def api_uds_progress():
-    # 进度轮询允许较短超时提高刷新体验
-    return jsonify(qt_request({"cmd": "uds_progress"}, timeout=2.0))
+    # 进度轮询允许较短超时提高刷新体验；对设备响应做扁平化，前端读取 j.percent 更直观
+    r = qt_request({"cmd": "uds_progress"}, timeout=2.0)
+    if not isinstance(r, dict):
+        return jsonify({"ok": False, "error": "no response"}), 500
+    if not r.get("ok"):
+        return jsonify(r)
+    data = r.get("data") if isinstance(r.get("data"), dict) else {}
+    percent = 0
+    try:
+        percent = int(data.get("percent", data.get("total_percent", 0)) or 0)
+    except Exception:
+        percent = 0
+    out = {"ok": True, "percent": percent, "data": data}
+    return jsonify(out)
 
 @app.route('/api/uds/logs', methods=['GET'])
 def api_uds_logs():
@@ -1603,7 +1982,19 @@ def api_uds_logs():
         limit = int(request.args.get('limit', '100'))
     except Exception:
         limit = 100
-    return jsonify(qt_request({"cmd": "uds_logs", "limit": limit}))
+    r = qt_request({"cmd": "uds_logs", "limit": limit})
+    if not isinstance(r, dict):
+        return jsonify({"ok": False, "error": "no response"}), 500
+    if not r.get("ok"):
+        return jsonify(r)
+    data = r.get("data") if isinstance(r.get("data"), dict) else {}
+    logs = []
+    if isinstance(data, dict):
+        if isinstance(data.get("logs"), list):
+            logs = data.get("logs")
+        elif isinstance(data.get("lines"), list):
+            logs = data.get("lines")
+    return jsonify({"ok": True, "logs": logs, "data": data})
 
 # 文件管理 API（代理到设备端）
 @app.route('/api/fs/list', methods=['GET'])
@@ -1656,13 +2047,37 @@ def api_fs_upload():
     name = f.filename or 'upload.bin'
     safe_name = name.replace('\\','_').replace('/','_').replace('\r','').replace('\n','')
     path = posixpath.join(base, safe_name)
-    content = f.read()
-    b64 = base64.b64encode(content).decode('ascii')
-    return jsonify(qt_request({"cmd": "fs_upload", "path": path, "data": b64}))
+    # 优先走分块写入（更稳定）；如果设备端不支持则回退到旧 fs_upload（小文件）
+    try:
+        total = 0
+        try:
+            total = int(getattr(f, 'content_length', 0) or 0)
+        except Exception:
+            total = 0
+        if not total:
+            try:
+                pos = f.stream.tell()
+                f.stream.seek(0, 2)
+                total = int(f.stream.tell())
+                f.stream.seek(pos, 0)
+            except Exception:
+                total = 0
+        f.stream.seek(0)
+        resp = _device_write_file_chunked(path, f.stream, total_size=total, chunk_size=128 * 1024)
+        if resp.get("ok"):
+            return jsonify(resp)
+        if "fs_write_range" in str(resp.get("error", "")) or "unknown" in str(resp.get("error", "")).lower():
+            raise RuntimeError("device does not support fs_write_range")
+        return jsonify(resp), 500
+    except Exception:
+        content = f.read()
+        b64 = base64.b64encode(content).decode('ascii')
+        return jsonify(qt_request({"cmd": "fs_upload", "path": path, "data": b64}))
 
 @app.route('/api/fs/base', methods=['GET'])
 def api_fs_base():
-    return jsonify({"ok": True, "base": UDISK_DIR})
+    gb = _guess_device_base_dir()
+    return jsonify({"ok": True, "base": gb.get("base"), "source": gb.get("source")})
 
 @app.route('/api/fs/download', methods=['GET'])
 def api_fs_download():
@@ -1830,16 +2245,25 @@ def api_file_batch_upload():
             name = file.filename or 'upload.bin'
             safe_name = name.replace('\\','_').replace('/','_').replace('\r','').replace('\n','')
             path = posixpath.join(base_dir, safe_name)
-            content = file.read()
-            b64 = base64.b64encode(content).decode('ascii')
-            
-            resp = qt_request({"cmd": "fs_upload", "path": path, "data": b64}, timeout=30.0)
+            # 分块上传
+            try:
+                total = 0
+                try:
+                    total = int(getattr(file, 'content_length', 0) or 0)
+                except Exception:
+                    total = 0
+                file.stream.seek(0)
+                resp = _device_write_file_chunked(path, file.stream, total_size=total, chunk_size=128 * 1024)
+            except Exception:
+                content = file.read()
+                b64 = base64.b64encode(content).decode('ascii')
+                resp = qt_request({"cmd": "fs_upload", "path": path, "data": b64}, timeout=30.0)
             results.append({
                 "name": safe_name,
                 "path": path,
-                "size": len(content),
-                "ok": resp.get('ok', False),
-                "error": resp.get('error') if not resp.get('ok') else None
+                "size": int(resp.get("written") or resp.get("size") or 0) if isinstance(resp, dict) else 0,
+                "ok": resp.get('ok', False) if isinstance(resp, dict) else False,
+                "error": (resp.get('error') if isinstance(resp, dict) else "no response") if not (isinstance(resp, dict) and resp.get('ok')) else None
             })
         
         return jsonify({"ok": True, "results": results})

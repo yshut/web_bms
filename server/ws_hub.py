@@ -35,6 +35,33 @@ class WSHub:
         self._dbc_parser: Optional[Callable[[str], Optional[dict]]] = None
         # 全局单调递增序列号，用于前端按序显示
         self._frame_seq: int = 0
+        # 可选：状态持久化（SQLite）
+        self._state_store = None
+        self._last_persist_ts: float = 0.0
+
+    def set_state_store(self, store) -> None:
+        """注入一个状态存储（例如 StateStore），用于持久化关键状态/最近事件。"""
+        self._state_store = store
+
+    def _persist_event(self, ev: str) -> None:
+        """按事件粒度做 best-effort 持久化（高频事件会被跳过/限频）。"""
+        try:
+            if not self._state_store:
+                return
+            # 高频事件不落盘：can_frames/can_parsed 只走内存/推送
+            if ev in ("can_frames", "can_parsed"):
+                return
+            # 限频：最多 1s 一次（避免刷盘）
+            import time
+            now = time.time()
+            if (now - float(self._last_persist_ts or 0.0)) < 1.0:
+                return
+            self._last_persist_ts = now
+            self._state_store.set("hub.events", dict(self._last_events))
+            self._state_store.set("hub.device_id", self._device_id)
+            self._state_store.set("hub.client_addr", self._client_addr)
+        except Exception:
+            pass
 
     def start(self):
         if not websockets:
@@ -334,6 +361,7 @@ class WSHub:
                             if did:
                                 self._device_id = did
                                 self._last_events['device_id'] = {"id": did}
+                                self._persist_event('device_id')
                                 # 设备集合更新
                                 try:
                                     self._device_conns[ws] = did
@@ -354,6 +382,7 @@ class WSHub:
                             ev = obj.get('event'); dat = obj.get('data')
                             if isinstance(ev, str):
                                 self._last_events[ev] = dat if isinstance(dat, dict) else {"value": dat}
+                                self._persist_event(ev)
                                 
                                 # 处理CAN帧数据：后端实时DBC解析
                                 if ev == 'can_frames' and isinstance(dat, dict):
@@ -574,6 +603,7 @@ class WSHub:
                         "port": None,
                         "id": None,
                     }
+                    self._persist_event("server_connection")
                     if self._ui_clients:
                         evt = json.dumps({"event": "server_connection", "data": self._last_events["server_connection"]})
                         for ui_ws in list(self._ui_clients):

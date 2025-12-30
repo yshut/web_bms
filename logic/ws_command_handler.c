@@ -458,6 +458,23 @@ static int handle_can_cmd(const char *json, const char *cmd, const char *request
  */
 static int handle_uds_cmd(const char *json, const char *cmd, const char *request_id)
 {
+    if (strcmp(cmd, "uds_set_params") == 0) {
+        char *iface = extract_json_string(json, "iface");
+        uint32_t tx_id = (uint32_t)extract_json_int(json, "tx_id", 0x7F3);
+        uint32_t rx_id = (uint32_t)extract_json_int(json, "rx_id", 0x7FB);
+        uint32_t blk = (uint32_t)extract_json_int(json, "block_size", 256);
+        extern int uds_set_params(const char *iface, uint32_t tx_id, uint32_t rx_id, uint32_t block_size);
+        const char *iface_out = (iface && iface[0]) ? iface : "can0";
+        uds_set_params(iface_out, tx_id, rx_id, blk);
+        char data[256];
+        snprintf(data, sizeof(data),
+                 "{\"iface\":\"%s\",\"tx_id\":%u,\"rx_id\":%u,\"block_size\":%u}",
+                 iface_out, tx_id, rx_id, blk);
+        ws_command_send_ok(request_id, data);
+        if (iface) free(iface);
+        return 0;
+    }
+
     if (strcmp(cmd, "uds_set_file") == 0) {
         char *path = extract_json_string(json, "path");
         if (path) {
@@ -476,20 +493,24 @@ static int handle_uds_cmd(const char *json, const char *cmd, const char *request
     }
     
     if (strcmp(cmd, "uds_progress") == 0) {
-        // 获取UDS刷写进度
-        char progress[512];
+        // 获取UDS刷写进度（简化版：running + percent）
+        extern bool uds_is_running(void);
+        // 当前实现未对外暴露精确进度，先提供基础状态，避免前端永远0%
+        char progress[256];
         snprintf(progress, sizeof(progress),
-                "{\"total_percent\":0,\"status\":\"idle\"}");
+                 "{\"percent\":%d,\"running\":%s}",
+                 uds_is_running() ? 5 : 0,
+                 uds_is_running() ? "true" : "false");
         ws_command_send_ok(request_id, progress);
         return 0;
     }
     
     if (strcmp(cmd, "uds_logs") == 0) {
         int limit = extract_json_int(json, "limit", 100);
-        
-        // 获取UDS日志（简单实现）
+        (void)limit;
+        // 当前实现未对外暴露日志缓存，先返回空数组（后续可扩展为环形缓存）
         char logs[256];
-        snprintf(logs, sizeof(logs), "{\"lines\":[]}");
+        snprintf(logs, sizeof(logs), "{\"logs\":[]}");
         ws_command_send_ok(request_id, logs);
         return 0;
     }
@@ -616,6 +637,14 @@ static int handle_uds_cmd(const char *json, const char *cmd, const char *request
  */
 static int handle_file_cmd(const char *json, const char *cmd, const char *request_id)
 {
+    if (strcmp(cmd, "fs_base") == 0) {
+        const char *base = (g_app_config.storage_mount[0] ? g_app_config.storage_mount : "/mnt/SDCARD");
+        char data[256];
+        snprintf(data, sizeof(data), "{\"base\":\"%s\"}", base);
+        ws_command_send_ok(request_id, data);
+        return 0;
+    }
+
     if (strcmp(cmd, "fs_list") == 0) {
         char *path = extract_json_string(json, "path");
         if (!path) path = strdup(g_app_config.storage_mount[0] ? g_app_config.storage_mount : "/mnt/SDCARD");
@@ -790,6 +819,47 @@ static int handle_file_cmd(const char *json, const char *cmd, const char *reques
         } else {
             ws_command_send_error(request_id, "Missing path");
         }
+        return 0;
+    }
+
+    if (strcmp(cmd, "fs_write_range") == 0) {
+        char *path = extract_json_string(json, "path");
+        int offset = extract_json_int(json, "offset", 0);
+        int truncate = extract_json_bool(json, "truncate", 0);
+        char *b64_data = extract_json_string(json, "data");
+
+        if (!path || !b64_data) {
+            if (path) free(path);
+            if (b64_data) free(b64_data);
+            ws_command_send_error(request_id, "Missing path or data");
+            return 0;
+        }
+
+        if (offset < 0) offset = 0;
+
+        size_t bin_len = 0;
+        uint8_t *bin_data = base64_decode(b64_data, &bin_len);
+        if (!bin_data && bin_len > 0) {
+            free(path);
+            free(b64_data);
+            ws_command_send_error(request_id, "Failed to decode data");
+            return 0;
+        }
+
+        int rc = file_write_range(path, (size_t)offset, bin_data, bin_len, truncate ? true : false);
+        if (bin_data) free(bin_data);
+        free(b64_data);
+
+        if (rc == 0) {
+            char data[512];
+            snprintf(data, sizeof(data),
+                     "{\"path\":\"%s\",\"offset\":%d,\"written\":%zu,\"next\":%zu}",
+                     path, offset, bin_len, (size_t)offset + bin_len);
+            ws_command_send_ok(request_id, data);
+        } else {
+            ws_command_send_error(request_id, "Failed to write range");
+        }
+        free(path);
         return 0;
     }
     

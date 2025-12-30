@@ -4,6 +4,8 @@
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <title>DBC 解析工具</title>
+  <link rel="icon" href="/static/dashboard/favicon.ico">
+  <link rel="stylesheet" href="/static/shared.css">
   <style>
     body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin:0; padding:20px; background:#f8f9fa; }
     h1 { color:#1a73e8; margin-bottom: 16px; }
@@ -107,7 +109,7 @@ function formatHexRaw(val){
 function connectWS(){
   try { if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return; } catch(e){}
   const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const host = location.hostname || '10.132.18.233';
+  const host = location.hostname;
   const wsUrl = `${protocol}//${host}:5052/ui`;
   log('连接 WebSocket: ' + wsUrl);
   try{
@@ -378,6 +380,7 @@ function log(text){ const el=document.getElementById('log'); const ts=new Date()
 refreshDbcList();
 connectWS();
 </script>
+<script src="/static/shared.js"></script>
 </body>
 </html>
 

@@ -71,6 +71,17 @@ uint8_t* file_read(const char *path, size_t *out_len);
 uint8_t* file_read_range(const char *path, size_t offset, size_t length, size_t *out_len, bool *eof);
 
 /**
+ * @brief 分块写入文件（支持偏移写）
+ * @param path 文件路径
+ * @param offset 写入起始偏移
+ * @param data 数据
+ * @param len 数据长度
+ * @param truncate 若为 true 且 offset==0，则先清空/重建文件
+ * @return 0成功，-1失败
+ */
+int file_write_range(const char *path, size_t offset, const uint8_t *data, size_t len, bool truncate);
+
+/**
  * @brief 获取文件信息
  * @param path 文件路径
  * @param info 输出文件信息

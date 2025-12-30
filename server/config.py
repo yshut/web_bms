@@ -57,6 +57,12 @@ PUBLIC_HOST_DISPLAY = _guess_public_host()
 # WebSocket 通信超时（秒）
 SOCKET_TIMEOUT = float(os.getenv('SOCKET_TIMEOUT', '3.0'))
 
+# 状态存储（用于前端刷新后快速恢复状态；默认 SQLite）
+# - 设为 '0' 可关闭持久化，仅内存缓存
+STATE_DB_ENABLE = os.getenv('STATE_DB_ENABLE', '1').strip() not in ('0', 'false', 'False', 'no', 'NO')
+# - SQLite 文件路径（建议放在可写目录）
+STATE_DB_PATH = os.getenv('STATE_DB_PATH', os.path.join(os.path.dirname(__file__), 'uploads', 'state.sqlite3'))
+
 # 打印配置信息（启动时）
 def print_config():
     """打印当前配置（用于启动时确认）"""
