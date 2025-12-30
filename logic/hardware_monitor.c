@@ -7,6 +7,7 @@
 #include "can_handler.h"
 #include "ws_client.h"
 #include "../utils/logger.h"
+#include "../utils/app_config.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -89,8 +90,12 @@ int hw_monitor_init(const hw_monitor_config_t *config)
     
     strncpy(g_hw_ctx.can0_status.interface, "can0", sizeof(g_hw_ctx.can0_status.interface) - 1);
     strncpy(g_hw_ctx.can1_status.interface, "can1", sizeof(g_hw_ctx.can1_status.interface) - 1);
-    strncpy(g_hw_ctx.sd_status.mount_point, "/mnt/SDCARD", sizeof(g_hw_ctx.sd_status.mount_point) - 1);
-    strncpy(g_hw_ctx.eth_status.interface, "eth0", sizeof(g_hw_ctx.eth_status.interface) - 1);
+    strncpy(g_hw_ctx.sd_status.mount_point,
+            (g_app_config.storage_mount[0] ? g_app_config.storage_mount : "/mnt/SDCARD"),
+            sizeof(g_hw_ctx.sd_status.mount_point) - 1);
+    strncpy(g_hw_ctx.eth_status.interface,
+            (g_app_config.net_iface[0] ? g_app_config.net_iface : "eth0"),
+            sizeof(g_hw_ctx.eth_status.interface) - 1);
     
     g_hw_ctx.last_report_ms = 0;
     
@@ -520,7 +525,7 @@ static void* monitor_thread_func(void *arg)
         }
         
         if (g_hw_ctx.config.enable_storage_monitor) {
-            update_storage_status("/mnt/SDCARD", &g_hw_ctx.sd_status);
+            update_storage_status(g_hw_ctx.sd_status.mount_point, &g_hw_ctx.sd_status);
         }
         
         if (g_hw_ctx.config.enable_system_monitor) {
@@ -528,7 +533,7 @@ static void* monitor_thread_func(void *arg)
         }
         
         if (g_hw_ctx.config.enable_network_monitor) {
-            update_network_status("eth0", &g_hw_ctx.eth_status);
+            update_network_status(g_hw_ctx.eth_status.interface, &g_hw_ctx.eth_status);
         }
         
         pthread_mutex_unlock(&g_hw_ctx.mutex);

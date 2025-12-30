@@ -27,6 +27,7 @@
 #include "logic/file_transfer_progress.h"
 #include "logic/hardware_monitor.h"
 #include "utils/logger.h"
+#include "utils/app_config.h"
 
 /* 全局变量 */
 // 注意：信号处理函数里只能做 async-signal-safe 的事情
@@ -150,7 +151,7 @@ static int init_can_system(void)
     log_info("初始化CAN双通道...");
     
     // 默认波特率：500Kbps
-    if (can_handler_init_dual(500000, 500000) < 0) {
+    if (can_handler_init_dual(g_app_config.can0_bitrate, g_app_config.can1_bitrate) < 0) {
         log_warn("CAN双通道初始化失败（可能是硬件不支持）");
         // 不返回错误，允许应用继续运行
         return 0;
@@ -167,10 +168,10 @@ static int init_can_system(void)
     can_recorder_config_t recorder_config = {
         .record_can0 = true,
         .record_can1 = true,
-        .max_file_size = 40 * 1024 * 1024,  // 40MB
-        .flush_interval_ms = 200,           // 200ms
+        .max_file_size = (uint64_t)g_app_config.can_record_max_mb * 1024 * 1024,
+        .flush_interval_ms = (int)g_app_config.can_record_flush_ms,
     };
-    strncpy(recorder_config.record_dir, "/mnt/SDCARD/can_records", 
+    strncpy(recorder_config.record_dir, g_app_config.can_record_dir,
             sizeof(recorder_config.record_dir) - 1);
     
     if (can_recorder_init(&recorder_config) < 0) {
@@ -255,55 +256,16 @@ static int init_websocket(void)
 {
     log_info("初始化WebSocket客户端...");
     
-    // 从配置文件读取服务器地址
-    // 注意：0.0.0.0 仅用于服务端“监听所有网卡”，客户端不能用 0.0.0.0 去连接。
-    // 如果未提供配置文件，建议你把主机IP写入 /mnt/UDISK/ws_config.txt（推荐）或 /mnt/SDCARD/ws_config.txt：
-    // 第一行: SERVER_IP
-    // 第二行: SERVER_PORT（可选，默认5052）
-    char host[128] = "192.168.100.1";   // 默认值（可按你的PC实际IP修改）
-    uint16_t port = 5052;
-    
-    const char *cfg_paths[] = {
-        "/mnt/UDISK/ws_config.txt",   // 优先UDISK：更常用、易维护
-        "/mnt/SDCARD/ws_config.txt",
-        NULL
-    };
-    bool loaded = false;
-    for (int i = 0; cfg_paths[i]; i++) {
-        FILE *fp = fopen(cfg_paths[i], "r");
-        if (!fp) continue;
-        char line[256];
-        if (fgets(line, sizeof(line), fp)) {
-            line[strcspn(line, "\r\n")] = '\0';
-            if (line[0] != '\0') {
-                strncpy(host, line, sizeof(host) - 1);
-                host[sizeof(host) - 1] = '\0';
-            }
-        }
-        if (fgets(line, sizeof(line), fp)) {
-            int p = atoi(line);
-            if (p > 0 && p <= 65535) port = (uint16_t)p;
-        }
-        fclose(fp);
-        loaded = true;
-        log_info("加载WebSocket配置(%s): %s:%d", cfg_paths[i], host, port);
-        break;
-    }
-    if (!loaded) {
-        log_warn("未找到WebSocket配置文件，使用默认配置: %s:%d", host, port);
-        log_warn("请在 /mnt/UDISK/ws_config.txt 写入两行: <SERVER_IP> 和 <PORT(可选)>，然后重启应用");
-    }
-    
     // 配置WebSocket客户端
     ws_config_t config = {
-        .port = port,
-        .use_ssl = false,
-        .reconnect_interval_ms = 4000,
-        .keepalive_interval_s = 20,
+        .port = g_app_config.ws_port,
+        .use_ssl = g_app_config.ws_use_ssl,
+        .reconnect_interval_ms = (int)g_app_config.ws_reconnect_interval_ms,
+        .keepalive_interval_s = (int)g_app_config.ws_keepalive_interval_s,
     };
-    strncpy(config.host, host, sizeof(config.host) - 1);
+    strncpy(config.host, g_app_config.ws_host, sizeof(config.host) - 1);
     config.host[sizeof(config.host) - 1] = '\0';
-    strncpy(config.path, "/ws", sizeof(config.path) - 1);
+    strncpy(config.path, g_app_config.ws_path, sizeof(config.path) - 1);
     config.path[sizeof(config.path) - 1] = '\0';
     
     // 初始化UI远程控制模块
@@ -368,13 +330,13 @@ static int init_hardware_monitor(void)
     log_info("初始化硬件监控系统...");
     
     hw_monitor_config_t config = {
-        .interval_ms = 2000,              // 每2秒更新一次
+        .interval_ms = g_app_config.hw_interval_ms,
         .enable_can_monitor = true,
         .enable_storage_monitor = true,
         .enable_system_monitor = true,
         .enable_network_monitor = true,
-        .enable_auto_report = true,
-        .report_interval_ms = 10000,      // 每10秒上报一次
+        .enable_auto_report = g_app_config.hw_auto_report,
+        .report_interval_ms = g_app_config.hw_report_interval_ms,
     };
     
     if (hw_monitor_init(&config) < 0) {
@@ -413,8 +375,36 @@ int main(int argc, char *argv[])
     (void)argc;  // 未使用的参数
     (void)argv;  // 未使用的参数
     
-    /* 初始化日志系统 */
-    log_init("/tmp/lvgl_app.log", LOG_LEVEL_DEBUG);
+    /* 统一加载配置（/mnt/UDISK/ws_config.txt 优先） */
+    char cfg_path[256] = {0};
+    int cfg_loaded = app_config_load_best(cfg_path, sizeof(cfg_path));
+
+    /* 初始化日志系统（从配置读取） */
+    log_level_t lvl = LOG_LEVEL_DEBUG;
+    if (g_app_config.log_level == APP_LOG_INFO) lvl = LOG_LEVEL_INFO;
+    else if (g_app_config.log_level == APP_LOG_WARN) lvl = LOG_LEVEL_WARN;
+    else if (g_app_config.log_level == APP_LOG_ERROR) lvl = LOG_LEVEL_ERROR;
+    log_init(g_app_config.log_file[0] ? g_app_config.log_file : NULL, lvl);
+
+    if (cfg_loaded == 0) {
+        log_info("已加载配置文件: %s", cfg_path);
+    } else {
+        log_warn("未找到配置文件，使用默认配置（可创建 /mnt/UDISK/ws_config.txt）");
+        /* 尝试生成一份全量模板配置，方便用户只维护一个文件 */
+        {
+            char saved_path[256] = {0};
+            if (app_config_save_best(saved_path, sizeof(saved_path)) == 0) {
+                log_info("已生成默认配置文件: %s", saved_path);
+            } else {
+                log_warn("生成默认配置文件失败（可能未挂载 UDISK/SDCARD 或只读）");
+            }
+        }
+    }
+    log_info("配置: ws=%s:%u path=%s", g_app_config.ws_host, g_app_config.ws_port, g_app_config.ws_path);
+    log_info("配置: can0=%u can1=%u record_dir=%s", g_app_config.can0_bitrate, g_app_config.can1_bitrate, g_app_config.can_record_dir);
+    log_info("配置: font_size=%d font_path=%s", g_app_config.font_size, g_app_config.font_path[0] ? g_app_config.font_path : "(auto)");
+    log_info("配置: storage_mount=%s net_iface=%s wifi_iface=%s", g_app_config.storage_mount, g_app_config.net_iface, g_app_config.wifi_iface);
+
     log_info("========================================");
     log_info("T113-S3 LVGL工业控制应用启动");
     log_info("版本: v1.0.0");

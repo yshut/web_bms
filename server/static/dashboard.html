@@ -92,12 +92,8 @@
   const g1 = $('g1'), g2=$('g2'), g3=$('g3');
   const bmst=$('bmst'), bmsi=$('bmsi'), cellv=$('cellv'), tempt=$('tempt'), iso=$('iso'), faultlvl=$('faultlvl'), faultmsg=$('faultmsg');
 
-  // ⭐ 配置后端服务器地址 ⭐
-  // 选项1: 使用固定IP（修改下面的IP地址）
-  const BACKEND_HOST = '172.17.237.241';  // ← 修改为您的后端服务器IP
-  
-  // 选项2: 自动从浏览器URL获取（注释掉上面，取消注释下面）
-  // const BACKEND_HOST = location.hostname;
+  // 后端服务器地址：默认从浏览器 URL 自动获取（避免写死 IP 导致“首页显示已连接但其他页面不一致”）
+  const BACKEND_HOST = location.hostname;
   
   // WebSocket连接
   let proto = location.protocol === 'https:' ? 'wss' : 'ws';

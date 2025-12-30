@@ -1011,6 +1011,8 @@
         let statusSyncTimer = null;
         let ws = null;
         let wsReconnectTimer = null;
+        let wsOnline = false;      // UI WebSocket（/ui）是否连通
+        let deviceOnline = false;  // 设备（/ws）是否连通（来自 /api/status）
         let lastSeq = 0;          // 后端全局序列号，用于时序去重
         let lastTimestamp = 0;    // 设备时间戳去重（秒）
         const MAX_FRAMES = 200;   // 最多显示200帧
@@ -1026,6 +1028,38 @@
         let signalUpdateRateTimer = null;
 
         // WebSocket连接管理
+        function renderConnectionStatus(serverReachable = true) {
+            const dot = document.getElementById('serverStatus');
+            const text = document.getElementById('serverText');
+
+            if (!serverReachable) {
+                dot.classList.remove('active');
+                text.textContent = '服务器: 离线';
+                return;
+            }
+
+            dot.classList.add('active');
+            const wsPart = wsOnline ? 'WS在线' : 'WS断开';
+            const devPart = deviceOnline ? '设备已连接' : '设备未连接';
+            text.textContent = `服务器: 运行中 (${wsPart}, ${devPart})`;
+
+            // 未连设备时禁用控制按钮，避免“服务器运行中但无法启动监控”的误导
+            const btnStart = document.getElementById('btnStart');
+            const btnStartRecord = document.getElementById('btnStartRecord');
+            if (!deviceOnline) {
+                if (btnStart) btnStart.disabled = true;
+                if (btnStartRecord) btnStartRecord.disabled = true;
+                const container = document.getElementById('framesContainer');
+                if (container && container.children.length === 0) {
+                    container.innerHTML = '<div style="text-align:center;color:#9ca3af;padding:50px;">设备未连接，无法启动监控。<br><small>请检查开发板 ws_config.txt 的 ws_host 是否为 Windows 局域网 IP（不要用 172.17.*）。</small></div>';
+                }
+            } else {
+                // 仅在未启动监控时允许启动按钮
+                if (btnStart && !monitorActive) btnStart.disabled = false;
+                if (btnStartRecord && !recordActive) btnStartRecord.disabled = false;
+            }
+        }
+
         function connectWebSocket() {
             const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
             const wsUrl = `${wsProtocol}//${window.location.host.split(':')[0]}:5052/ui`;
@@ -1037,8 +1071,8 @@
                 
                 ws.onopen = () => {
                     console.log('✓ WebSocket已连接');
-                    document.getElementById('serverStatus').classList.add('active');
-                    document.getElementById('serverText').textContent = '服务器: 在线 (WS)';
+                    wsOnline = true;
+                    renderConnectionStatus(true);
                 };
                 
                 ws.onmessage = (event) => {
@@ -1056,8 +1090,8 @@
                 
                 ws.onclose = () => {
                     console.log('WebSocket已断开');
-                    document.getElementById('serverStatus').classList.remove('active');
-                    document.getElementById('serverText').textContent = '服务器: 断开';
+                    wsOnline = false;
+                    renderConnectionStatus(true);
                     ws = null;
                     
                     // 5秒后重连
@@ -1369,17 +1403,16 @@
                 const response = await fetch(API_BASE + '/api/status');
                 const result = await response.json();
                 
-                document.getElementById('serverStatus').classList.add('active');
-                document.getElementById('serverText').textContent = '服务器: 运行中';
+                deviceOnline = !!(result && result.hub && result.hub.connected);
+                renderConnectionStatus(true);
                 
                 // 检查设备连接状态
-                if (result.hub && result.hub.connected) {
+                if (deviceOnline) {
                     // 更新CAN状态
                     updateCANStatus();
                 }
             } catch (error) {
-                document.getElementById('serverStatus').classList.remove('active');
-                document.getElementById('serverText').textContent = '服务器: 离线';
+                renderConnectionStatus(false);
             }
         }
         
@@ -1398,6 +1431,11 @@
                         document.getElementById('btnStart').disabled = true;
                         document.getElementById('btnStop').disabled = false;
                     }
+                } else if (result && result.ok === false && !deviceOnline) {
+                    // 设备未连接时保持“未启动”并提示
+                    monitorActive = false;
+                    document.getElementById('canStatus').classList.remove('active');
+                    document.getElementById('canText').textContent = 'CAN: 需要设备连接';
                 }
             } catch (error) {
                 console.error('更新CAN状态失败:', error);
@@ -1412,6 +1450,11 @@
             const btnStart = document.getElementById('btnStart');
             if (btnStart.disabled) {
                 console.log('按钮已禁用，忽略点击');
+                return;
+            }
+
+            if (!deviceOnline) {
+                alert('设备未连接，无法启动监控。\n请检查开发板 ws_config.txt 的 ws_host 是否为 Windows 局域网 IP（不要用 172.17.*），并重启 lvgl_app。');
                 return;
             }
             
@@ -1498,6 +1541,11 @@
             
             const btnStart = document.getElementById('btnStartRecord');
             if (btnStart.disabled) {
+                return;
+            }
+
+            if (!deviceOnline) {
+                alert('设备未连接，无法开始录制。\n请先确保设备已通过 WebSocket 连接到服务器。');
                 return;
             }
             

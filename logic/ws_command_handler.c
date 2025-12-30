@@ -12,6 +12,7 @@
 #include "ui_remote_control.h"
 #include "../logic/app_manager.h"
 #include "../utils/logger.h"
+#include "../utils/app_config.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -228,8 +229,8 @@ static int handle_can_cmd(const char *json, const char *cmd, const char *request
     
     if (strcmp(cmd, "can_get_config") == 0) {
         // 获取当前CAN配置（波特率等）
-        uint32_t bitrate0 = 500000;
-        uint32_t bitrate1 = 500000;
+        uint32_t bitrate0 = g_app_config.can0_bitrate;
+        uint32_t bitrate1 = g_app_config.can1_bitrate;
         
         // 尝试从can_handler获取实际配置
         can_handler_get_bitrate_dual(&bitrate0, &bitrate1);
@@ -245,8 +246,8 @@ static int handle_can_cmd(const char *json, const char *cmd, const char *request
     
     if (strcmp(cmd, "can_set_bitrates") == 0) {
         // 注意：API使用can1/can2，设备端使用can0/can1
-        int bitrate0 = extract_json_int(json, "can1", 500000);  // API的can1对应设备的can0
-        int bitrate1 = extract_json_int(json, "can2", 500000);  // API的can2对应设备的can1
+        int bitrate0 = extract_json_int(json, "can1", (int)g_app_config.can0_bitrate);  // API的can1对应设备的can0
+        int bitrate1 = extract_json_int(json, "can2", (int)g_app_config.can1_bitrate);  // API的can2对应设备的can1
         
         // 重新配置CAN接口
         if (can_handler_configure("can0", (uint32_t)bitrate0) == 0 &&
@@ -441,7 +442,8 @@ static int handle_can_cmd(const char *json, const char *cmd, const char *request
     if (strcmp(cmd, "can_set_channel_bitrate") == 0) {
         // 远程设置单个通道波特率
         int channel = extract_json_int(json, "channel", 0);
-        int bitrate = extract_json_int(json, "bitrate", 500000);
+        int bitrate = extract_json_int(json, "bitrate",
+                                       (int)(channel == 0 ? g_app_config.can0_bitrate : g_app_config.can1_bitrate));
         
         ui_remote_can_set_bitrate(channel, (uint32_t)bitrate);
         ws_command_send_ok(request_id, NULL);
@@ -501,7 +503,7 @@ static int handle_uds_cmd(const char *json, const char *cmd, const char *request
     
     if (strcmp(cmd, "uds_list") == 0) {
         char *dir = extract_json_string(json, "dir");
-        if (!dir) dir = strdup("/mnt/SDCARD");
+        if (!dir) dir = strdup(g_app_config.storage_mount[0] ? g_app_config.storage_mount : "/mnt/SDCARD");
         
         char *files = list_s19_files_json(dir);
         if (files) {
@@ -593,7 +595,7 @@ static int handle_uds_cmd(const char *json, const char *cmd, const char *request
     
     if (strcmp(cmd, "uds_set_bitrate") == 0) {
         // 远程设置UDS波特率
-        int bitrate = extract_json_int(json, "bitrate", 500000);
+        int bitrate = extract_json_int(json, "bitrate", (int)g_app_config.can0_bitrate);
         ui_remote_uds_set_bitrate((uint32_t)bitrate);
         ws_command_send_ok(request_id, NULL);
         return 0;
@@ -616,7 +618,7 @@ static int handle_file_cmd(const char *json, const char *cmd, const char *reques
 {
     if (strcmp(cmd, "fs_list") == 0) {
         char *path = extract_json_string(json, "path");
-        if (!path) path = strdup("/mnt/SDCARD");
+        if (!path) path = strdup(g_app_config.storage_mount[0] ? g_app_config.storage_mount : "/mnt/SDCARD");
         
         char *list_json = file_list_directory_json(path);
         if (list_json) {

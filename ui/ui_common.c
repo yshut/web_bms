@@ -6,6 +6,7 @@
 #include "ui_common.h"
 #include "../utils/logger.h"
 #include "../utils/font_manager.h"
+#include "../utils/app_config.h"
 #include <stdbool.h>
 
 /* 全局样式定义 */
@@ -45,11 +46,24 @@ void ui_common_init(void)
     
     log_info("========== 开始加载字体 ==========");
     bool font_loaded = false;
-    // 使用 18 像素字体（内存优化）
-    const int font_size = 18;
+    // 默认 18 像素字体（可在 ws_config.txt 里用 font_size= 覆盖）
+    const int font_size = (g_app_config.font_size > 0 ? g_app_config.font_size : 18);
     log_info("字体大小: %d 像素", font_size);
     
+    // 如果用户显式指定了字体路径，则优先尝试一次
+    if (g_app_config.font_path[0]) {
+        log_info("优先加载指定字体: %s", g_app_config.font_path);
+        if (font_manager_init(g_app_config.font_path, font_size) == 0) {
+            loaded_font = font_manager_get_main_font();
+            log_info("✅ 字体加载成功: %s (大小: %dpx)", g_app_config.font_path, font_size);
+            font_loaded = true;
+        } else {
+            log_warn("❌ 指定字体加载失败: %s", g_app_config.font_path);
+        }
+    }
+
     for (int i = 0; font_paths[i] != NULL; i++) {
+        if (font_loaded) break;
         log_info("尝试加载: %s", font_paths[i]);
         if (font_manager_init(font_paths[i], font_size) == 0) {
             loaded_font = font_manager_get_main_font();

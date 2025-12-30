@@ -562,6 +562,24 @@ class WSHub:
                 except Exception:
                     pass
             finally:
+                # 设备断开：清理“已连接”快照并广播给所有 UI 客户端，避免前端一直显示“已连接”
+                try:
+                    self._device_id = None
+                except Exception:
+                    pass
+                try:
+                    self._last_events["server_connection"] = {
+                        "connected": False,
+                        "host": None,
+                        "port": None,
+                        "id": None,
+                    }
+                    if self._ui_clients:
+                        evt = json.dumps({"event": "server_connection", "data": self._last_events["server_connection"]})
+                        for ui_ws in list(self._ui_clients):
+                            await _safe_send(ui_ws, evt)
+                except Exception:
+                    pass
                 self._device_ws = None
                 self._client_addr = None
                 try:

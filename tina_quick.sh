@@ -368,15 +368,48 @@ build_lvgl_app() {
     echo -e "${RED}错误: 未找到 ./build.sh（请在 app_lvgl 目录运行）${NC}"
     exit 1
   fi
-  echo -e "${YELLOW}开始编译（./build.sh ${MAKE_ARGS:-}）...${NC}"
   # 允许用户传入 -j8 / clean 等参数
+  # 兼容常见误用：--make-args "clean -j8"（这会只清理不编译）
+  # 这里改为：若包含 clean，则先 clean，再继续默认/剩余参数进行编译。
   if [ -n "${MAKE_ARGS:-}" ]; then
-    run "./build.sh ${MAKE_ARGS}"
+    echo -e "${YELLOW}开始编译（./build.sh ${MAKE_ARGS}）...${NC}"
+    # shellcheck disable=SC2206
+    local args=(${MAKE_ARGS})
+    local do_clean=0
+    local build_args=()
+    local a=""
+    for a in "${args[@]}"; do
+      if [ "${a}" = "clean" ]; then
+        do_clean=1
+      else
+        build_args+=("${a}")
+      fi
+    done
+    if [ "${do_clean}" -eq 1 ]; then
+      run "./build.sh clean"
+    fi
+    if [ "${#build_args[@]}" -gt 0 ]; then
+      local cmd="./build.sh"
+      for a in "${build_args[@]}"; do
+        cmd+=" $(printf '%q' "${a}")"
+      done
+      run "${cmd}"
+    else
+      # 若用户只传了 clean，则 clean 后继续默认 all 编译
+      run "./build.sh"
+    fi
   else
+    echo -e "${YELLOW}开始编译（./build.sh）...${NC}"
     run "./build.sh"
+  fi
+  # dry-run 不会真的生成文件，直接返回即可
+  if [ "${DRYRUN}" -eq 1 ]; then
+    echo -e "${GREEN}✓ [dry-run] 编译流程已模拟完成（未实际生成 ./lvgl_app）${NC}"
+    return 0
   fi
   if [ ! -f "./lvgl_app" ]; then
     echo -e "${RED}错误: 编译后未生成 ./lvgl_app${NC}"
+    echo -e "${YELLOW}提示: 如你传了 --make-args \"clean -j8\"，旧版本会只 clean 不 build；现在已自动处理为 clean 后再 build。${NC}"
     exit 1
   fi
   echo -e "${GREEN}✓ 编译完成：./lvgl_app${NC}"
@@ -455,8 +488,12 @@ if [ -n "${URL}" ]; then
   echo -e "${GREEN}✓ 下载完成${NC}"
 else
   if [ ! -f "${FILE}" ]; then
-    echo -e "${RED}错误: 本地文件不存在: ${FILE}${NC}"
-    exit 1
+    if [ "${DRYRUN}" -eq 1 ]; then
+      echo -e "${YELLOW}[dry-run] 提示: 本地文件当前不存在: ${FILE}（dry-run 模式下忽略）${NC}"
+    else
+      echo -e "${RED}错误: 本地文件不存在: ${FILE}${NC}"
+      exit 1
+    fi
   fi
   LOCAL_PATH="${FILE}"
 fi
@@ -482,10 +519,11 @@ fi
 # 2.5) 可选：写入设备端 WebSocket 配置（让 lvgl_app 连到正确的 server）
 if [ -n "${WS_HOST}" ]; then
   echo -e "${YELLOW}步骤3.5: 写入设备WebSocket配置...${NC}"
-  # 写入两行：host + port（优先UDISK；若SDCARD存在也同步一份）
-  ssh_wrap "'mkdir -p /mnt/UDISK 2>/dev/null || true; printf \"%s\\n%s\\n\" \"${WS_HOST}\" \"${WS_PORT}\" > /mnt/UDISK/ws_config.txt; sync'"
-  ssh_wrap "'if [ -d /mnt/SDCARD ]; then printf \"%s\\n%s\\n\" \"${WS_HOST}\" \"${WS_PORT}\" > /mnt/SDCARD/ws_config.txt; sync; fi'"
-  echo -e "${GREEN}✓ 已写入 /mnt/UDISK/ws_config.txt (${WS_HOST}:${WS_PORT})${NC}"
+  # 写入全量模板（key=value），并在文件开头保留两行 legacy host/port 便于兼容旧程序
+  # 说明：应用端启动后若检测到 legacy-only，会自动升级成全量模板；这里提前写好，便于后续直接改参数。
+  ssh_wrap "'mkdir -p /mnt/UDISK 2>/dev/null || true; cat > /mnt/UDISK/ws_config.txt <<'\"'\"'EOF'\"'\"'\n${WS_HOST}\n${WS_PORT}\n\n# app_lvgl 配置文件（推荐 key=value 格式）\n# 修改后重启 lvgl_app 生效\n\n# === WebSocket ===\nws_host=${WS_HOST}\nws_port=${WS_PORT}\nws_path=/ws\nws_use_ssl=false\nws_reconnect_interval_ms=4000\nws_keepalive_interval_s=20\n\n# === 日志 ===\nlog_file=/tmp/lvgl_app.log\nlog_level=debug\n\n# === CAN ===\ncan0_bitrate=500000\ncan1_bitrate=500000\ncan_record_dir=/mnt/SDCARD/can_records\ncan_record_max_mb=40\ncan_record_flush_ms=200\n\n# === 存储/网络 ===\nstorage_mount=/mnt/SDCARD\nnet_iface=eth0\nwifi_iface=${WIFI_IFACE}\n\n# === 字体 ===\n# font_path 为空则自动从常见路径列表中查找\nfont_path=\nfont_size=18\n\n# === 硬件监控 ===\nhw_interval_ms=2000\nhw_auto_report=true\nhw_report_interval_ms=10000\n\n# === WiFi 自动连接（可选）===\nwifi_ssid=${WIFI_SSID}\nwifi_psk=${WIFI_PSK}\nEOF\nsync'"
+  ssh_wrap "'if [ -d /mnt/SDCARD ]; then cp -f /mnt/UDISK/ws_config.txt /mnt/SDCARD/ws_config.txt; sync; fi'"
+  echo -e "${GREEN}✓ 已写入 /mnt/UDISK/ws_config.txt（全量模板，ws=${WS_HOST}:${WS_PORT}）${NC}"
 fi
 
 # 3) 上传到临时文件，再原子替换

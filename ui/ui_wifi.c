@@ -7,6 +7,7 @@
 #include "ui_common.h"
 #include "../logic/app_manager.h"
 #include "../utils/logger.h"
+#include "../utils/app_config.h"
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -169,7 +170,12 @@ static void check_current_connection(void)
     log_info("检查当前WiFi连接状态...");
     
     // 执行wpa_cli status
-    system("wpa_cli -i wlan0 status > /tmp/wifi_current_status.txt 2>&1");
+    {
+        char cmd[256];
+        snprintf(cmd, sizeof(cmd), "wpa_cli -i %s status > /tmp/wifi_current_status.txt 2>&1",
+                 g_app_config.wifi_iface[0] ? g_app_config.wifi_iface : "wlan0");
+        system(cmd);
+    }
     
     FILE *fp = fopen("/tmp/wifi_current_status.txt", "r");
     if (!fp) return;
@@ -266,12 +272,22 @@ static void auto_connect_if_available(ui_wifi_t *wifi)
         sleep(1);
         
         // 2. 重新启动wpa_supplicant
-        system("wpa_supplicant -B -i wlan0 -c /etc/wpa_supplicant.conf -Dnl80211,wext 2>/dev/null");
+        {
+            char cmd[256];
+            snprintf(cmd, sizeof(cmd), "wpa_supplicant -B -i %s -c /etc/wpa_supplicant.conf -Dnl80211,wext 2>/dev/null",
+                     g_app_config.wifi_iface[0] ? g_app_config.wifi_iface : "wlan0");
+            system(cmd);
+        }
         sleep(2);
         
         // 3. 触发DHCP获取IP
         system("killall udhcpc 2>/dev/null");
-        system("udhcpc -i wlan0 -n -q 2>/dev/null &");
+        {
+            char cmd[256];
+            snprintf(cmd, sizeof(cmd), "udhcpc -i %s -n -q 2>/dev/null &",
+                     g_app_config.wifi_iface[0] ? g_app_config.wifi_iface : "wlan0");
+            system(cmd);
+        }
         
         // 4. 等待连接
         sleep(3);
@@ -449,7 +465,12 @@ static void scan_wifi_networks(ui_wifi_t *wifi)
     
     // 执行扫描命令（使用 iw 工具）
     // 注意：需要 root 权限
-    system("iw dev wlan0 scan > /tmp/wifi_scan.txt 2>&1");
+    {
+        char cmd[256];
+        snprintf(cmd, sizeof(cmd), "iw dev %s scan > /tmp/wifi_scan.txt 2>&1",
+                 g_app_config.wifi_iface[0] ? g_app_config.wifi_iface : "wlan0");
+        system(cmd);
+    }
     sleep(1); // 等待扫描完成
     
     // 解析扫描结果
@@ -687,11 +708,21 @@ static void connect_to_wifi(const char *ssid, const char *password)
     sleep(1);
     
     // 重新启动 wpa_supplicant
-    system("wpa_supplicant -B -i wlan0 -c /etc/wpa_supplicant.conf -Dnl80211,wext 2>/dev/null");
+    {
+        char cmd[256];
+        snprintf(cmd, sizeof(cmd), "wpa_supplicant -B -i %s -c /etc/wpa_supplicant.conf -Dnl80211,wext 2>/dev/null",
+                 g_app_config.wifi_iface[0] ? g_app_config.wifi_iface : "wlan0");
+        system(cmd);
+    }
     sleep(2);
     
     // 获取 IP 地址
-    system("udhcpc -i wlan0 -n -q 2>/dev/null &");
+    {
+        char cmd[256];
+        snprintf(cmd, sizeof(cmd), "udhcpc -i %s -n -q 2>/dev/null &",
+                 g_app_config.wifi_iface[0] ? g_app_config.wifi_iface : "wlan0");
+        system(cmd);
+    }
     
     // 等待连接
     sleep(3);
@@ -712,14 +743,29 @@ static void disconnect_wifi(void)
     sleep(1);
     
     // 关闭网络接口
-    system("ifconfig wlan0 down");
+    {
+        char cmd[128];
+        snprintf(cmd, sizeof(cmd), "ifconfig %s down",
+                 g_app_config.wifi_iface[0] ? g_app_config.wifi_iface : "wlan0");
+        system(cmd);
+    }
     sleep(1);
     
     // 重新启动接口（不连接）
-    system("ifconfig wlan0 up");
+    {
+        char cmd[128];
+        snprintf(cmd, sizeof(cmd), "ifconfig %s up",
+                 g_app_config.wifi_iface[0] ? g_app_config.wifi_iface : "wlan0");
+        system(cmd);
+    }
     
     // 重新启动 wpa_supplicant（不会自动连接）
-    system("wpa_supplicant -B -i wlan0 -c /etc/wpa_supplicant.conf -Dnl80211,wext 2>/dev/null");
+    {
+        char cmd[256];
+        snprintf(cmd, sizeof(cmd), "wpa_supplicant -B -i %s -c /etc/wpa_supplicant.conf -Dnl80211,wext 2>/dev/null",
+                 g_app_config.wifi_iface[0] ? g_app_config.wifi_iface : "wlan0");
+        system(cmd);
+    }
     
     log_info("WiFi 已断开");
     
@@ -792,7 +838,12 @@ static void network_item_event_cb(lv_event_t *e)
         }
         
         // 使用wpa_cli reconnect连接已保存的网络
-        system("wpa_cli -i wlan0 reconnect > /dev/null 2>&1");
+        {
+            char cmd[128];
+            snprintf(cmd, sizeof(cmd), "wpa_cli -i %s reconnect > /dev/null 2>&1",
+                     g_app_config.wifi_iface[0] ? g_app_config.wifi_iface : "wlan0");
+            system(cmd);
+        }
         sleep(3);
         check_current_connection();
     } else if (needs_password) {
@@ -978,7 +1029,11 @@ void ui_wifi_destroy(ui_wifi_t *wifi)
 bool ui_wifi_is_connected(void)
 {
     // 检查 wlan0 接口是否有 IP 地址
-    FILE *fp = popen("ip addr show wlan0 | grep 'inet ' | awk '{print $2}' | cut -d'/' -f1", "r");
+    char cmd[256];
+    snprintf(cmd, sizeof(cmd),
+             "ip addr show %s | grep 'inet ' | awk '{print $2}' | cut -d'/' -f1",
+             g_app_config.wifi_iface[0] ? g_app_config.wifi_iface : "wlan0");
+    FILE *fp = popen(cmd, "r");
     if (!fp) return false;
     
     char ip[64] = {0};
@@ -1008,7 +1063,11 @@ const char* ui_wifi_get_connected_ssid(void)
     ssid[0] = '\0';
     
     // 使用 iw 命令获取当前连接的 SSID
-    FILE *fp = popen("iw dev wlan0 link | grep 'SSID:' | awk '{print $2}'", "r");
+    char cmd[256];
+    snprintf(cmd, sizeof(cmd),
+             "iw dev %s link | grep 'SSID:' | awk '{print $2}'",
+             g_app_config.wifi_iface[0] ? g_app_config.wifi_iface : "wlan0");
+    FILE *fp = popen(cmd, "r");
     if (!fp) return ssid;
     
     if (fgets(ssid, sizeof(ssid), fp) != NULL) {
@@ -1029,7 +1088,11 @@ const char* ui_wifi_get_ip_address(void)
     static char ip[64] = {0};
     ip[0] = '\0';
     
-    FILE *fp = popen("ip addr show wlan0 | grep 'inet ' | awk '{print $2}' | cut -d'/' -f1", "r");
+    char cmd[256];
+    snprintf(cmd, sizeof(cmd),
+             "ip addr show %s | grep 'inet ' | awk '{print $2}' | cut -d'/' -f1",
+             g_app_config.wifi_iface[0] ? g_app_config.wifi_iface : "wlan0");
+    FILE *fp = popen(cmd, "r");
     if (!fp) return ip;
     
     if (fgets(ip, sizeof(ip), fp) != NULL) {
