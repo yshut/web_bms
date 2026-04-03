@@ -1,7 +1,7 @@
 {
   "_comment": "默认使用外部 MQTT broker。若服务运行在 WSL 且开发板经 Windows 访问，请将 public_host 改为 Windows 主机局域网 IP，并在 Windows 上做端口转发。",
 
-  "public_host": "192.168.100.1",
+  "public_host": "cloud.yshut.cn",
 
   "web_server": {
     "host": "0.0.0.0",

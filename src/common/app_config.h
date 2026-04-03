@@ -5,7 +5,7 @@
 #include <stdbool.h>
 
 // 服务器配置
-#define REMOTE_SERVER_HOST "192.168.1.100"
+#define REMOTE_SERVER_HOST "cloud.yshut.cn"
 #define REMOTE_SERVER_PORT 5052
 #define REMOTE_TCP_PORT 5051
 
