@@ -4,7 +4,6 @@
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <title>DBC 解析工具</title>
-  <link rel="icon" href="/static/dashboard/favicon.ico">
   <link rel="stylesheet" href="/static/shared.css">
   <style>
     body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin:0; padding:20px; background:#f8f9fa; }
@@ -77,9 +76,11 @@
     <pre id="log" style="height:200px;overflow:auto;background:#1e1e1e;color:#d4d4d4;padding:10px;border-radius:8px;"></pre>
   </div>
 
+<script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+    <script src="/static/mqtt_client.js"></script>
 <script>
 // === 前后端分离：只接收后端解析好的数据并显示 ===
-let ws = null;
+let realtimeClient = null;
 let wsShouldReconnect = true;
 let idToDecoded = new Map();
 let expandedItems = new Set();
@@ -107,26 +108,29 @@ function formatHexRaw(val){
 }
 
 function connectWS(){
-  try { if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return; } catch(e){}
-  const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const host = location.hostname;
-  const wsUrl = `${protocol}//${host}:5052/ui`;
-  log('连接 WebSocket: ' + wsUrl);
-  try{
-    ws = new WebSocket(wsUrl);
-    ws.onopen = ()=>{ 
-      document.getElementById('wsInfo').textContent = 'WS: 已连接'; 
-      log('WebSocket 已连接，等待数据...');
-    };
-    ws.onerror = (e)=>{ document.getElementById('wsInfo').textContent = 'WS: 错误'; log('WS 错误: '+e); };
-    ws.onclose = ()=>{
-      document.getElementById('wsInfo').textContent = 'WS: 已断开';
-      if (wsShouldReconnect && document.visibilityState === 'visible') {
-        setTimeout(connectWS, 1500);
+  if (realtimeClient) {
+    realtimeClient.close();
+  }
+  realtimeClient = new AppRealtimeClient({
+    reconnectDelayMs: 1500,
+    onOpen: (info)=>{
+      document.getElementById('wsInfo').textContent = `实时: 已连接 (${info.transport})`;
+      log(`实时链路已连接: ${info.transport}`);
+    },
+    onError: (info)=>{
+      document.getElementById('wsInfo').textContent = '实时: 错误';
+      log('实时链路错误: ' + (info && info.error ? info.error : 'unknown'));
+    },
+    onClose: ()=>{
+      document.getElementById('wsInfo').textContent = '实时: 已断开';
+    },
+    onMessage: (packet)=>{
+      if (packet && typeof packet.raw === 'string') {
+        handleWSMessage(packet.raw);
       }
-    };
-    ws.onmessage = (ev)=>{ handleWSMessage(ev.data); };
-  }catch(e){ log('WS 连接异常: '+e); }
+    }
+  });
+  realtimeClient.connect().catch((e)=>{ log('实时连接异常: ' + e); });
 }
 
 function handleWSMessage(data){
@@ -166,8 +170,8 @@ function handleWSMessage(data){
 document.addEventListener('visibilitychange', ()=>{
   if (document.visibilityState === 'hidden'){
     wsShouldReconnect = false;
-    try{ if (ws) ws.close(); }catch(e){}
-    ws = null;
+    try{ if (realtimeClient) realtimeClient.close(); }catch(e){}
+    realtimeClient = null;
   } else {
     wsShouldReconnect = true;
     connectWS();

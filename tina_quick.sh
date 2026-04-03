@@ -28,9 +28,25 @@ DEST="${TINA_DEST:-/mnt/UDISK/lvgl_app}"
 PASS="${TINA_PASS:-}"
 WS_HOST=""
 WS_PORT="5052"
+TRANSPORT_MODE="${TRANSPORT_MODE:-websocket}"
+MQTT_HOST="${MQTT_HOST:-}"
+MQTT_PORT="${MQTT_PORT:-1883}"
+MQTT_CLIENT_ID="${MQTT_CLIENT_ID:-}"
+MQTT_USERNAME="${MQTT_USERNAME:-}"
+MQTT_PASSWORD="${MQTT_PASSWORD:-}"
+MQTT_KEEPALIVE_S="${MQTT_KEEPALIVE_S:-30}"
+MQTT_QOS="${MQTT_QOS:-1}"
+MQTT_TOPIC_PREFIX="${MQTT_TOPIC_PREFIX:-app_lvgl}"
+MQTT_USE_TLS="${MQTT_USE_TLS:-false}"
 WIFI_SSID=""
 WIFI_PSK=""
+NET_IFACE="${NET_IFACE:-eth0}"
 WIFI_IFACE="${WIFI_IFACE:-wlan0}"
+NET_USE_DHCP="${NET_USE_DHCP:-false}"
+DEVICE_IP="${DEVICE_IP:-${IP}}"
+DEVICE_NETMASK="${DEVICE_NETMASK:-255.255.255.0}"
+DEVICE_GATEWAY="${DEVICE_GATEWAY:-}"
+NET_CONFIG_REQUESTED=0
 URL=""
 FILE=""
 RESTART=0
@@ -60,13 +76,28 @@ usage() {
   --password PASS  SSH/SCP 密码（不推荐；需要 sshpass 才能自动填充；也可用环境变量 TINA_PASS）
   --ws-host HOST   写入设备端 WebSocket 配置文件的服务器IP（写到 /mnt/UDISK/ws_config.txt）
   --ws-port PORT   写入设备端 WebSocket 端口（默认5052）
+  --transport-mode MODE  设备远程传输模式：websocket 或 mqtt（默认 websocket）
+  --mqtt-host HOST       写入设备端 MQTT Broker 地址
+  --mqtt-port PORT       写入设备端 MQTT Broker 端口（默认1883）
+  --mqtt-client-id ID    写入设备端 MQTT client_id（默认留空，设备端自动生成）
+  --mqtt-username USER   写入设备端 MQTT 用户名
+  --mqtt-password PASS   写入设备端 MQTT 密码
+  --mqtt-keepalive S     写入设备端 MQTT keepalive 秒数（默认30）
+  --mqtt-qos QOS         写入设备端 MQTT QoS（默认1）
+  --mqtt-topic-prefix P  写入设备端 MQTT topic 前缀（默认 app_lvgl）
+  --mqtt-use-tls BOOL    写入设备端 MQTT TLS 开关（true/false，默认false）
+  --net-iface IF         写入设备端网络配置中的主网卡名（默认 eth0）
+  --net-dhcp BOOL        写入设备端网络配置是否使用 DHCP（true/false，默认false）
+  --device-ip IP         写入设备端静态 IP（默认等于 --ip）
+  --device-netmask MASK  写入设备端子网掩码（默认255.255.255.0）
+  --device-gateway GW    写入设备端默认网关（可留空）
   --wifi-ssid SSID 配置开发板自动连接的 WiFi SSID（写到 /etc/wifi_autoconnect.conf 并安装开机自启）
   --wifi-psk  PSK  配置开发板自动连接的 WiFi 密码（明文写入 /etc/wifi_autoconnect.conf）
   --wifi-iface IF  WiFi 网卡名（默认 wlan0，可用 ifconfig/ip link 查看）
   --restart        推送后尝试 killall 并后台启动 DEST
   --build          先执行 ./build.sh 编译（默认产物 lvgl_app）
   --make-args STR  传给 ./build.sh 的参数（例如: "clean -j8"）
-  --server         启动 Python Web 服务器：server/web_server.py
+  --server         启动 Python Web 服务器：server/web_server.py（会自动拉起本地 mosquitto，如配置启用）
   --cleanup        清理当前目录下不必要文件：*.o、__pycache__、*Zone.Identifier*
   --cleanup-only   只清理不必要文件，不进行下载/推送
   --dry-run        只打印将要执行的命令，不实际执行
@@ -138,6 +169,21 @@ while [ $# -gt 0 ]; do
     --password) PASS="${2:-}"; shift 2;;
     --ws-host) WS_HOST="${2:-}"; shift 2;;
     --ws-port) WS_PORT="${2:-}"; shift 2;;
+    --transport-mode) TRANSPORT_MODE="${2:-}"; shift 2;;
+    --mqtt-host) MQTT_HOST="${2:-}"; shift 2;;
+    --mqtt-port) MQTT_PORT="${2:-}"; shift 2;;
+    --mqtt-client-id) MQTT_CLIENT_ID="${2:-}"; shift 2;;
+    --mqtt-username) MQTT_USERNAME="${2:-}"; shift 2;;
+    --mqtt-password) MQTT_PASSWORD="${2:-}"; shift 2;;
+    --mqtt-keepalive) MQTT_KEEPALIVE_S="${2:-}"; shift 2;;
+    --mqtt-qos) MQTT_QOS="${2:-}"; shift 2;;
+    --mqtt-topic-prefix) MQTT_TOPIC_PREFIX="${2:-}"; shift 2;;
+    --mqtt-use-tls) MQTT_USE_TLS="${2:-}"; shift 2;;
+    --net-iface) NET_IFACE="${2:-}"; NET_CONFIG_REQUESTED=1; shift 2;;
+    --net-dhcp) NET_USE_DHCP="${2:-}"; NET_CONFIG_REQUESTED=1; shift 2;;
+    --device-ip) DEVICE_IP="${2:-}"; NET_CONFIG_REQUESTED=1; shift 2;;
+    --device-netmask) DEVICE_NETMASK="${2:-}"; NET_CONFIG_REQUESTED=1; shift 2;;
+    --device-gateway) DEVICE_GATEWAY="${2:-}"; NET_CONFIG_REQUESTED=1; shift 2;;
     --wifi-ssid) WIFI_SSID="${2:-}"; shift 2;;
     --wifi-psk) WIFI_PSK="${2:-}"; shift 2;;
     --wifi-iface) WIFI_IFACE="${2:-}"; shift 2;;
@@ -156,6 +202,10 @@ while [ $# -gt 0 ]; do
       ;;
   esac
 done
+
+if [ -z "${DEVICE_IP}" ]; then
+  DEVICE_IP="${IP}"
+fi
 
 cleanup_local_tree() {
   echo -e "${YELLOW}清理: 删除 *.o（编译产物）...${NC}"
@@ -359,7 +409,8 @@ start_python_server() {
     exit 1
   fi
   echo -e "${YELLOW}启动 Python 服务器...${NC}"
-  echo "提示：默认端口通常是 HTTP=18080 / WS=5052"
+  echo "提示：默认端口通常是 HTTP=18080 / WS=5052 / MQTT=1883"
+  echo "提示：当 MQTT_HOST=127.0.0.1 且 auto_start_local_broker=true 时，web_server.py 会自动拉起本地 mosquitto。"
   run "${PYTHON_BIN} server/web_server.py"
 }
 
@@ -516,13 +567,99 @@ if [ -n "${WIFI_SSID}" ] || [ -n "${WIFI_PSK}" ]; then
   install_wifi_autoconnect
 fi
 
-# 2.5) 可选：写入设备端 WebSocket 配置（让 lvgl_app 连到正确的 server）
+# 2.4) 可选：写入设备端网络配置（开发板自身 IP/网卡）
+if [ "${NET_CONFIG_REQUESTED}" -eq 1 ]; then
+  echo -e "${YELLOW}步骤3.4: 写入设备网络配置...${NC}"
+  tmpdir_net="$(mktemp -d)"
+  tmp_net_cfg="${tmpdir_net}/net_config.txt"
+  cat > "${tmp_net_cfg}" <<EOF
+# app_lvgl 板端网络配置
+# 说明：此文件只描述开发板自身网卡参数，不包含服务端地址。
+# 服务端地址请写入 ws_config.txt。
+
+dhcp=${NET_USE_DHCP}
+ip=${DEVICE_IP}
+netmask=${DEVICE_NETMASK}
+gateway=${DEVICE_GATEWAY}
+iface=${NET_IFACE}
+wifi_iface=${WIFI_IFACE}
+EOF
+  ssh_wrap "'mkdir -p /mnt/UDISK 2>/dev/null || true'"
+  scp_wrap "${tmp_net_cfg}" "/mnt/UDISK/net_config.txt"
+  ssh_wrap "'if [ -d /mnt/SDCARD ]; then cp -f /mnt/UDISK/net_config.txt /mnt/SDCARD/net_config.txt; sync; fi'"
+  rm -rf "${tmpdir_net}" || true
+  echo -e "${GREEN}✓ 已写入 /mnt/UDISK/net_config.txt（ip=${DEVICE_IP} dhcp=${NET_USE_DHCP} iface=${NET_IFACE}）${NC}"
+fi
+
+# 2.5) 可选：写入设备端 WebSocket/MQTT 配置（让 lvgl_app 连到正确的 server）
 if [ -n "${WS_HOST}" ]; then
   echo -e "${YELLOW}步骤3.5: 写入设备WebSocket配置...${NC}"
   # 写入全量模板（key=value），并在文件开头保留两行 legacy host/port 便于兼容旧程序
   # 说明：应用端启动后若检测到 legacy-only，会自动升级成全量模板；这里提前写好，便于后续直接改参数。
-  ssh_wrap "'mkdir -p /mnt/UDISK 2>/dev/null || true; cat > /mnt/UDISK/ws_config.txt <<'\"'\"'EOF'\"'\"'\n${WS_HOST}\n${WS_PORT}\n\n# app_lvgl 配置文件（推荐 key=value 格式）\n# 修改后重启 lvgl_app 生效\n\n# === WebSocket ===\nws_host=${WS_HOST}\nws_port=${WS_PORT}\nws_path=/ws\nws_use_ssl=false\nws_reconnect_interval_ms=4000\nws_keepalive_interval_s=20\n\n# === 日志 ===\nlog_file=/tmp/lvgl_app.log\nlog_level=debug\n\n# === CAN ===\ncan0_bitrate=500000\ncan1_bitrate=500000\ncan_record_dir=/mnt/SDCARD/can_records\ncan_record_max_mb=40\ncan_record_flush_ms=200\n\n# === 存储/网络 ===\nstorage_mount=/mnt/SDCARD\nnet_iface=eth0\nwifi_iface=${WIFI_IFACE}\n\n# === 字体 ===\n# font_path 为空则自动从常见路径列表中查找\nfont_path=\nfont_size=18\n\n# === 硬件监控 ===\nhw_interval_ms=2000\nhw_auto_report=true\nhw_report_interval_ms=10000\n\n# === WiFi 自动连接（可选）===\nwifi_ssid=${WIFI_SSID}\nwifi_psk=${WIFI_PSK}\nEOF\nsync'"
+  tmpdir_ws="$(mktemp -d)"
+  tmp_ws_cfg="${tmpdir_ws}/ws_config.txt"
+  cat > "${tmp_ws_cfg}" <<EOF
+${WS_HOST}
+${WS_PORT}
+
+# app_lvgl 远端连接配置（推荐 key=value 格式）
+# 修改后重启 lvgl_app 生效
+# 板端自身 IP/网卡请维护在 /mnt/UDISK/net_config.txt
+
+# === 传输模式 ===
+transport_mode=${TRANSPORT_MODE}
+
+# === WebSocket ===
+ws_host=${WS_HOST}
+ws_port=${WS_PORT}
+ws_path=/ws
+ws_use_ssl=false
+ws_reconnect_interval_ms=4000
+ws_keepalive_interval_s=20
+
+# === MQTT ===
+mqtt_host=${MQTT_HOST:-${WS_HOST}}
+mqtt_port=${MQTT_PORT}
+mqtt_client_id=${MQTT_CLIENT_ID}
+mqtt_username=${MQTT_USERNAME}
+mqtt_password=${MQTT_PASSWORD}
+mqtt_keepalive_s=${MQTT_KEEPALIVE_S}
+mqtt_qos=${MQTT_QOS}
+mqtt_topic_prefix=${MQTT_TOPIC_PREFIX}
+mqtt_use_tls=${MQTT_USE_TLS}
+
+# === 日志 ===
+log_file=/tmp/lvgl_app.log
+log_level=debug
+
+# === CAN ===
+can0_bitrate=500000
+can1_bitrate=500000
+can_record_dir=/mnt/SDCARD/can_records
+can_record_max_mb=40
+can_record_flush_ms=200
+
+# === 存储 ===
+storage_mount=/mnt/SDCARD
+
+# === 字体 ===
+# font_path 为空则自动从常见路径列表中查找
+font_path=
+font_size=18
+
+# === 硬件监控 ===
+hw_interval_ms=2000
+hw_auto_report=true
+hw_report_interval_ms=10000
+
+# === WiFi 自动连接（可选）===
+wifi_ssid=${WIFI_SSID}
+wifi_psk=${WIFI_PSK}
+EOF
+  ssh_wrap "'mkdir -p /mnt/UDISK 2>/dev/null || true'"
+  scp_wrap "${tmp_ws_cfg}" "/mnt/UDISK/ws_config.txt"
   ssh_wrap "'if [ -d /mnt/SDCARD ]; then cp -f /mnt/UDISK/ws_config.txt /mnt/SDCARD/ws_config.txt; sync; fi'"
+  rm -rf "${tmpdir_ws}" || true
   echo -e "${GREEN}✓ 已写入 /mnt/UDISK/ws_config.txt（全量模板，ws=${WS_HOST}:${WS_PORT}）${NC}"
 fi
 
@@ -534,7 +671,7 @@ echo -e "${GREEN}✓ 推送完成${NC}"
 if [ "${RESTART}" -eq 1 ]; then
   echo ""
   echo -e "${YELLOW}步骤4: 重启应用...${NC}"
-  ssh_wrap "'nohup \"${DEST}\" >/dev/null 2>&1 &'"
+  ssh_wrap "'if command -v nohup >/dev/null 2>&1; then nohup \"${DEST}\" >/dev/null 2>&1 </dev/null & else \"${DEST}\" >/dev/null 2>&1 </dev/null & fi'"
   echo -e "${GREEN}✓ 已重启${NC}"
 fi
 

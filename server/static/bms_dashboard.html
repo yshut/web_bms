@@ -1,0 +1,789 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>BMS 数据看板</title>
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+<script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+<style>
+:root{--bg:#0e1117;--panel:#161b22;--card:#1c2333;--border:#30363d;--accent:#58a6ff;--green:#3fb950;--yellow:#d29922;--red:#f85149;--text:#e6edf3;--text2:#8b949e;--text3:#6e7681}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font-family:'Segoe UI',system-ui,sans-serif;font-size:14px;min-height:100vh}
+.topbar{height:52px;background:var(--panel);border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 20px;gap:16px;position:sticky;top:0;z-index:100}
+.topbar-brand{font-size:17px;font-weight:700;color:var(--accent)}
+.topbar-links{display:flex;gap:4px;margin-left:12px}
+.topbar-links a{color:var(--text2);text-decoration:none;font-size:13px;padding:5px 12px;border-radius:6px;transition:.15s}
+.topbar-links a:hover,.topbar-links a.act{background:var(--card);color:var(--text)}
+.topbar-right{margin-left:auto;display:flex;align-items:center;gap:10px}
+.badge{display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border-radius:20px;font-size:12px;font-weight:500}
+.badge-green{background:rgba(63,185,80,.15);color:var(--green)}
+.badge-red{background:rgba(248,81,73,.15);color:var(--red)}
+.badge-yellow{background:rgba(210,153,34,.15);color:var(--yellow)}
+.dot{width:7px;height:7px;border-radius:50%;background:currentColor}
+.main{display:flex;height:calc(100vh - 52px)}
+.sidebar{width:220px;min-width:220px;background:var(--panel);border-right:1px solid var(--border);overflow-y:auto;padding:12px 8px}
+.sidebar-sec{font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;padding:8px 8px 4px}
+.sidebar-item{display:flex;align-items:center;gap-8px;padding:7px 10px;border-radius:6px;cursor:pointer;font-size:13px;color:var(--text2);transition:.15s;gap:8px}
+.sidebar-item:hover{background:var(--card);color:var(--text)}
+.sidebar-item.act{background:rgba(88,166,255,.12);color:var(--accent)}
+.sidebar-badge{margin-left:auto;background:var(--card);border-radius:10px;padding:1px 7px;font-size:11px;color:var(--text3)}
+.content{flex:1;overflow-y:auto;padding:20px}
+.stat-row{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px;margin-bottom:20px}
+.stat-card{background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:14px}
+.stat-label{font-size:11px;color:var(--text3);margin-bottom:6px}
+.stat-val{font-size:26px;font-weight:700;color:var(--text)}
+.stat-sub{font-size:11px;color:var(--text3);margin-top:3px}
+.panel-card{background:var(--panel);border:1px solid var(--border);border-radius:8px;margin-bottom:16px}
+.panel-hdr{padding:12px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;font-weight:600;font-size:14px}
+.panel-body{padding:14px 16px}
+.btn{border:none;cursor:pointer;border-radius:6px;padding:6px 14px;font-size:13px;font-weight:500;transition:.15s}
+.btn:hover{opacity:.85}
+.btn-pri{background:var(--accent);color:#000}
+.btn-sec{background:var(--card);color:var(--text);border:1px solid var(--border)}
+.btn-red{background:var(--red);color:#fff}
+.btn-green{background:var(--green);color:#000}
+.btn-sm{padding:4px 10px;font-size:12px}
+.row-flex{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+input,select{background:var(--card);border:1px solid var(--border);color:var(--text);border-radius:5px;padding:5px 9px;font-size:13px}
+input:focus,select:focus{outline:none;border-color:var(--accent)}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{background:var(--card);padding:8px 12px;text-align:left;color:var(--text3);font-size:11px;text-transform:uppercase;font-weight:600;border-bottom:1px solid var(--border)}
+td{padding:7px 12px;border-bottom:1px solid var(--border);color:var(--text)}
+tr:last-child td{border-bottom:none}
+tr:hover td{background:rgba(255,255,255,.02)}
+.val-num{font-family:monospace;color:var(--accent);font-size:13px}
+.val-unit{color:var(--text3);font-size:12px}
+.chart-wrap{width:100%;height:360px}
+.tab-bar{display:flex;gap:4px;margin-bottom:16px;border-bottom:1px solid var(--border);padding-bottom:8px}
+.tab{padding:6px 14px;border-radius:6px 6px 0 0;cursor:pointer;font-size:13px;color:var(--text2);border:1px solid transparent;border-bottom:none;transition:.15s}
+.tab:hover{color:var(--text)}
+.tab.act{color:var(--accent);border-color:var(--border);background:var(--panel);border-bottom:1px solid var(--panel)}
+.tab-pane{display:none}.tab-pane.act{display:block}
+.msg-group{margin-bottom:20px}
+.msg-group-hdr{display:flex;align-items:center;gap:10px;padding:8px 12px;background:var(--card);border:1px solid var(--border);border-radius:6px 6px 0 0;cursor:pointer;font-weight:600;font-size:13px;user-select:none}
+.msg-group-hdr:hover{border-color:var(--accent)}
+.msg-group-body{border:1px solid var(--border);border-top:none;border-radius:0 0 6px 6px;overflow:hidden}
+.msg-group-body.collapsed{display:none}
+.sig-row{display:flex;align-items:center;padding:6px 14px;border-bottom:1px solid var(--border);font-size:13px}
+.sig-row:last-child{border-bottom:none}
+.sig-row:hover{background:rgba(255,255,255,.02)}
+.sig-name{flex:1;color:var(--text)}
+.sig-val{font-family:monospace;font-size:14px;font-weight:600;color:var(--green);min-width:100px;text-align:right}
+.sig-unit{color:var(--text3);font-size:12px;min-width:50px;text-align:right;margin-left:6px}
+.sig-ts{color:var(--text3);font-size:11px;min-width:90px;text-align:right;margin-left:10px}
+.sig-ch{font-size:11px;color:var(--text3);min-width:40px;margin-left:6px;text-align:right}
+.check-sig{cursor:pointer;margin-right:8px}
+.filter-bar{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;align-items:center}
+#toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(60px);padding:10px 22px;border-radius:8px;font-size:13px;opacity:0;transition:.3s;z-index:9999;pointer-events:none}
+#toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+#toast.ok{background:var(--green);color:#000}
+#toast.err{background:var(--red);color:#fff}
+.live-dot{width:8px;height:8px;border-radius:50%;background:var(--green);animation:pulse 1.5s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+.page-hidden{display:none}
+.empty-hint{text-align:center;padding:40px;color:var(--text3);font-size:13px}
+</style>
+</head>
+<body>
+<div class="topbar">
+  <div class="topbar-brand">📊 BMS 数据看板</div>
+  <div class="topbar-links">
+    <a href="/">首页</a>
+    <a href="/device_config">设备配置</a>
+    <a href="/can_monitor">CAN 监控</a>
+    <a href="/bms" class="act">BMS 看板</a>
+  </div>
+  <div class="topbar-right">
+    <span id="mqtt-badge" class="badge badge-yellow" title="MQTT 实时推送状态"><span class="dot"></span>MQTT 连接中</span>
+    <span id="db-badge" class="badge badge-yellow"><span class="dot"></span>初始化中</span>
+    <button class="btn btn-sec btn-sm" onclick="refreshAll()">⟳ 刷新</button>
+    <button class="btn btn-sec btn-sm" onclick="toggleAutoRefresh()">⏱ 自动刷新: <span id="ar-txt">开</span></button>
+  </div>
+</div>
+
+<div class="main">
+  <!-- 侧边栏 -->
+  <div class="sidebar">
+    <div class="sidebar-sec">导航</div>
+    <div class="sidebar-item act" onclick="showPage('live')">⚡ 实时信号</div>
+    <div class="sidebar-item" onclick="showPage('chart')">📈 历史曲线</div>
+    <div class="sidebar-item" onclick="showPage('table')">📋 数据列表</div>
+    <div class="sidebar-item" onclick="showPage('alerts')">🔔 告警记录 <span class="sidebar-badge" id="sb-alert">0</span></div>
+    <div class="sidebar-item" onclick="showPage('config')">⚙ 配置</div>
+    <div class="sidebar-sec" style="margin-top:12px">数据库</div>
+    <div style="padding:8px 10px;font-size:12px;color:var(--text3);line-height:1.8">
+      总记录: <span id="sb-total" style="color:var(--text)">-</span><br>
+      信号数: <span id="sb-sigs" style="color:var(--text)">-</span><br>
+      DB 大小: <span id="sb-size" style="color:var(--text)">-</span><br>
+      最新数据: <span id="sb-maxts" style="color:var(--green)">-</span>
+    </div>
+  </div>
+
+  <!-- 内容区 -->
+  <div class="content">
+
+    <!-- ① 实时信号 -->
+    <div id="page-live" class="tab-pane act">
+      <div class="filter-bar">
+        <span style="font-size:15px;font-weight:700">实时信号</span>
+        <span id="live-dot-wrap" style="display:none"><span class="live-dot"></span><span style="font-size:12px;color:var(--green);margin-left:6px">自动更新</span></span>
+        <input id="live-filter" type="text" placeholder="过滤信号/消息名..." style="width:200px" oninput="filterLive()">
+        <select id="live-msg-filter" onchange="filterLive()"><option value="">全部消息</option></select>
+        <button class="btn btn-sec btn-sm" onclick="loadLiveSignals()">刷新</button>
+        <button class="btn btn-sec btn-sm" onclick="expandAll()">展开全部</button>
+        <button class="btn btn-sec btn-sm" onclick="collapseAll()">折叠全部</button>
+      </div>
+      <div id="live-groups"></div>
+      <div id="live-empty" class="empty-hint" style="display:none">暂无数据。服务端数据库尚未收到 BMS 信号（设备需将 CAN 帧转为 MQTT 发布）。</div>
+    </div>
+
+    <!-- ② 历史曲线 -->
+    <div id="page-chart" class="tab-pane page-hidden">
+      <div class="panel-card">
+        <div class="panel-hdr">📈 历史曲线</div>
+        <div class="panel-body">
+          <div class="filter-bar" style="margin-bottom:10px">
+            <input id="chart-start" type="datetime-local" style="width:185px">
+            <span style="color:var(--text3)">~</span>
+            <input id="chart-end" type="datetime-local" style="width:185px">
+            <select id="chart-range">
+              <option value="3600">最近 1 小时</option>
+              <option value="21600">最近 6 小时</option>
+              <option value="86400" selected>最近 24 小时</option>
+              <option value="259200">最近 3 天</option>
+              <option value="604800">最近 7 天</option>
+              <option value="0">自定义</option>
+            </select>
+            <button class="btn btn-pri btn-sm" onclick="loadChart()">绘制</button>
+            <input id="chart-sig-filter" type="text" placeholder="搜索信号..." style="width:180px" oninput="filterChartSigs()">
+          </div>
+          <div style="display:flex;gap:14px">
+            <div style="width:230px;min-width:230px">
+              <div style="font-size:12px;color:var(--text3);margin-bottom:6px;display:flex;justify-content:space-between">
+                <span>选择信号（可多选）</span>
+                <span><a href="#" onclick="chkAll();return false" style="color:var(--accent)">全选</a> / <a href="#" onclick="chkNone();return false" style="color:var(--accent)">清除</a></span>
+              </div>
+              <div id="chart-sig-list" style="height:300px;overflow-y:auto;border:1px solid var(--border);border-radius:5px;padding:4px;background:var(--card)"></div>
+            </div>
+            <div style="flex:1">
+              <div id="chart-container" class="chart-wrap"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ③ 数据列表 -->
+    <div id="page-table" class="tab-pane page-hidden">
+      <div class="panel-card">
+        <div class="panel-hdr">📋 信号最新值</div>
+        <div class="panel-body">
+          <div class="filter-bar">
+            <input id="tbl-filter" type="text" placeholder="过滤..." style="width:200px" oninput="filterTable()">
+            <select id="tbl-msg" onchange="filterTable()"><option value="">全部消息</option></select>
+            <button class="btn btn-sec btn-sm" onclick="loadTableData()">刷新</button>
+            <button class="btn btn-green btn-sm" onclick="exportCSV()">导出 CSV</button>
+          </div>
+          <div style="overflow-x:auto">
+            <table id="tbl-signals">
+              <thead><tr><th>消息</th><th>信号</th><th>值</th><th>单位</th><th>通道</th><th>CAN ID</th><th>更新时间</th></tr></thead>
+              <tbody id="tbl-body"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ④ 告警记录 -->
+    <div id="page-alerts" class="tab-pane page-hidden">
+      <div class="panel-card">
+        <div class="panel-hdr">🔔 告警记录</div>
+        <div class="panel-body">
+          <div class="filter-bar">
+            <select id="alert-range">
+              <option value="3600">最近 1 小时</option>
+              <option value="86400" selected>最近 24 小时</option>
+              <option value="604800">最近 7 天</option>
+              <option value="0">全部</option>
+            </select>
+            <input id="alert-limit" type="number" value="200" min="10" max="5000" style="width:80px">
+            <button class="btn btn-sec btn-sm" onclick="loadAlerts()">刷新</button>
+          </div>
+          <div style="overflow-x:auto">
+            <table>
+              <thead><tr><th>时间</th><th>信号</th><th>实测值</th><th>阈值</th><th>方向</th><th>消息</th></tr></thead>
+              <tbody id="alert-body"></tbody>
+            </table>
+          </div>
+          <div id="alert-empty" class="empty-hint" style="display:none">暂无告警记录</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ⑤ 配置 -->
+    <div id="page-config" class="tab-pane page-hidden">
+      <div class="panel-card">
+        <div class="panel-hdr">⚙ 基础配置</div>
+        <div class="panel-body">
+          <table style="max-width:600px">
+            <tr><td style="padding:8px 0;color:var(--text3);width:180px">数据保留天数</td><td><input id="cfg-days" type="number" min="1" style="width:100px"> 天</td></tr>
+            <tr><td style="padding:8px 0;color:var(--text3)">最小写入间隔</td><td><input id="cfg-interval" type="number" min="0" style="width:100px"> ms</td></tr>
+            <tr><td style="padding:8px 0;color:var(--text3)">批量写入阈值</td><td><input id="cfg-batch" type="number" min="1" style="width:100px"> 条</td></tr>
+          </table>
+          <div style="margin-top:12px"><button class="btn btn-pri" onclick="saveBaseCfg()">保存</button></div>
+        </div>
+      </div>
+      <div class="panel-card">
+        <div class="panel-hdr">🔔 告警规则</div>
+        <div class="panel-body">
+          <div id="alert-rules-wrap"></div>
+          <div style="margin-top:10px;display:flex;gap:8px">
+            <button class="btn btn-sec btn-sm" onclick="addRule()">+ 添加规则</button>
+            <button class="btn btn-pri btn-sm" onclick="saveRules()">保存规则</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /content -->
+</div><!-- /main -->
+
+<div id="toast"></div>
+
+<script>
+const API = '';
+let _autoRefresh = true;
+let _arTimer = null;
+let _chart = null;
+let _allSignals = [];    // 所有信号名列表（来自 messages API）
+let _allMessages = [];   // 所有消息名列表
+let _liveData = {};      // msg -> [{signal_name, value, ...}]
+let _tableData = [];
+let _alertRules = [];
+let _activePage = 'live';
+
+function toast(msg, ok=true){
+  const e=document.getElementById('toast');
+  e.textContent=msg; e.className='toast show '+(ok?'ok':'err');
+  setTimeout(()=>e.classList.remove('show'),3000);
+}
+function fmtTs(ts){
+  if(!ts) return '-';
+  return new Date(ts*1000).toLocaleString('zh-CN',{hour12:false,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit'});
+}
+function fmtSz(b){
+  if(!b) return '0 B';
+  if(b<1024) return b+' B';
+  if(b<1048576) return (b/1024).toFixed(1)+' KB';
+  return (b/1048576).toFixed(1)+' MB';
+}
+function fmtVal(v){
+  if(v===null||v===undefined) return '-';
+  return (typeof v==='number') ? (Math.abs(v)>=1000?v.toFixed(1):(Math.abs(v)<0.01?v.toExponential(3):v.toFixed(3))) : v;
+}
+
+function showPage(name){
+  _activePage = name;
+  document.querySelectorAll('.tab-pane').forEach(e=>e.classList.remove('act'));
+  document.querySelectorAll('.sidebar-item').forEach(e=>e.classList.remove('act'));
+  const pg = document.getElementById('page-'+name);
+  if(pg){ pg.classList.add('act'); pg.classList.remove('page-hidden'); }
+  const allItems = document.querySelectorAll('.sidebar-item');
+  allItems.forEach(el=>{
+    if(el.getAttribute('onclick')&&el.getAttribute('onclick').includes("'"+name+"'")){el.classList.add('act');}
+  });
+  if(name==='chart') initChart();
+  if(name==='table') loadTableData();
+  if(name==='alerts') loadAlerts();
+  if(name==='config') loadConfig();
+}
+
+// ─────────────────────── Stats ───────────────────────
+async function loadStats(){
+  try{
+    const j=await(await fetch(API+'/api/bms/stats')).json();
+    if(!j.ok) return;
+    const d=j.data;
+    document.getElementById('sb-total').textContent=(d.total_records||0).toLocaleString();
+    document.getElementById('sb-sigs').textContent=(d.signal_count||0).toLocaleString();
+    document.getElementById('sb-size').textContent=fmtSz(d.db_size_bytes);
+    document.getElementById('sb-maxts').textContent=d.max_ts?fmtTs(d.max_ts):'-';
+    document.getElementById('sb-alert').textContent=d.alert_count||0;
+    const badge=document.getElementById('db-badge');
+    if(d.total_records>0){
+      badge.className='badge badge-green';
+      badge.innerHTML='<span class="dot"></span>数据库活跃 '+d.total_records.toLocaleString()+' 条';
+    } else {
+      badge.className='badge badge-yellow';
+      badge.innerHTML='<span class="dot"></span>等待数据';
+    }
+  } catch(e){}
+}
+
+// ─────────────────────── Live Signals ───────────────────────
+async function loadLiveSignals(){
+  try{
+    const j=await(await fetch(API+'/api/bms/messages')).json();
+    if(!j.ok){ document.getElementById('live-empty').style.display='block'; return; }
+    _liveData = j.data || {};
+    _allMessages = Object.keys(_liveData).sort((a,b)=>{
+      // module_N 排在后面，按数字排序
+      const isMA=a.startsWith('module_'), isMB=b.startsWith('module_');
+      if(isMA&&!isMB) return 1; if(!isMA&&isMB) return -1;
+      if(isMA&&isMB){
+        return parseInt(a.split('_')[1]||'0')-parseInt(b.split('_')[1]||'0');
+      }
+      return a.localeCompare(b);
+    });
+
+    // 更新消息过滤下拉
+    const sel=document.getElementById('live-msg-filter');
+    const prevVal=sel.value;
+    sel.innerHTML='<option value="">全部消息 ('+_allMessages.length+')</option>';
+    _allMessages.forEach(mn=>{
+      const opt=document.createElement('option');
+      opt.value=mn; opt.textContent=mn+' ('+(_liveData[mn]||[]).length+')';
+      sel.appendChild(opt);
+    });
+    if(prevVal) sel.value=prevVal;
+
+    // 同步收集所有信号名供曲线选择器
+    _allSignals=[];
+    Object.values(_liveData).forEach(sigs=>sigs.forEach(s=>{if(!_allSignals.includes(s.signal_name))_allSignals.push(s.signal_name);}));
+    _allSignals.sort();
+
+    renderLiveGroups();
+    document.getElementById('live-empty').style.display=Object.keys(_liveData).length?'none':'block';
+    document.getElementById('live-dot-wrap').style.display=_autoRefresh?'':'none';
+  } catch(e){ console.error(e); }
+}
+
+function renderLiveGroups(){
+  const kw=(document.getElementById('live-filter').value||'').toLowerCase();
+  const msgF=document.getElementById('live-msg-filter').value;
+  const container=document.getElementById('live-groups');
+  container.innerHTML='';
+
+  const msgs = msgF ? [msgF] : _allMessages;
+  let totalShown=0;
+  msgs.forEach(mn=>{
+    const sigs=(_liveData[mn]||[]).filter(s=>{
+      if(!kw) return true;
+      return s.signal_name.toLowerCase().includes(kw)||mn.toLowerCase().includes(kw);
+    });
+    if(!sigs.length) return;
+    totalShown+=sigs.length;
+
+    const grp=document.createElement('div');
+    grp.className='msg-group';
+    const stateKey='grp_'+mn;
+    const collapsed=sessionStorage.getItem(stateKey)==='1';
+
+    const hdr=document.createElement('div');
+    hdr.className='msg-group-hdr';
+    // Label: module_N → 子板 N,  others → raw
+    let label=mn;
+    if(mn.startsWith('module_')) label='📦 子板 '+mn.split('_')[1];
+    else label='📋 '+mn;
+
+    hdr.innerHTML=`${label} <span class="sidebar-badge">${sigs.length} 信号</span><span style="margin-left:auto;color:var(--text3);font-size:12px">${collapsed?'▶ 展开':'▼ 折叠'}</span>`;
+    hdr.onclick=()=>{
+      body.classList.toggle('collapsed');
+      const now=body.classList.contains('collapsed');
+      sessionStorage.setItem(stateKey, now?'1':'0');
+      hdr.querySelector('span:last-child').textContent=now?'▶ 展开':'▼ 折叠';
+    };
+
+    const body=document.createElement('div');
+    body.className='msg-group-body'+(collapsed?' collapsed':'');
+
+    sigs.sort((a,b)=>a.signal_name.localeCompare(b.signal_name));
+    sigs.forEach(s=>{
+      const uid = (mn + '/' + s.signal_name).replace(/[^a-zA-Z0-9_-]/g,'_');
+      const row=document.createElement('div');
+      row.className='sig-row';
+      row.innerHTML=`
+        <input type="checkbox" class="check-sig" data-sig="${s.signal_name}" title="选中后可在曲线图中查看">
+        <span class="sig-name">${s.signal_name}</span>
+        <span class="sig-val" id="bmsval-${uid}">${fmtVal(s.value)}</span>
+        <span class="sig-unit">${s.unit||''}</span>
+        <span class="sig-ch">${s.channel||''}</span>
+        <span class="sig-ts" id="bmsts-${uid}">${s.ts?fmtTs(s.ts):'-'}</span>
+      `;
+      body.appendChild(row);
+    });
+
+    grp.appendChild(hdr);
+    grp.appendChild(body);
+    container.appendChild(grp);
+  });
+
+  // 添加"显示在曲线中"按钮
+  if(totalShown>0){
+    const bar=document.createElement('div');
+    bar.style='margin-top:10px;display:flex;gap:8px;align-items:center';
+    bar.innerHTML=`<button class="btn btn-pri btn-sm" onclick="showCheckedInChart()">📈 在曲线中查看选中信号</button><span style="font-size:12px;color:var(--text3)">勾选信号后点击</span>`;
+    container.appendChild(bar);
+  }
+}
+
+function filterLive(){ renderLiveGroups(); }
+function expandAll(){ document.querySelectorAll('.msg-group-body.collapsed').forEach(e=>{e.classList.remove('collapsed');}); }
+function collapseAll(){ document.querySelectorAll('.msg-group-body:not(.collapsed)').forEach(e=>{e.classList.add('collapsed');}); }
+
+function showCheckedInChart(){
+  const checked=[...document.querySelectorAll('.check-sig:checked')].map(c=>c.dataset.sig);
+  if(!checked.length){toast('请先勾选信号',false);return;}
+  showPage('chart');
+  setTimeout(()=>{
+    // 先取消所有选中
+    document.querySelectorAll('#chart-sig-list input[type=checkbox]').forEach(c=>c.checked=false);
+    // 再选中对应的
+    checked.forEach(sn=>{
+      const cb=document.querySelector('#chart-sig-list input[value="'+sn+'"]');
+      if(cb) cb.checked=true;
+    });
+    loadChart();
+  }, 300);
+}
+
+// ─────────────────────── Chart ───────────────────────
+function initChart(){
+  if(!_chart){
+    const dom=document.getElementById('chart-container');
+    _chart=echarts.init(dom,'dark');
+  }
+  updateChartSigList();
+  // 默认时间范围
+  onChartRangeChange();
+}
+
+function updateChartSigList(){
+  const kw=(document.getElementById('chart-sig-filter').value||'').toLowerCase();
+  const sigs=_allSignals.filter(s=>!kw||s.toLowerCase().includes(kw));
+  const wrap=document.getElementById('chart-sig-list');
+  wrap.innerHTML='';
+  sigs.forEach(sn=>{
+    const item=document.createElement('label');
+    item.style='display:flex;align-items:center;gap:6px;padding:4px 6px;cursor:pointer;border-radius:4px;font-size:12px;color:var(--text)';
+    item.innerHTML=`<input type="checkbox" value="${sn}"> ${sn}`;
+    wrap.appendChild(item);
+  });
+  if(!sigs.length) wrap.innerHTML='<div style="color:var(--text3);padding:8px;font-size:12px">无匹配信号</div>';
+}
+
+function filterChartSigs(){ updateChartSigList(); }
+function chkAll(){ document.querySelectorAll('#chart-sig-list input').forEach(c=>c.checked=true); }
+function chkNone(){ document.querySelectorAll('#chart-sig-list input').forEach(c=>c.checked=false); }
+
+function onChartRangeChange(){
+  const v=parseInt(document.getElementById('chart-range').value);
+  if(!v) return;
+  const now=new Date();
+  const start=new Date(now-v*1000);
+  document.getElementById('chart-start').value=toLocalDatetime(start);
+  document.getElementById('chart-end').value=toLocalDatetime(now);
+}
+
+function toLocalDatetime(d){
+  const pad=n=>String(n).padStart(2,'0');
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+async function loadChart(){
+  const sel=[...document.querySelectorAll('#chart-sig-list input:checked')].map(c=>c.value);
+  if(!sel.length){toast('请选择至少一个信号',false);return;}
+  const startVal=document.getElementById('chart-start').value;
+  const endVal=document.getElementById('chart-end').value;
+  const startTs=startVal?new Date(startVal).getTime()/1000:null;
+  const endTs=endVal?new Date(endVal).getTime()/1000:null;
+  let qs='signals='+encodeURIComponent(sel.join(','));
+  if(startTs) qs+='&start='+startTs;
+  if(endTs) qs+='&end='+endTs;
+  qs+='&limit=5000';
+  try{
+    const j=await(await fetch(API+'/api/bms/query?'+qs)).json();
+    if(!j.ok){toast('查询失败',false);return;}
+    renderChart(j.data, sel);
+  }catch(e){toast('网络错误',false);}
+}
+
+function renderChart(data, sigs){
+  if(!_chart) return;
+  const colors=['#58a6ff','#3fb950','#f0883e','#f85149','#d29922','#a5d6ff','#7ee787','#ffa657'];
+  const series=[];
+  sigs.forEach((sn,i)=>{
+    const pts=(data[sn]||[]).map(r=>[r.ts*1000, r.value]);
+    if(!pts.length) return;
+    series.push({
+      name:sn, type:'line', data:pts, showSymbol:false,
+      lineStyle:{width:1.5}, color:colors[i%colors.length],
+      emphasis:{focus:'series'},
+    });
+  });
+  if(!series.length){toast('所选时间段内无数据',false);return;}
+  _chart.setOption({
+    backgroundColor:'transparent',
+    grid:{left:60,right:20,top:40,bottom:50},
+    tooltip:{trigger:'axis',axisPointer:{type:'cross'},formatter:params=>{
+      let s='<span style="font-size:12px">'+new Date(params[0].value[0]).toLocaleString('zh-CN',{hour12:false})+'</span><br>';
+      params.forEach(p=>{s+=`<span style="color:${p.color}">●</span> ${p.seriesName}: <b>${fmtVal(p.value[1])}</b><br>`;});
+      return s;
+    }},
+    legend:{textStyle:{color:'#e6edf3'},type:'scroll',bottom:0},
+    xAxis:{type:'time',axisLabel:{color:'#8b949e',formatter:v=>{const d=new Date(v);return`${d.getMonth()+1}/${d.getDate()} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;}},axisLine:{lineStyle:{color:'#30363d'}}},
+    yAxis:{type:'value',axisLabel:{color:'#8b949e'},splitLine:{lineStyle:{color:'#21262d'}}},
+    dataZoom:[{type:'inside'},{type:'slider',height:20,bottom:22,handleStyle:{color:'#58a6ff'}}],
+    series,
+  });
+  toast('曲线已绘制，共 '+series.length+' 个信号');
+}
+
+document.getElementById('chart-range').addEventListener('change', onChartRangeChange);
+
+// ─────────────────────── Table ───────────────────────
+async function loadTableData(){
+  try{
+    const j=await(await fetch(API+'/api/bms/signals')).json();
+    if(!j.ok) return;
+    _tableData=j.data||[];
+    // 更新消息过滤
+    const msgNames=[...new Set(_tableData.map(r=>r.msg_name||''))].sort();
+    const sel=document.getElementById('tbl-msg');
+    const pv=sel.value;
+    sel.innerHTML='<option value="">全部消息 ('+msgNames.length+')</option>';
+    msgNames.forEach(mn=>{const o=document.createElement('option');o.value=mn;o.textContent=mn;sel.appendChild(o);});
+    if(pv) sel.value=pv;
+    filterTable();
+  }catch(e){}
+}
+
+function filterTable(){
+  const kw=(document.getElementById('tbl-filter').value||'').toLowerCase();
+  const msgF=document.getElementById('tbl-msg').value;
+  const rows=_tableData.filter(r=>{
+    if(msgF&&r.msg_name!==msgF) return false;
+    if(kw&&!r.signal_name.toLowerCase().includes(kw)&&!(r.msg_name||'').toLowerCase().includes(kw)) return false;
+    return true;
+  });
+  const tbody=document.getElementById('tbl-body');
+  tbody.innerHTML='';
+  rows.sort((a,b)=>(a.msg_name||'').localeCompare(b.msg_name)||a.signal_name.localeCompare(b.signal_name));
+  rows.forEach(r=>{
+    const tr=document.createElement('tr');
+    tr.innerHTML=`<td><span style="color:var(--text2)">${r.msg_name||'-'}</span></td>
+      <td>${r.signal_name}</td>
+      <td class="val-num">${fmtVal(r.value)}</td>
+      <td class="val-unit">${r.unit||'-'}</td>
+      <td style="color:var(--text3)">${r.channel||'-'}</td>
+      <td style="color:var(--text3);font-family:monospace">0x${(r.can_id||0).toString(16).toUpperCase()}</td>
+      <td style="color:var(--text3)">${fmtTs(r.ts)}</td>`;
+    tbody.appendChild(tr);
+  });
+}
+
+function exportCSV(){
+  const startVal=document.getElementById('chart-start').value;
+  const endVal=document.getElementById('chart-end').value;
+  const startTs=startVal?new Date(startVal).getTime()/1000:0;
+  const endTs=endVal?new Date(endVal).getTime()/1000:0;
+  let url=API+'/api/bms/export?limit=100000';
+  if(startTs) url+='&start='+startTs;
+  if(endTs) url+='&end='+endTs;
+  window.open(url,'_blank');
+}
+
+// ─────────────────────── Alerts ───────────────────────
+async function loadAlerts(){
+  const range=parseInt(document.getElementById('alert-range').value)||0;
+  const limit=parseInt(document.getElementById('alert-limit').value)||200;
+  let qs='limit='+limit;
+  if(range) qs+='&start='+(Date.now()/1000-range);
+  try{
+    const j=await(await fetch(API+'/api/bms/alerts?'+qs)).json();
+    if(!j.ok) return;
+    const data=j.data||[];
+    const tbody=document.getElementById('alert-body');
+    tbody.innerHTML='';
+    document.getElementById('alert-empty').style.display=data.length?'none':'block';
+    data.forEach(a=>{
+      const tr=document.createElement('tr');
+      tr.innerHTML=`<td>${fmtTs(a.ts)}</td>
+        <td style="color:var(--yellow)">${a.signal_name}</td>
+        <td class="val-num">${fmtVal(a.value)}</td>
+        <td>${fmtVal(a.threshold)}</td>
+        <td>${a.direction==='above'?'超上限↑':'低下限↓'}</td>
+        <td style="color:var(--text3)">${a.message||''}</td>`;
+      tbody.appendChild(tr);
+    });
+    document.getElementById('sb-alert').textContent=data.length;
+  }catch(e){}
+}
+
+// ─────────────────────── Config ───────────────────────
+async function loadConfig(){
+  try{
+    const j=await(await fetch(API+'/api/bms/config')).json();
+    if(!j.ok) return;
+    const d=j.data;
+    document.getElementById('cfg-days').value=d.retention_days||30;
+    document.getElementById('cfg-interval').value=d.min_interval_ms||500;
+    document.getElementById('cfg-batch').value=d.batch_size||100;
+    _alertRules=d.alert_rules||[];
+    renderRules();
+  }catch(e){}
+}
+
+async function saveBaseCfg(){
+  const body={
+    retention_days: parseFloat(document.getElementById('cfg-days').value)||30,
+    min_interval_ms: parseFloat(document.getElementById('cfg-interval').value)||500,
+    batch_size: parseInt(document.getElementById('cfg-batch').value)||100,
+  };
+  const j=await(await fetch(API+'/api/bms/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).json();
+  toast(j.ok?'配置已保存':'保存失败: '+(j.error||''), j.ok);
+}
+
+function renderRules(){
+  const wrap=document.getElementById('alert-rules-wrap');
+  wrap.innerHTML='';
+  if(!_alertRules.length){
+    wrap.innerHTML='<p style="color:var(--text3);font-size:13px">暂无告警规则</p>';
+    return;
+  }
+  _alertRules.forEach((r,i)=>{
+    const row=document.createElement('div');
+    row.style='display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap';
+    row.innerHTML=`<input type="text" placeholder="信号名" value="${r.signal||''}" data-i="${i}" data-f="signal" onchange="updRule(this)" style="width:180px">
+      <select data-i="${i}" data-f="direction" onchange="updRule(this)">
+        <option value="above" ${r.direction==='above'?'selected':''}>超过</option>
+        <option value="below" ${r.direction==='below'?'selected':''}>低于</option>
+      </select>
+      <input type="number" placeholder="阈值" value="${r.threshold||0}" data-i="${i}" data-f="threshold" onchange="updRule(this)" style="width:100px">
+      <input type="text" placeholder="告警消息" value="${r.message||''}" data-i="${i}" data-f="message" onchange="updRule(this)" style="flex:1;min-width:150px">
+      <button class="btn btn-red btn-sm" onclick="delRule(${i})">删除</button>`;
+    wrap.appendChild(row);
+  });
+}
+
+function addRule(){ _alertRules.push({signal:'',direction:'above',threshold:0,message:''}); renderRules(); }
+function delRule(i){ _alertRules.splice(i,1); renderRules(); }
+function updRule(el){ const i=parseInt(el.dataset.i),f=el.dataset.f; _alertRules[i][f]=f==='threshold'?parseFloat(el.value):el.value; }
+
+async function saveRules(){
+  const j=await(await fetch(API+'/api/bms/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({alert_rules:_alertRules})})).json();
+  toast(j.ok?'告警规则已保存':'保存失败',j.ok);
+}
+
+// ─────────────────────── Auto Refresh ───────────────────────
+function toggleAutoRefresh(){
+  _autoRefresh=!_autoRefresh;
+  document.getElementById('ar-txt').textContent=_autoRefresh?'开':'关';
+  if(_autoRefresh) startAutoRefresh();
+  else { clearInterval(_arTimer); _arTimer=null; }
+}
+
+function startAutoRefresh(){
+  if(_arTimer) clearInterval(_arTimer);
+  _arTimer=setInterval(()=>{
+    loadStats();
+    if(_activePage==='live') loadLiveSignals();
+  }, 3000);
+}
+
+async function refreshAll(){
+  await loadStats();
+  await loadLiveSignals();
+}
+
+// ─────────────────────── MQTT 实时推送 ───────────────────────
+let _mqttClient = null;
+
+function setMqttBadge(ok, label) {
+  const el = document.getElementById('mqtt-badge');
+  if (!el) return;
+  el.className = 'badge ' + (ok ? 'badge-green' : 'badge-yellow');
+  el.innerHTML = '<span class="dot"></span>' + label;
+}
+
+async function connectMqtt() {
+  if (!window.mqtt) return;  // mqtt.js 未加载则跳过
+  try {
+    const cfg = await (await fetch('/api/realtime/config', {cache:'no-store'})).json();
+    const mqttCfg = cfg.mqtt || {};
+    if (!mqttCfg.url || !mqttCfg.enabled) return;
+    if (_mqttClient) { try { _mqttClient.end(true); } catch(e){} }
+
+    const client = window.mqtt.connect(mqttCfg.url, {
+      clientId: 'bms_page_' + Math.random().toString(36).slice(2,8),
+      reconnectPeriod: 5000, clean: true,
+    });
+    _mqttClient = client;
+
+    client.on('connect', () => {
+      setMqttBadge(true, 'MQTT 已连接');
+      // 订阅 UI 事件流（bms_signal 事件）
+      const uiTopic = mqttCfg.ui_topic || (mqttCfg.topic_prefix + '/ui/events');
+      client.subscribe(uiTopic, {qos:0});
+      // 也直接订阅 BMS 信号 topic（如果设备直接发布）
+      const devTopic = (mqttCfg.topic_prefix || 'app_lvgl') + '/device/+/bms/#';
+      client.subscribe(devTopic, {qos:0});
+    });
+
+    client.on('message', (topic, payload) => {
+      try {
+        const obj = JSON.parse(payload.toString());
+        // 来自 ui/events 的 bms_signal 事件
+        if (obj.event === 'bms_signal') {
+          const d = obj.data || {};
+          _applyLiveBmsUpdate(d.msg, d.signal, d.value, d.unit, d.ts);
+          return;
+        }
+        // 来自设备直接发布的 BMS 信号
+        if (topic.includes('/bms/') && typeof obj.value !== 'undefined') {
+          const parts = topic.split('/');
+          const msgIdx = parts.indexOf('bms') + 1;
+          const sigIdx = parts.length - 1;
+          const msgName = parts[msgIdx] || 'bms';
+          const sigName = obj.signal || parts[sigIdx] || '';
+          _applyLiveBmsUpdate(msgName, sigName, obj.value, obj.unit || '', obj.ts || Date.now()/1000);
+        }
+      } catch(e) {}
+    });
+
+    client.on('close', () => setMqttBadge(false, 'MQTT 断开'));
+    client.on('error', () => setMqttBadge(false, 'MQTT 错误'));
+  } catch(e) {
+    setMqttBadge(false, 'MQTT 不可用');
+  }
+}
+
+// 将 MQTT 推送的单个信号值应用到实时信号表格（无需整页刷新）
+function _safeId(s) { return s.replace(/[^a-zA-Z0-9_-]/g, '_'); }
+function _applyLiveBmsUpdate(msgName, sigName, value, unit, ts) {
+  if (!msgName || !sigName || value === undefined || value === null) return;
+  const uid = _safeId(msgName + '/' + sigName);
+  const valEl = document.getElementById('bmsval-' + uid);
+  const tsEl  = document.getElementById('bmsts-'  + uid);
+  if (valEl) {
+    valEl.textContent = Number(value).toLocaleString(undefined, {maximumFractionDigits:4}) + (unit ? ' ' + unit : '');
+    valEl.style.color = 'var(--green)';
+    setTimeout(() => { if(valEl) valEl.style.color = ''; }, 800);
+  }
+  if (tsEl) tsEl.textContent = fmtTs(ts);
+}
+
+// ─────────────────────── Init ───────────────────────
+(async()=>{
+  await refreshAll();
+  startAutoRefresh();
+  onChartRangeChange();
+  updateChartSigList();
+  connectMqtt();
+})();
+
+window.addEventListener('resize',()=>{ if(_chart) _chart.resize(); });
+</script>
+</body>
+</html>

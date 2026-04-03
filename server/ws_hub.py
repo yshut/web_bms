@@ -38,6 +38,8 @@ class WSHub:
         # 可选：状态持久化（SQLite）
         self._state_store = None
         self._last_persist_ts: float = 0.0
+        self._startup_event = threading.Event()
+        self._startup_error: Optional[str] = None
 
     def set_state_store(self, store) -> None:
         """注入一个状态存储（例如 StateStore），用于持久化关键状态/最近事件。"""
@@ -63,26 +65,38 @@ class WSHub:
         except Exception:
             pass
 
-    def start(self):
+    def start(self) -> bool:
         if not websockets:
             # 显式提示依赖缺失，避免静默失败
+            self._startup_error = "websockets not installed"
+            self._startup_event.set()
             try:
                 print("[WSHub] websockets 未安装，WebSocket 未启动。请执行: pip install websockets")
             except Exception:
                 pass
-            return
-        if self._thread:
+            return False
+        if self._thread and self._thread.is_alive():
             try:
                 print(f"[WSHub] 已在 {self._host}:{self._port} 运行，忽略重复启动")
             except Exception:
                 pass
-            return
+            return self._startup_error is None
+        self._startup_event.clear()
+        self._startup_error = None
         try:
             print(f"[WSHub] 正在启动 WebSocket 服务器: {self._host}:{self._port}")
         except Exception:
             pass
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._thread.start()
+        self._startup_event.wait(timeout=2.0)
+        return self._startup_error is None
+
+    def startup_error(self) -> Optional[str]:
+        return self._startup_error
+
+    def is_serving(self) -> bool:
+        return self._server is not None and self._startup_error is None
 
     def is_connected(self) -> bool:
         return self._device_ws is not None
@@ -628,9 +642,17 @@ class WSHub:
         async def _start_server():
             try:
                 self._server = await websockets.serve(handler, self._host, self._port, **kwargs)
+                self._startup_error = None
+                self._startup_event.set()
             except Exception as _e:
+                self._startup_error = f"{type(_e).__name__}: {_e}"
+                self._startup_event.set()
                 try:
                     print(f"[WSHub] Start failed: {type(_e).__name__}: {_e}")
+                except Exception:
+                    pass
+                try:
+                    self._loop.call_soon(self._loop.stop)
                 except Exception:
                     pass
 
@@ -638,9 +660,18 @@ class WSHub:
             self._loop.create_task(_start_server())
         except Exception:
             # 兜底：如果 create_task 失败，不阻断主流程
-            pass
+            self._startup_error = "create_task failed"
+            self._startup_event.set()
 
         self._loop.run_forever()
+        try:
+            self._server = None
+            if self._loop and not self._loop.is_closed():
+                self._loop.close()
+        except Exception:
+            pass
+        self._loop = None
+        self._thread = None
 
     def request(self, payload: dict, timeout: float = 3.0) -> dict:
         if not websockets or not self._loop or not self._device_ws:
@@ -662,3 +693,86 @@ class WSHub:
             return {"ok": False, "error": f"ws request failed: {e}"}
         finally:
             self._pending.pop(rid, None) 
+
+    def _broadcast_external(self, obj: dict) -> None:
+        if not self._loop or not self._ui_clients:
+            return
+
+        data = json.dumps(obj)
+
+        async def _broadcast():
+            try:
+                await asyncio.gather(*[c.send(data) for c in list(self._ui_clients)], return_exceptions=True)
+            except Exception:
+                pass
+
+        try:
+            asyncio.run_coroutine_threadsafe(_broadcast(), self._loop)
+        except Exception:
+            pass
+
+    def ingest_external_event(self, obj: dict) -> None:
+        """接收 MQTT 等外部来源的语义事件，并复用现有 UI 广播缓存。"""
+        try:
+            if not isinstance(obj, dict):
+                return
+            ev = obj.get("event")
+            dat = obj.get("data")
+            if not isinstance(ev, str) or not ev:
+                return
+
+            self._last_events[ev] = dat if isinstance(dat, dict) else {"value": dat}
+            self._persist_event(ev)
+
+            if ev == "device_id":
+                did = str((dat or {}).get("id") or "").strip() if isinstance(dat, dict) else ""
+                if did:
+                    self._device_id = did
+                    self._history_ids.add(did)
+            elif ev == "can_frames" and isinstance(dat, dict):
+                lines = dat.get("lines", [])
+                if not lines and "buf" in dat:
+                    lines = [ln for ln in str(dat.get("buf", "")).split("\n") if ln.strip()]
+                frames = dat.get("frames") if isinstance(dat.get("frames"), list) else []
+                if frames:
+                    for item in frames[-10:]:
+                        try:
+                            if isinstance(item, dict):
+                                self.add_can_data(str(item.get("line") or item.get("frame") or ""), item.get("timestamp"))
+                        except Exception:
+                            continue
+                else:
+                    for line in lines[-10:]:
+                        self.add_can_data(str(line))
+            elif ev.lower().startswith("can") or "can" in ev.lower():
+                can_frame = None
+                if isinstance(dat, dict):
+                    can_frame = dat.get("frame") or dat.get("data") or dat.get("message")
+                elif isinstance(dat, str):
+                    can_frame = dat
+                if can_frame:
+                    self.add_can_data(str(can_frame))
+
+            if ev != "metrics":
+                self._broadcast_external(obj)
+        except Exception:
+            pass
+
+    def set_external_connection(self, connected: bool, device_id: Optional[str] = None, protocol: str = "mqtt") -> None:
+        data = {
+            "connected": bool(connected),
+            "host": protocol if connected else None,
+            "port": None,
+            "id": device_id or None,
+        }
+        try:
+            if connected and device_id:
+                self._device_id = str(device_id)
+                self._history_ids.add(self._device_id)
+            elif not connected and self._device_ws is None:
+                self._device_id = None
+            self._last_events["server_connection"] = data
+            self._persist_event("server_connection")
+            self._broadcast_external({"event": "server_connection", "data": data})
+        except Exception:
+            pass

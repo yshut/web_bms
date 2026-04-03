@@ -16,6 +16,7 @@
 #include <netdb.h>
 #include <fcntl.h>
 #include <errno.h>
+#include <inttypes.h>
 #include <time.h>
 #include <sys/time.h>
 #include <stdbool.h>
@@ -27,6 +28,13 @@
 #define WS_OPCODE_CLOSE   0x08
 #define WS_OPCODE_PING    0x09
 #define WS_OPCODE_PONG    0x0A
+
+typedef struct {
+    char *line;
+    int channel;
+    double timestamp_s;
+    uint64_t seq;
+} ws_can_frame_entry_t;
 
 /* WebSocket客户端上下文 */
 typedef struct {
@@ -48,11 +56,12 @@ typedef struct {
     char device_id[33];  // 32位十六进制字符串 + \0
     
     /* CAN帧缓冲（批量上报） */
-    char **can_frame_buffer;
+    ws_can_frame_entry_t *can_frame_buffer;
     int can_frame_count;
     int can_frame_capacity;
     pthread_mutex_t can_buffer_mutex;
     uint64_t last_can_flush_time;  // 毫秒级时间戳
+    uint64_t next_can_seq;
     
     /* 互斥锁 */
     pthread_mutex_t mutex;
@@ -84,6 +93,7 @@ static int ws_receive_frame(void);
 static void ws_handle_message(const char *msg, size_t len);
 static void ws_flush_can_frames(void);
 static void generate_device_id(char *id_buf, size_t buf_size);
+static size_t json_escape_string(const char *src, char *dst, size_t dst_size);
 
 /**
  * @brief 生成设备ID（基于MAC地址或系统信息的哈希）
@@ -123,7 +133,8 @@ int ws_client_init(const ws_config_t *config)
     
     // 初始化CAN帧缓冲
     g_ws_ctx.can_frame_capacity = 1000;
-    g_ws_ctx.can_frame_buffer = (char**)calloc(g_ws_ctx.can_frame_capacity, sizeof(char*));
+    g_ws_ctx.can_frame_buffer = (ws_can_frame_entry_t*)calloc(
+        g_ws_ctx.can_frame_capacity, sizeof(ws_can_frame_entry_t));
     
     // 初始化时间戳（毫秒）
     struct timeval tv;
@@ -145,7 +156,7 @@ void ws_client_deinit(void)
     pthread_mutex_lock(&g_ws_ctx.can_buffer_mutex);
     if (g_ws_ctx.can_frame_buffer) {
         for (int i = 0; i < g_ws_ctx.can_frame_count; i++) {
-            free(g_ws_ctx.can_frame_buffer[i]);
+            free(g_ws_ctx.can_frame_buffer[i].line);
         }
         free(g_ws_ctx.can_frame_buffer);
         g_ws_ctx.can_frame_buffer = NULL;
@@ -665,11 +676,20 @@ int ws_client_send_binary(const uint8_t *data, size_t len)
 void ws_client_report_can_frame(int channel, const char *frame_text)
 {
     if (!frame_text) return;
+    struct timeval tv;
+    double timestamp_s;
+
+    gettimeofday(&tv, NULL);
+    timestamp_s = (double)tv.tv_sec + ((double)tv.tv_usec / 1000000.0);
     
     pthread_mutex_lock(&g_ws_ctx.can_buffer_mutex);
     
     if (g_ws_ctx.can_frame_count < g_ws_ctx.can_frame_capacity) {
-        g_ws_ctx.can_frame_buffer[g_ws_ctx.can_frame_count] = strdup(frame_text);
+        ws_can_frame_entry_t *entry = &g_ws_ctx.can_frame_buffer[g_ws_ctx.can_frame_count];
+        entry->line = strdup(frame_text);
+        entry->channel = channel;
+        entry->timestamp_s = timestamp_s;
+        entry->seq = ++g_ws_ctx.next_can_seq;
         g_ws_ctx.can_frame_count++;
     }
     
@@ -688,26 +708,88 @@ static void ws_flush_can_frames(void)
         return;
     }
     
-    // 构建批量消息 (简化版)
-    char *batch_msg = (char*)malloc(g_ws_ctx.can_frame_count * 256);  // 每帧假设最多256字节
+    // 构建包含 seq/timestamp 的 JSON 批量消息，便于服务端去重与补齐
+    char *batch_msg = (char*)malloc((size_t)g_ws_ctx.can_frame_count * 512 + 256);
     if (!batch_msg) {
         pthread_mutex_unlock(&g_ws_ctx.can_buffer_mutex);
         return;
     }
     
-    strcpy(batch_msg, "CBUF1\n");
+    strcpy(batch_msg, "{\"event\":\"can_frames\",\"data\":{\"lines\":[");
     for (int i = 0; i < g_ws_ctx.can_frame_count; i++) {
-        strcat(batch_msg, g_ws_ctx.can_frame_buffer[i]);
-        strcat(batch_msg, "\n");
-        free(g_ws_ctx.can_frame_buffer[i]);
+        char escaped_line[384];
+        ws_can_frame_entry_t *entry = &g_ws_ctx.can_frame_buffer[i];
+
+        json_escape_string(entry->line ? entry->line : "", escaped_line, sizeof(escaped_line));
+        if (i > 0) strcat(batch_msg, ",");
+        strcat(batch_msg, "\"");
+        strcat(batch_msg, escaped_line);
+        strcat(batch_msg, "\"");
     }
+    strcat(batch_msg, "],\"frames\":[");
+    for (int i = 0; i < g_ws_ctx.can_frame_count; i++) {
+        char escaped_line[384];
+        char frame_json[640];
+        ws_can_frame_entry_t *entry = &g_ws_ctx.can_frame_buffer[i];
+
+        json_escape_string(entry->line ? entry->line : "", escaped_line, sizeof(escaped_line));
+        snprintf(frame_json, sizeof(frame_json),
+                 "%s{\"line\":\"%s\",\"channel\":%d,\"timestamp\":%.6f,\"ts_ms\":%" PRIu64 ",\"seq\":%" PRIu64 "}",
+                 (i > 0) ? "," : "",
+                 escaped_line,
+                 entry->channel,
+                 entry->timestamp_s,
+                 (uint64_t)(entry->timestamp_s * 1000.0),
+                 entry->seq);
+        strcat(batch_msg, frame_json);
+        free(entry->line);
+        memset(entry, 0, sizeof(*entry));
+    }
+    strcat(batch_msg, "]}}");
     
-    ws_send_frame(WS_OPCODE_BINARY, (const uint8_t*)batch_msg, strlen(batch_msg));
+    ws_send_frame(WS_OPCODE_TEXT, (const uint8_t*)batch_msg, strlen(batch_msg));
     
     free(batch_msg);
     g_ws_ctx.can_frame_count = 0;
     
     pthread_mutex_unlock(&g_ws_ctx.can_buffer_mutex);
+}
+
+static size_t json_escape_string(const char *src, char *dst, size_t dst_size)
+{
+    size_t out = 0;
+
+    if (!dst || dst_size == 0) {
+        return 0;
+    }
+
+    if (!src) {
+        dst[0] = '\0';
+        return 0;
+    }
+
+    while (*src && out + 2 < dst_size) {
+        unsigned char ch = (unsigned char)(*src++);
+        if (ch == '\\' || ch == '"') {
+            if (out + 2 >= dst_size) break;
+            dst[out++] = '\\';
+            dst[out++] = (char)ch;
+        } else if (ch == '\n') {
+            dst[out++] = '\\';
+            dst[out++] = 'n';
+        } else if (ch == '\r') {
+            dst[out++] = '\\';
+            dst[out++] = 'r';
+        } else if (ch == '\t') {
+            dst[out++] = '\\';
+            dst[out++] = 't';
+        } else {
+            dst[out++] = (char)ch;
+        }
+    }
+
+    dst[out] = '\0';
+    return out;
 }
 
 /**

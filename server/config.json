@@ -1,0 +1,40 @@
+{
+  "_comment": "默认使用外部 MQTT broker。若服务运行在 WSL 且开发板经 Windows 访问，请将 public_host 改为 Windows 主机局域网 IP，并在 Windows 上做端口转发。",
+
+  "public_host": "192.168.100.1",
+
+  "web_server": {
+    "host": "0.0.0.0",
+    "port": 18080,
+    "debug": false
+  },
+
+  "mqtt": {
+    "enable": true,
+    "host": "127.0.0.1",
+    "port": 1883,
+    "ws_port": 9001,
+    "ws_url": "ws://192.168.100.1:9001",
+    "embedded_broker": false,
+    "embedded_bind_host": "0.0.0.0",
+    "embedded_port": 1883,
+    "auto_start_local_broker": true,
+    "mosquitto_bin": "mosquitto",
+    "username": "",
+    "password": "",
+    "client_id": "app_lvgl_server",
+    "keepalive_s": 30,
+    "qos": 1,
+    "topic_prefix": "app_lvgl",
+    "use_tls": false
+  },
+
+  "network": {
+    "socket_timeout": 3.0
+  },
+
+  "state": {
+    "db_enable": true,
+    "db_path": "./uploads/state.sqlite3"
+  }
+}

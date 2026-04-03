@@ -4,7 +4,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>硬件状态监控 - T113-S3</title>
-    <link rel="icon" href="/static/dashboard/favicon.ico">
     <link rel="stylesheet" href="/static/shared.css">
     <style>
         * {
@@ -323,6 +322,10 @@
                 <div class="progress-bar">
                     <div class="progress-fill" id="memoryProgress"></div>
                 </div>
+                <div class="info-row" style="margin-top:4px">
+                    <span class="info-label" style="color:#64748b;font-size:12px">可用内存:</span>
+                    <span class="info-value" style="color:#64748b;font-size:12px" id="systemMemoryFree">--</span>
+                </div>
                 <div class="info-row" style="margin-top: 15px;">
                     <span class="info-label">温度:</span>
                     <span class="info-value" id="systemTemp">--</span>
@@ -468,11 +471,14 @@
             // 系统
             if (data.system) {
                 const system = data.system;
-                document.getElementById('systemCpuUsage').textContent = system.cpu_usage.toFixed(1);
+                document.getElementById('systemCpuUsage').textContent = (system.cpu_usage != null ? (+system.cpu_usage).toFixed(1) : '--');
                 document.getElementById('systemMemoryTotal').textContent = formatBytes((system.memory_total || 0) * 1024);
                 document.getElementById('systemMemoryUsed').textContent = formatBytes((system.memory_used || 0) * 1024);
-                document.getElementById('systemMemoryUsage').textContent = system.memory_usage.toFixed(1);
-                document.getElementById('systemTemp').textContent = system.temperature.toFixed(1) + ' °C';
+                document.getElementById('systemMemoryUsage').textContent = (system.memory_usage != null ? (+system.memory_usage).toFixed(1) : '--');
+                if (system.memory_free != null) {
+                    document.getElementById('systemMemoryFree').textContent = formatBytes(system.memory_free * 1024);
+                }
+                document.getElementById('systemTemp').textContent = (system.temperature != null ? (+system.temperature).toFixed(1) + ' °C' : '--');
                 document.getElementById('systemUptime').textContent = formatUptime(system.uptime || 0);
                 
                 const memProgress = document.getElementById('memoryProgress');
@@ -524,7 +530,7 @@
         // 每3秒刷新一次
         setInterval(fetchStatus, 3000);
     </script>
-</body>
 <script src="/static/shared.js"></script>
+</body>
 </html>
 

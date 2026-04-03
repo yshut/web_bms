@@ -15,6 +15,275 @@
 #include <dirent.h>
 #include <sys/stat.h>
 #include <limits.h>
+#include <pthread.h>
+
+#define UDS_SYNC_LOG_LINES 8
+#define UDS_SYNC_LOG_LEN 120
+#define DEFAULT_TX_ID 0x7F3
+#define DEFAULT_RX_ID 0x7FB
+
+typedef struct {
+    bool inited;
+    bool running;
+    int total_percent;
+    int seg_index;
+    int seg_total;
+    char iface[16];
+    uint32_t bitrate;
+    char tx_id[16];
+    char rx_id[16];
+    uint32_t block_size;
+    char s19_path[PATH_MAX];
+    char can_status[96];
+    int log_count;
+    int log_head;
+    char logs[UDS_SYNC_LOG_LINES][UDS_SYNC_LOG_LEN];
+} uds_sync_state_t;
+
+typedef struct {
+    char iface[16];
+    uint32_t bitrate;
+    uint32_t tx_id;
+    uint32_t rx_id;
+    uint32_t block_size;
+} uds_param_sync_msg_t;
+
+static pthread_mutex_t g_uds_sync_lock = PTHREAD_MUTEX_INITIALIZER;
+static uds_sync_state_t g_uds_sync = {0};
+static ui_uds_t *g_active_uds = NULL;
+
+static void uds_sync_init_defaults_locked(void)
+{
+    if (g_uds_sync.inited) return;
+    memset(&g_uds_sync, 0, sizeof(g_uds_sync));
+    g_uds_sync.inited = true;
+    strncpy(g_uds_sync.iface, "can0", sizeof(g_uds_sync.iface) - 1);
+    g_uds_sync.bitrate = 500000;
+    strncpy(g_uds_sync.tx_id, "7F3", sizeof(g_uds_sync.tx_id) - 1);
+    strncpy(g_uds_sync.rx_id, "7FB", sizeof(g_uds_sync.rx_id) - 1);
+    g_uds_sync.block_size = 256;
+    strncpy(g_uds_sync.can_status, "CAN状态: 未配置", sizeof(g_uds_sync.can_status) - 1);
+    strncpy(g_uds_sync.logs[0], "[系统] 就绪", sizeof(g_uds_sync.logs[0]) - 1);
+    g_uds_sync.log_count = 1;
+    g_uds_sync.log_head = 1 % UDS_SYNC_LOG_LINES;
+}
+
+static void uds_sync_init_defaults(void)
+{
+    pthread_mutex_lock(&g_uds_sync_lock);
+    uds_sync_init_defaults_locked();
+    pthread_mutex_unlock(&g_uds_sync_lock);
+}
+
+static uint16_t uds_bitrate_to_dropdown_index(uint32_t bitrate)
+{
+    if (bitrate == 125000) return 0;
+    if (bitrate == 250000) return 1;
+    if (bitrate == 1000000) return 3;
+    return 2;
+}
+
+static const char *uds_iface_to_channel_label(const char *iface)
+{
+    return (iface && strcmp(iface, "can1") == 0) ? "CAN2" : "CAN1";
+}
+
+static void uds_sync_set_params_locked(const char *iface, uint32_t bitrate, uint32_t tx_id, uint32_t rx_id, uint32_t block_size)
+{
+    uds_sync_init_defaults_locked();
+    if (iface && iface[0]) {
+        strncpy(g_uds_sync.iface, iface, sizeof(g_uds_sync.iface) - 1);
+        g_uds_sync.iface[sizeof(g_uds_sync.iface) - 1] = '\0';
+    }
+    if (bitrate > 0) g_uds_sync.bitrate = bitrate;
+    if (tx_id > 0) snprintf(g_uds_sync.tx_id, sizeof(g_uds_sync.tx_id), "%X", tx_id);
+    if (rx_id > 0) snprintf(g_uds_sync.rx_id, sizeof(g_uds_sync.rx_id), "%X", rx_id);
+    if (block_size > 0) g_uds_sync.block_size = block_size;
+}
+
+static void uds_sync_set_path_locked(const char *path)
+{
+    uds_sync_init_defaults_locked();
+    if (!path) return;
+    strncpy(g_uds_sync.s19_path, path, sizeof(g_uds_sync.s19_path) - 1);
+    g_uds_sync.s19_path[sizeof(g_uds_sync.s19_path) - 1] = '\0';
+}
+
+static void uds_sync_set_running_locked(bool running)
+{
+    uds_sync_init_defaults_locked();
+    g_uds_sync.running = running;
+}
+
+static void uds_sync_set_progress_locked(int total_percent, int seg_index, int seg_total)
+{
+    uds_sync_init_defaults_locked();
+    if (total_percent < 0) total_percent = 0;
+    if (total_percent > 100) total_percent = 100;
+    g_uds_sync.total_percent = total_percent;
+    g_uds_sync.seg_index = seg_index;
+    g_uds_sync.seg_total = seg_total;
+    if (total_percent >= 100) {
+        g_uds_sync.running = false;
+    }
+}
+
+static void uds_sync_set_can_status_locked(const char *status)
+{
+    uds_sync_init_defaults_locked();
+    if (!status) return;
+    strncpy(g_uds_sync.can_status, status, sizeof(g_uds_sync.can_status) - 1);
+    g_uds_sync.can_status[sizeof(g_uds_sync.can_status) - 1] = '\0';
+}
+
+static void uds_sync_append_log_locked(const char *line)
+{
+    size_t len = 0;
+    char *dst = NULL;
+    uds_sync_init_defaults_locked();
+    if (!line || !line[0]) return;
+    dst = g_uds_sync.logs[g_uds_sync.log_head];
+    len = strlen(line);
+    if (len >= UDS_SYNC_LOG_LEN) len = UDS_SYNC_LOG_LEN - 1;
+    memcpy(dst, line, len);
+    dst[len] = '\0';
+    g_uds_sync.log_head = (g_uds_sync.log_head + 1) % UDS_SYNC_LOG_LINES;
+    if (g_uds_sync.log_count < UDS_SYNC_LOG_LINES) g_uds_sync.log_count++;
+}
+
+static void uds_sync_clear_logs_locked(void)
+{
+    uds_sync_init_defaults_locked();
+    memset(g_uds_sync.logs, 0, sizeof(g_uds_sync.logs));
+    g_uds_sync.log_count = 0;
+    g_uds_sync.log_head = 0;
+}
+
+static void uds_sync_copy(uds_sync_state_t *out)
+{
+    if (!out) return;
+    pthread_mutex_lock(&g_uds_sync_lock);
+    uds_sync_init_defaults_locked();
+    *out = g_uds_sync;
+    pthread_mutex_unlock(&g_uds_sync_lock);
+}
+
+static void uds_sync_update_from_widgets(ui_uds_t *uds)
+{
+    char ch_buf[8] = {0};
+    char br_buf[16] = {0};
+    const char *sel_if = "can0";
+    const char *tx_str = NULL;
+    const char *rx_str = NULL;
+    const char *blk_str = NULL;
+    const char *s19 = NULL;
+    uint32_t bitrate = 500000;
+    uint32_t tx_id = DEFAULT_TX_ID;
+    uint32_t rx_id = DEFAULT_RX_ID;
+    uint32_t block_size = 256;
+
+    if (!uds) return;
+    if (uds->channel_dd) {
+        lv_dropdown_get_selected_str(uds->channel_dd, ch_buf, sizeof(ch_buf));
+        sel_if = (!strcmp(ch_buf, "CAN2")) ? "can1" : "can0";
+    }
+    if (uds->bitrate_dd) {
+        lv_dropdown_get_selected_str(uds->bitrate_dd, br_buf, sizeof(br_buf));
+        bitrate = (uint32_t)strtoul(br_buf, NULL, 10);
+        if (bitrate == 0) bitrate = 500000;
+    }
+    tx_str = uds->tx_id_input ? lv_textarea_get_text(uds->tx_id_input) : NULL;
+    rx_str = uds->rx_id_input ? lv_textarea_get_text(uds->rx_id_input) : NULL;
+    blk_str = uds->blk_size_input ? lv_textarea_get_text(uds->blk_size_input) : NULL;
+    s19 = uds->s19_path_input ? lv_textarea_get_text(uds->s19_path_input) : NULL;
+    if (tx_str && tx_str[0]) tx_id = (uint32_t)strtoul(tx_str, NULL, 16);
+    if (rx_str && rx_str[0]) rx_id = (uint32_t)strtoul(rx_str, NULL, 16);
+    if (blk_str && blk_str[0]) block_size = (uint32_t)strtoul(blk_str, NULL, 10);
+
+    pthread_mutex_lock(&g_uds_sync_lock);
+    uds_sync_set_params_locked(sel_if, bitrate, tx_id, rx_id, block_size);
+    uds_sync_set_path_locked(s19);
+    pthread_mutex_unlock(&g_uds_sync_lock);
+}
+
+static void uds_sync_render_logs(ui_uds_t *uds, const uds_sync_state_t *state)
+{
+    int start = 0;
+    int idx = 0;
+    int i = 0;
+
+    if (!uds || !uds->log_list || !state) return;
+    lv_obj_clean(uds->log_list);
+    if (state->log_count <= 0) {
+        return;
+    }
+    start = (state->log_head - state->log_count + UDS_SYNC_LOG_LINES) % UDS_SYNC_LOG_LINES;
+    for (i = 0; i < state->log_count; i++) {
+        idx = (start + i) % UDS_SYNC_LOG_LINES;
+        if (!state->logs[idx][0]) continue;
+        lv_obj_t *item = lv_list_add_text(uds->log_list, state->logs[idx]);
+        if (item) {
+            lv_obj_set_style_text_font(item, ui_common_get_font(), 0);
+            lv_obj_add_style(item, &g_style_label_normal, 0);
+        }
+    }
+}
+
+static void uds_sync_apply_to_widgets(ui_uds_t *uds, bool include_logs)
+{
+    uds_sync_state_t state;
+    char seg_buf[48];
+
+    if (!uds) return;
+    uds_sync_copy(&state);
+
+    if (uds->channel_dd) {
+        lv_dropdown_set_selected(uds->channel_dd, strcmp(state.iface, "can1") == 0 ? 1 : 0);
+    }
+    if (uds->bitrate_dd) {
+        lv_dropdown_set_selected(uds->bitrate_dd, uds_bitrate_to_dropdown_index(state.bitrate));
+    }
+    if (uds->tx_id_input) lv_textarea_set_text(uds->tx_id_input, state.tx_id);
+    if (uds->rx_id_input) lv_textarea_set_text(uds->rx_id_input, state.rx_id);
+    if (uds->blk_size_input) {
+        char blk_buf[16];
+        snprintf(blk_buf, sizeof(blk_buf), "%u", state.block_size);
+        lv_textarea_set_text(uds->blk_size_input, blk_buf);
+    }
+    if (uds->s19_path_input) lv_textarea_set_text(uds->s19_path_input, state.s19_path);
+    if (uds->can_status_label) lv_label_set_text(uds->can_status_label, state.can_status);
+    if (uds->total_progress_bar) lv_bar_set_value(uds->total_progress_bar, state.total_percent, LV_ANIM_OFF);
+    if (uds->total_progress_label) {
+        char txt[32];
+        snprintf(txt, sizeof(txt), "总进度: %d%%", state.total_percent);
+        lv_label_set_text(uds->total_progress_label, txt);
+    }
+    if (uds->segment_progress_label) {
+        if (state.seg_total > 0) {
+            snprintf(seg_buf, sizeof(seg_buf), "分段: %d/%d", state.seg_index, state.seg_total);
+            lv_label_set_text(uds->segment_progress_label, seg_buf);
+        } else {
+            lv_label_set_text(uds->segment_progress_label, "");
+        }
+    }
+    if (uds->start_btn) {
+        if (state.running) {
+            lv_obj_add_state(uds->start_btn, LV_STATE_DISABLED);
+        } else {
+            lv_obj_clear_state(uds->start_btn, LV_STATE_DISABLED);
+        }
+    }
+    if (include_logs) {
+        uds_sync_render_logs(uds, &state);
+    }
+}
+
+static void uds_apply_snapshot_async_cb(void *user_data)
+{
+    (void)user_data;
+    if (!g_active_uds) return;
+    uds_sync_apply_to_widgets(g_active_uds, true);
+}
 
 /* 输入框与软键盘交互 */
 static void input_focus_cb(lv_event_t *e)
@@ -35,10 +304,13 @@ static void input_focus_cb(lv_event_t *e)
 static void input_value_changed_cb(lv_event_t *e)
 {
     ui_uds_t *uds = (ui_uds_t *)lv_event_get_user_data(e);
-    if (!uds || !uds->kb_preview) return;
+    if (!uds) return;
     lv_obj_t *obj = lv_event_get_target(e);
-    const char *txt = lv_textarea_get_text(obj);
-    lv_textarea_set_text(uds->kb_preview, txt ? txt : "");
+    const char *txt = obj ? lv_textarea_get_text(obj) : "";
+    if (uds->kb_preview) {
+        lv_textarea_set_text(uds->kb_preview, txt ? txt : "");
+    }
+    uds_sync_update_from_widgets(uds);
 }
 
 static void kb_hide_btn_event_cb(lv_event_t *e)
@@ -69,8 +341,17 @@ static void uds_lvgl_apply_progress(void *p)
         if (m->uds->total_progress_bar) lv_bar_set_value(m->uds->total_progress_bar, m->total_percent, LV_ANIM_OFF);
         if (m->uds->total_progress_label) {
             char txt[32];
-            snprintf(txt, sizeof(txt), "Total: %d%%", m->total_percent);
+            snprintf(txt, sizeof(txt), "总进度: %d%%", m->total_percent);
             lv_label_set_text(m->uds->total_progress_label, txt);
+        }
+        if (m->uds->segment_progress_label) {
+            char seg_txt[48];
+            if (m->seg_total > 0) {
+                snprintf(seg_txt, sizeof(seg_txt), "分段: %d/%d", m->seg_index, m->seg_total);
+                lv_label_set_text(m->uds->segment_progress_label, seg_txt);
+            } else {
+                lv_label_set_text(m->uds->segment_progress_label, "");
+            }
         }
     }
     if (m) free(m);
@@ -117,6 +398,10 @@ static void uds_progress_cb_impl(int total_percent, int seg_index, int seg_total
 {
     ui_uds_t *uds = (ui_uds_t*)user;
     uds_prog_msg_t *msg = (uds_prog_msg_t*)malloc(sizeof(uds_prog_msg_t));
+    pthread_mutex_lock(&g_uds_sync_lock);
+    uds_sync_set_progress_locked(total_percent, seg_index, seg_total);
+    pthread_mutex_unlock(&g_uds_sync_lock);
+    if (!uds) uds = g_active_uds;
     if (!msg) return;
     msg->uds = uds;
     msg->total_percent = total_percent;
@@ -129,6 +414,14 @@ static void uds_log_cb_impl(const char *line, void *user)
 {
     ui_uds_t *uds = (ui_uds_t*)user;
     uds_log_msg_t *msg = (uds_log_msg_t*)malloc(sizeof(uds_log_msg_t));
+    pthread_mutex_lock(&g_uds_sync_lock);
+    uds_sync_append_log_locked(line);
+    if (line && (strstr(line, "刷写完成") || strstr(line, "刷写成功") ||
+                 strstr(line, "ERROR") || strstr(line, "失败") || strstr(line, "STOP"))) {
+        g_uds_sync.running = false;
+    }
+    pthread_mutex_unlock(&g_uds_sync_lock);
+    if (!uds) uds = g_active_uds;
     if (!msg) return;
     msg->uds = uds;
     if (line) {
@@ -194,6 +487,7 @@ static void file_item_event_cb(lv_event_t *e)
         // 选择文件，填入路径并关闭
         if (ctx->uds && ctx->uds->s19_path_input) {
             lv_textarea_set_text(ctx->uds->s19_path_input, path);
+            uds_sync_update_from_widgets(ctx->uds);
         }
         file_dlg_close(ctx);
     }
@@ -332,9 +626,12 @@ static void browse_btn_event_cb(lv_event_t *e)
     open_file_dialog(uds);
 }
 
-/* UDS诊断ID配置 */
-#define DEFAULT_TX_ID 0x7F3
-#define DEFAULT_RX_ID 0x7FB
+static void dropdown_value_changed_cb(lv_event_t *e)
+{
+    ui_uds_t *uds = (ui_uds_t *)lv_event_get_user_data(e);
+    if (!uds) return;
+    uds_sync_update_from_widgets(uds);
+}
 
 static void back_btn_event_cb(lv_event_t *e)
 {
@@ -402,10 +699,84 @@ static void configure_can_btn_event_cb(lv_event_t *e)
         // 更新状态标签
         if (uds->can_status_label) {
             char status[96];
-            snprintf(status, sizeof(status), "CAN Status: Configured (%s)", sel_if);
+            snprintf(status, sizeof(status), "CAN状态: 已配置 (%s)", sel_if);
             lv_label_set_text(uds->can_status_label, status);
+            pthread_mutex_lock(&g_uds_sync_lock);
+            uds_sync_set_can_status_locked(status);
+            pthread_mutex_unlock(&g_uds_sync_lock);
         }
+        uds_sync_update_from_widgets(uds);
     }
+}
+
+static int uds_start_with_values(ui_uds_t *uds,
+                                 const char *sel_if,
+                                 uint32_t bitrate,
+                                 uint32_t tx,
+                                 uint32_t rx,
+                                 uint32_t blk,
+                                 const char *s19)
+{
+    uds_config_t cfg;
+
+    if (!sel_if || !s19 || !s19[0]) {
+        pthread_mutex_lock(&g_uds_sync_lock);
+        uds_sync_append_log_locked("[ERROR] 未设置S19文件路径");
+        pthread_mutex_unlock(&g_uds_sync_lock);
+        lv_async_call(uds_apply_snapshot_async_cb, NULL);
+        return -1;
+    }
+
+    pthread_mutex_lock(&g_uds_sync_lock);
+    uds_sync_set_params_locked(sel_if, bitrate, tx, rx, blk);
+    uds_sync_set_path_locked(s19);
+    pthread_mutex_unlock(&g_uds_sync_lock);
+
+    if (can_handler_configure(sel_if, bitrate) < 0 || can_handler_init(sel_if, bitrate) < 0) {
+        pthread_mutex_lock(&g_uds_sync_lock);
+        uds_sync_append_log_locked("[ERROR] CAN init failed");
+        pthread_mutex_unlock(&g_uds_sync_lock);
+        lv_async_call(uds_apply_snapshot_async_cb, NULL);
+        return -1;
+    }
+
+    cfg.interface = sel_if;
+    cfg.tx_id = tx;
+    cfg.rx_id = rx;
+    cfg.block_size = blk;
+    cfg.s19_path = s19;
+    if (uds_init(&cfg) != 0) {
+        pthread_mutex_lock(&g_uds_sync_lock);
+        uds_sync_append_log_locked("[ERROR] UDS init failed");
+        pthread_mutex_unlock(&g_uds_sync_lock);
+        lv_async_call(uds_apply_snapshot_async_cb, NULL);
+        return -1;
+    }
+
+    uds_register_progress_cb(uds_progress_cb_impl, uds ? uds : g_active_uds);
+    uds_register_log_cb(uds_log_cb_impl, uds ? uds : g_active_uds);
+
+    if (uds_start() != 0) {
+        pthread_mutex_lock(&g_uds_sync_lock);
+        uds_sync_set_running_locked(false);
+        uds_sync_append_log_locked("[ERROR] UDS start failed");
+        pthread_mutex_unlock(&g_uds_sync_lock);
+        lv_async_call(uds_apply_snapshot_async_cb, NULL);
+        return -1;
+    }
+
+    pthread_mutex_lock(&g_uds_sync_lock);
+    uds_sync_set_running_locked(true);
+    uds_sync_set_progress_locked(0, 0, 0);
+    uds_sync_append_log_locked("[START] UDS flashing...");
+    pthread_mutex_unlock(&g_uds_sync_lock);
+
+    if (uds && uds->start_btn) {
+        lv_obj_add_state(uds->start_btn, LV_STATE_DISABLED);
+        log_info("开始刷写，禁用开始按钮");
+    }
+    lv_async_call(uds_apply_snapshot_async_cb, NULL);
+    return 0;
 }
 
 static void start_flash_btn_event_cb(lv_event_t *e)
@@ -430,45 +801,8 @@ static void start_flash_btn_event_cb(lv_event_t *e)
         uint32_t tx = strtoul(tx_str, NULL, 16);
         uint32_t rx = strtoul(rx_str, NULL, 16);
         uint32_t blk = strtoul(blk_str, NULL, 10);
-
-        // 确保CAN已配置
-        if (can_handler_configure(sel_if, bitrate) < 0 || can_handler_init(sel_if, bitrate) < 0) {
-            if (uds->log_list) {
-                lv_obj_t *item = lv_list_add_text(uds->log_list, "[ERROR] CAN init failed");
-                if (item) {
-                    lv_obj_set_style_text_font(item, ui_common_get_font(), 0);
-                    lv_obj_set_style_text_color(item, lv_color_hex(0xFF0000), 0);
-                }
-            }
-            return;
-        }
-
-        // 初始化并启动UDS（注意：先初始化，再注册回调，避免被uds_init清零）
-        uds_config_t cfg = { sel_if, tx, rx, blk, s19 };
-        if (uds_init(&cfg) == 0) {
-            /* 注册回调（跨线程转发到LVGL）*/
-            uds_register_progress_cb(uds_progress_cb_impl, uds);
-            uds_register_log_cb(uds_log_cb_impl, uds);
-        }
-        if (uds_start() == 0) {
-            /* 禁用开始刷写按钮，防止重复点击 */
-            if (uds->start_btn) {
-                lv_obj_add_state(uds->start_btn, LV_STATE_DISABLED);
-                log_info("开始刷写，禁用开始按钮");
-            }
-            if (uds->log_list) {
-                lv_obj_t *item = lv_list_add_text(uds->log_list, "[START] UDS flashing...");
-                if (item) lv_obj_set_style_text_font(item, ui_common_get_font(), 0);
-            }
-        } else {
-            if (uds->log_list) {
-                lv_obj_t *item = lv_list_add_text(uds->log_list, "[ERROR] UDS start failed");
-                if (item) {
-                    lv_obj_set_style_text_font(item, ui_common_get_font(), 0);
-                    lv_obj_set_style_text_color(item, lv_color_hex(0xFF0000), 0);
-                }
-            }
-        }
+        uds_sync_update_from_widgets(uds);
+        uds_start_with_values(uds, sel_if, bitrate, tx, rx, blk, s19);
     }
 }
 
@@ -481,28 +815,29 @@ static void stop_flash_btn_event_cb(lv_event_t *e)
         if (!uds) return;
         uds_stop();
         uds_deinit();
+        pthread_mutex_lock(&g_uds_sync_lock);
+        uds_sync_set_running_locked(false);
+        uds_sync_append_log_locked("[STOP] UDS flashing stopped");
+        pthread_mutex_unlock(&g_uds_sync_lock);
         /* 重新启用开始刷写按钮 */
         if (uds->start_btn) {
             lv_obj_clear_state(uds->start_btn, LV_STATE_DISABLED);
             log_info("停止刷写，重新启用开始按钮");
         }
-        if (uds->log_list) {
-            lv_obj_t *item = lv_list_add_text(uds->log_list, "[STOP] UDS flashing stopped");
-            if (item) {
-                lv_obj_set_style_text_font(item, ui_common_get_font(), 0);
-                lv_obj_set_style_text_color(item, lv_color_hex(0xFFA500), 0);
-            }
-        }
+        lv_async_call(uds_apply_snapshot_async_cb, NULL);
     }
 }
 
 ui_uds_t* ui_uds_create(void)
 {
     log_info("创建UDS诊断界面...");
-    
+
+    uds_sync_init_defaults();
     ui_uds_t *uds = malloc(sizeof(ui_uds_t));
     if (!uds) return NULL;
-    
+    memset(uds, 0, sizeof(*uds));
+    g_active_uds = uds;
+
     uds->screen = lv_obj_create(NULL);
     lv_obj_set_style_bg_color(uds->screen, lv_color_hex(0xF0F0F0), 0);
     
@@ -567,6 +902,7 @@ ui_uds_t* ui_uds_create(void)
     lv_dropdown_set_options_static(uds->channel_dd, "CAN1\nCAN2");
     lv_obj_set_size(uds->channel_dd, 90, 32);
     lv_obj_align(uds->channel_dd, LV_ALIGN_TOP_LEFT, 70, 30);
+    lv_obj_add_event_cb(uds->channel_dd, dropdown_value_changed_cb, LV_EVENT_VALUE_CHANGED, uds);
 
     lv_obj_t *br_label = lv_label_create(can_config_cont);
     lv_label_set_text(br_label, "波特率:");
@@ -577,6 +913,7 @@ ui_uds_t* ui_uds_create(void)
     lv_dropdown_set_selected(uds->bitrate_dd, 2);
     lv_obj_set_size(uds->bitrate_dd, 110, 32);
     lv_obj_align(uds->bitrate_dd, LV_ALIGN_TOP_LEFT, 235, 30);
+    lv_obj_add_event_cb(uds->bitrate_dd, dropdown_value_changed_cb, LV_EVENT_VALUE_CHANGED, uds);
 
     // IDs 与块大小
     lv_obj_t *tx_label = lv_label_create(can_config_cont);
@@ -730,12 +1067,6 @@ ui_uds_t* ui_uds_create(void)
     lv_obj_set_style_bg_color(uds->log_list, lv_color_hex(0xFFFFFF), 0);
     lv_obj_set_scrollbar_mode(uds->log_list, LV_SCROLLBAR_MODE_OFF);
     
-    // Initial log
-    lv_obj_t *item = lv_list_add_text(uds->log_list, "[系统] 就绪");
-    if (item) {
-        lv_obj_set_style_text_font(item, ui_common_get_font(), 0);
-    }
-    
     /* 软键盘 */
     uds->kb_cont = lv_obj_create(uds->screen);
     lv_disp_t *disp = lv_disp_get_default();
@@ -779,17 +1110,178 @@ ui_uds_t* ui_uds_create(void)
     // 同步当前波特率到UI下拉框
     uint32_t current_bitrate = can_handler_get_bitrate();
     if (current_bitrate > 0) {
-        uint16_t sel_idx = 2; // 默认500000
-        if (current_bitrate == 125000) sel_idx = 0;
-        else if (current_bitrate == 250000) sel_idx = 1;
-        else if (current_bitrate == 500000) sel_idx = 2;
-        else if (current_bitrate == 1000000) sel_idx = 3;
-        lv_dropdown_set_selected(uds->bitrate_dd, sel_idx);
-        log_info("同步UDS页面CAN波特率: %u bps -> 下拉框索引 %u", current_bitrate, sel_idx);
+        pthread_mutex_lock(&g_uds_sync_lock);
+        uds_sync_init_defaults_locked();
+        g_uds_sync.bitrate = current_bitrate;
+        pthread_mutex_unlock(&g_uds_sync_lock);
+        log_info("同步UDS页面CAN波特率: %u bps", current_bitrate);
     }
 
+    uds_sync_apply_to_widgets(uds, true);
     log_info("UDS diagnostic UI created");
     return uds;
+}
+
+int ui_uds_remote_set_file(const char *path)
+{
+    int rc = -1;
+    if (!path || !path[0]) return -1;
+
+    pthread_mutex_lock(&g_uds_sync_lock);
+    uds_sync_set_path_locked(path);
+    pthread_mutex_unlock(&g_uds_sync_lock);
+
+    rc = uds_set_file_path(path);
+    if (rc == 0) {
+        lv_async_call(uds_apply_snapshot_async_cb, NULL);
+    }
+    return rc;
+}
+
+void ui_uds_remote_set_params(const char *iface, uint32_t bitrate, uint32_t tx_id, uint32_t rx_id, uint32_t block_size)
+{
+    pthread_mutex_lock(&g_uds_sync_lock);
+    uds_sync_set_params_locked(iface, bitrate, tx_id, rx_id, block_size);
+    pthread_mutex_unlock(&g_uds_sync_lock);
+    lv_async_call(uds_apply_snapshot_async_cb, NULL);
+}
+
+int ui_uds_remote_start(void)
+{
+    uds_sync_state_t state;
+    uint32_t tx_id = DEFAULT_TX_ID;
+    uint32_t rx_id = DEFAULT_RX_ID;
+
+    uds_sync_copy(&state);
+    if (state.tx_id[0]) tx_id = (uint32_t)strtoul(state.tx_id, NULL, 16);
+    if (state.rx_id[0]) rx_id = (uint32_t)strtoul(state.rx_id, NULL, 16);
+    return uds_start_with_values(g_active_uds,
+                                 state.iface[0] ? state.iface : "can0",
+                                 state.bitrate ? state.bitrate : 500000,
+                                 tx_id,
+                                 rx_id,
+                                 state.block_size ? state.block_size : 256,
+                                 state.s19_path);
+}
+
+void ui_uds_remote_stop(void)
+{
+    uds_stop();
+    uds_deinit();
+    pthread_mutex_lock(&g_uds_sync_lock);
+    uds_sync_set_running_locked(false);
+    uds_sync_append_log_locked("[STOP] UDS flashing stopped");
+    pthread_mutex_unlock(&g_uds_sync_lock);
+    lv_async_call(uds_apply_snapshot_async_cb, NULL);
+}
+
+void ui_uds_remote_clear_logs(void)
+{
+    pthread_mutex_lock(&g_uds_sync_lock);
+    uds_sync_clear_logs_locked();
+    pthread_mutex_unlock(&g_uds_sync_lock);
+    lv_async_call(uds_apply_snapshot_async_cb, NULL);
+}
+
+static size_t json_append_escaped(char *buf, size_t size, size_t pos, const char *src)
+{
+    const unsigned char *p = (const unsigned char *)(src ? src : "");
+    while (*p && pos + 2 < size) {
+        if (*p == '\\' || *p == '"') {
+            if (pos + 2 >= size) break;
+            buf[pos++] = '\\';
+            buf[pos++] = (char)*p;
+        } else if (*p == '\n' || *p == '\r') {
+            if (pos + 2 >= size) break;
+            buf[pos++] = '\\';
+            buf[pos++] = 'n';
+        } else if (*p == '\t') {
+            if (pos + 2 >= size) break;
+            buf[pos++] = '\\';
+            buf[pos++] = 't';
+        } else if (*p >= 0x20) {
+            buf[pos++] = (char)*p;
+        }
+        p++;
+    }
+    if (pos < size) buf[pos] = '\0';
+    return pos;
+}
+
+int ui_uds_get_state_json(char *buf, size_t size)
+{
+    uds_sync_state_t state;
+    int start = 0;
+    int idx = 0;
+    int i = 0;
+    size_t pos = 0;
+    int written = 0;
+
+    if (!buf || size < 64) return -1;
+    uds_sync_copy(&state);
+
+    written = snprintf(buf + pos, size - pos,
+                       "{\"running\":%s,\"percent\":%d,\"seg_index\":%d,\"seg_total\":%d,"
+                       "\"iface\":\"%s\",\"bitrate\":%u,\"tx_id\":\"%s\",\"rx_id\":\"%s\","
+                       "\"block_size\":%u,\"path\":\"",
+                       state.running ? "true" : "false",
+                       state.total_percent,
+                       state.seg_index,
+                       state.seg_total,
+                       state.iface,
+                       state.bitrate,
+                       state.tx_id,
+                       state.rx_id,
+                       state.block_size);
+    if (written < 0) return -1;
+    pos += (size_t)written;
+    if (pos >= size) {
+        buf[size - 1] = '\0';
+        return -1;
+    }
+    pos = json_append_escaped(buf, size, pos, state.s19_path);
+    written = snprintf(buf + pos, size - pos, "\",\"can_status\":\"");
+    if (written < 0) return -1;
+    pos += (size_t)written;
+    if (pos >= size) {
+        buf[size - 1] = '\0';
+        return -1;
+    }
+    pos = json_append_escaped(buf, size, pos, state.can_status);
+    written = snprintf(buf + pos, size - pos, "\",\"logs\":[");
+    if (written < 0) return -1;
+    pos += (size_t)written;
+    if (pos >= size) {
+        buf[size - 1] = '\0';
+        return -1;
+    }
+
+    start = (state.log_head - state.log_count + UDS_SYNC_LOG_LINES) % UDS_SYNC_LOG_LINES;
+    for (i = 0; i < state.log_count; i++) {
+        idx = (start + i) % UDS_SYNC_LOG_LINES;
+        if (i > 0) {
+            written = snprintf(buf + pos, size - pos, ",");
+            if (written < 0) return -1;
+            pos += (size_t)written;
+        }
+        if (pos >= size) break;
+        written = snprintf(buf + pos, size - pos, "\"");
+        if (written < 0) return -1;
+        pos += (size_t)written;
+        if (pos >= size) break;
+        pos = json_append_escaped(buf, size, pos, state.logs[idx]);
+        written = snprintf(buf + pos, size - pos, "\"");
+        if (written < 0) return -1;
+        pos += (size_t)written;
+        if (pos >= size) break;
+    }
+    if (pos >= size) {
+        buf[size - 1] = '\0';
+        return -1;
+    }
+    written = snprintf(buf + pos, size - pos, "]}");
+    if (written < 0) return -1;
+    return 0;
 }
 
 void ui_uds_destroy(ui_uds_t *uds)
@@ -806,7 +1298,10 @@ void ui_uds_destroy(ui_uds_t *uds)
     
     // 注意：不要手动删除screen，LVGL会在加载新屏幕时自动清理旧屏幕
     // 只需要清空指针和释放结构体内存
-    
+    if (g_active_uds == uds) {
+        g_active_uds = NULL;
+    }
+
     // 释放内存
     free(uds);
     

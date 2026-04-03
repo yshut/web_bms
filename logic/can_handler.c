@@ -517,24 +517,36 @@ int can_handler_init_dual(uint32_t bitrate0, uint32_t bitrate1)
         return 0;
     }
 
-    // 自动检测CAN0波特率（2秒超时）
-    uint32_t detected_bitrate0 = auto_detect_bitrate("can0", 2);
-    if (detected_bitrate0 > 0) {
-        log_info("CAN0 自动检测成功，使用波特率: %u", detected_bitrate0);
-        bitrate0 = detected_bitrate0;
-    } else {
-        log_warn("CAN0 自动检测失败，使用默认波特率: %u", bitrate0);
+    /* CAN0：有配置波特率则直接使用，无则自动检测 */
+    if (bitrate0 > 0) {
+        log_info("CAN0 使用配置波特率: %u bps（跳过自动检测）", bitrate0);
         if (configure_can_interface("can0", bitrate0) < 0) return -1;
-    }
-    
-    // 自动检测CAN1波特率（2秒超时）
-    uint32_t detected_bitrate1 = auto_detect_bitrate("can1", 2);
-    if (detected_bitrate1 > 0) {
-        log_info("CAN1 自动检测成功，使用波特率: %u", detected_bitrate1);
-        bitrate1 = detected_bitrate1;
     } else {
-        log_warn("CAN1 自动检测失败，使用默认波特率: %u", bitrate1);
+        uint32_t detected = auto_detect_bitrate("can0", 2);
+        if (detected > 0) {
+            log_info("CAN0 自动检测成功，使用波特率: %u", detected);
+            bitrate0 = detected;
+        } else {
+            bitrate0 = 500000;
+            log_warn("CAN0 自动检测失败，使用默认波特率: %u", bitrate0);
+            if (configure_can_interface("can0", bitrate0) < 0) return -1;
+        }
+    }
+
+    /* CAN1：有配置波特率则直接使用，无则自动检测 */
+    if (bitrate1 > 0) {
+        log_info("CAN1 使用配置波特率: %u bps（跳过自动检测）", bitrate1);
         if (configure_can_interface("can1", bitrate1) < 0) return -1;
+    } else {
+        uint32_t detected = auto_detect_bitrate("can1", 2);
+        if (detected > 0) {
+            log_info("CAN1 自动检测成功，使用波特率: %u", detected);
+            bitrate1 = detected;
+        } else {
+            bitrate1 = 500000;
+            log_warn("CAN1 自动检测失败，使用默认波特率: %u", bitrate1);
+            if (configure_can_interface("can1", bitrate1) < 0) return -1;
+        }
     }
 
     g_can_ctx.socket_fd = socket(PF_CAN, SOCK_RAW, CAN_RAW);

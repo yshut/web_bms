@@ -70,8 +70,16 @@ static void set_str(char *dst, size_t dst_sz, const char *src) {
     dst[dst_sz - 1] = '\0';
 }
 
+const char *app_config_transport_mode_to_string(app_transport_mode_t mode)
+{
+    return (mode == APP_TRANSPORT_MQTT) ? "mqtt" : "websocket";
+}
+
 void app_config_set_defaults(void) {
     memset(&g_app_config, 0, sizeof(g_app_config));
+
+    /* remote transport */
+    g_app_config.transport_mode = APP_TRANSPORT_MQTT;
 
     /* ws */
     set_str(g_app_config.ws_host, sizeof(g_app_config.ws_host), "192.168.100.1");
@@ -80,6 +88,17 @@ void app_config_set_defaults(void) {
     g_app_config.ws_use_ssl = false;
     g_app_config.ws_reconnect_interval_ms = 4000;
     g_app_config.ws_keepalive_interval_s = 20;
+
+    /* mqtt */
+    set_str(g_app_config.mqtt_host, sizeof(g_app_config.mqtt_host), "192.168.100.1");
+    g_app_config.mqtt_port = 1883;
+    g_app_config.mqtt_client_id[0] = '\0';
+    g_app_config.mqtt_username[0] = '\0';
+    g_app_config.mqtt_password[0] = '\0';
+    g_app_config.mqtt_keepalive_s = 30;
+    g_app_config.mqtt_qos = 1;
+    set_str(g_app_config.mqtt_topic_prefix, sizeof(g_app_config.mqtt_topic_prefix), "app_lvgl");
+    g_app_config.mqtt_use_tls = false;
 
     /* log */
     set_str(g_app_config.log_file, sizeof(g_app_config.log_file), "/tmp/lvgl_app.log");
@@ -96,6 +115,14 @@ void app_config_set_defaults(void) {
     set_str(g_app_config.storage_mount, sizeof(g_app_config.storage_mount), "/mnt/SDCARD");
     set_str(g_app_config.net_iface, sizeof(g_app_config.net_iface), "eth0");
     set_str(g_app_config.wifi_iface, sizeof(g_app_config.wifi_iface), "wlan0");
+    g_app_config.net_use_dhcp = false;
+    set_str(g_app_config.net_ip, sizeof(g_app_config.net_ip), "192.168.100.100");
+    set_str(g_app_config.net_netmask, sizeof(g_app_config.net_netmask), "255.255.255.0");
+    set_str(g_app_config.net_gateway, sizeof(g_app_config.net_gateway), "192.168.100.1");
+    g_app_config.net_use_dhcp = false;
+    set_str(g_app_config.net_ip, sizeof(g_app_config.net_ip), "192.168.100.100");
+    set_str(g_app_config.net_netmask, sizeof(g_app_config.net_netmask), "255.255.255.0");
+    set_str(g_app_config.net_gateway, sizeof(g_app_config.net_gateway), "192.168.100.1");
 
     /* font */
     g_app_config.font_path[0] = '\0';   /* 默认走程序内置搜索列表 */
@@ -120,6 +147,13 @@ static void apply_kv(const char *k_in, const char *v_in) {
     char vbuf[512];
     set_str(vbuf, sizeof(vbuf), v_in);
     char *v = trim(vbuf);
+
+    /* remote transport */
+    if (ieq(k, "transport_mode") || ieq(k, "REMOTE_TRANSPORT") || ieq(k, "TRANSPORT_MODE")) {
+        if (ieq(v, "mqtt")) g_app_config.transport_mode = APP_TRANSPORT_MQTT;
+        else g_app_config.transport_mode = APP_TRANSPORT_WEBSOCKET;
+        return;
+    }
 
     /* ws */
     if (ieq(k, "ws_host") || ieq(k, "server_host") || ieq(k, "WS_HOST")) {
@@ -148,6 +182,48 @@ static void apply_kv(const char *k_in, const char *v_in) {
     if (ieq(k, "ws_keepalive_interval_s") || ieq(k, "keepalive_interval_s") || ieq(k, "WS_KEEPALIVE_S")) {
         uint32_t x;
         if (parse_u32(v, &x) == 0 && x >= 1) g_app_config.ws_keepalive_interval_s = x;
+        return;
+    }
+
+    /* mqtt */
+    if (ieq(k, "mqtt_host") || ieq(k, "MQTT_HOST")) {
+        if (v[0]) set_str(g_app_config.mqtt_host, sizeof(g_app_config.mqtt_host), v);
+        return;
+    }
+    if (ieq(k, "mqtt_port") || ieq(k, "MQTT_PORT")) {
+        uint16_t p;
+        if (parse_u16(v, &p) == 0 && p > 0) g_app_config.mqtt_port = p;
+        return;
+    }
+    if (ieq(k, "mqtt_client_id") || ieq(k, "MQTT_CLIENT_ID")) {
+        set_str(g_app_config.mqtt_client_id, sizeof(g_app_config.mqtt_client_id), v);
+        return;
+    }
+    if (ieq(k, "mqtt_username") || ieq(k, "MQTT_USERNAME")) {
+        set_str(g_app_config.mqtt_username, sizeof(g_app_config.mqtt_username), v);
+        return;
+    }
+    if (ieq(k, "mqtt_password") || ieq(k, "MQTT_PASSWORD")) {
+        set_str(g_app_config.mqtt_password, sizeof(g_app_config.mqtt_password), v);
+        return;
+    }
+    if (ieq(k, "mqtt_keepalive_s") || ieq(k, "MQTT_KEEPALIVE_S")) {
+        uint32_t x;
+        if (parse_u32(v, &x) == 0 && x >= 1) g_app_config.mqtt_keepalive_s = x;
+        return;
+    }
+    if (ieq(k, "mqtt_qos") || ieq(k, "MQTT_QOS")) {
+        uint32_t x;
+        if (parse_u32(v, &x) == 0 && x <= 2) g_app_config.mqtt_qos = x;
+        return;
+    }
+    if (ieq(k, "mqtt_topic_prefix") || ieq(k, "MQTT_TOPIC_PREFIX")) {
+        if (v[0]) set_str(g_app_config.mqtt_topic_prefix, sizeof(g_app_config.mqtt_topic_prefix), v);
+        return;
+    }
+    if (ieq(k, "mqtt_use_tls") || ieq(k, "MQTT_USE_TLS")) {
+        bool b;
+        if (parse_bool(v, &b) == 0) g_app_config.mqtt_use_tls = b;
         return;
     }
 
@@ -193,6 +269,27 @@ static void apply_kv(const char *k_in, const char *v_in) {
     /* storage/network */
     if (ieq(k, "storage_mount")) {
         if (v[0]) set_str(g_app_config.storage_mount, sizeof(g_app_config.storage_mount), v);
+        return;
+    }
+    if (ieq(k, "dhcp") || ieq(k, "net_use_dhcp") || ieq(k, "use_dhcp")) {
+        bool b;
+        if (parse_bool(v, &b) == 0) g_app_config.net_use_dhcp = b;
+        return;
+    }
+    if (ieq(k, "ip") || ieq(k, "net_ip") || ieq(k, "device_ip")) {
+        if (v[0]) set_str(g_app_config.net_ip, sizeof(g_app_config.net_ip), v);
+        return;
+    }
+    if (ieq(k, "netmask") || ieq(k, "mask") || ieq(k, "device_netmask")) {
+        if (v[0]) set_str(g_app_config.net_netmask, sizeof(g_app_config.net_netmask), v);
+        return;
+    }
+    if (ieq(k, "gateway") || ieq(k, "gw") || ieq(k, "device_gateway")) {
+        set_str(g_app_config.net_gateway, sizeof(g_app_config.net_gateway), v);
+        return;
+    }
+    if (ieq(k, "iface")) {
+        if (v[0]) set_str(g_app_config.net_iface, sizeof(g_app_config.net_iface), v);
         return;
     }
     if (ieq(k, "net_iface")) {
@@ -244,9 +341,11 @@ static void apply_kv(const char *k_in, const char *v_in) {
     }
 }
 
-int app_config_load_file(const char *path) {
-    app_config_set_defaults();
-
+static int load_config_file_internal(const char *path, bool reset_defaults, bool allow_legacy_format)
+{
+    if (reset_defaults) {
+        app_config_set_defaults();
+    }
     FILE *fp = fopen(path, "rb");
     if (!fp) return -1;
 
@@ -296,6 +395,9 @@ int app_config_load_file(const char *path) {
         }
 
         /* legacy positional lines */
+        if (!allow_legacy_format) {
+            continue;
+        }
         legacy_idx++;
         if (legacy_idx == 1) {
             apply_kv("ws_host", s);
@@ -315,11 +417,19 @@ int app_config_load_file(const char *path) {
     if (!seen_effective) return -1;
 
     /* 自动升级：若用户仍使用旧格式（位置行）且没有任何 key=value，则写回全量模板，方便后续只改一个文件 */
-    if (!seen_kv && legacy_idx > 0) {
+    if (allow_legacy_format && !seen_kv && legacy_idx > 0) {
         /* best-effort：写失败也不影响本次已加载的配置 */
         (void)app_config_save_file(path);
     }
     return 0;
+}
+
+int app_config_load_file(const char *path) {
+    return load_config_file_internal(path, true, true);
+}
+
+int app_config_load_network_file(const char *path) {
+    return load_config_file_internal(path, false, false);
 }
 
 int app_config_load_best(char *used_path, size_t used_path_size) {
@@ -339,6 +449,26 @@ int app_config_load_best(char *used_path, size_t used_path_size) {
     }
 
     app_config_set_defaults();
+    if (used_path && used_path_size > 0) used_path[0] = '\0';
+    return -1;
+}
+
+int app_config_load_network_best(char *used_path, size_t used_path_size) {
+    const char *paths[] = {
+        "/mnt/UDISK/net_config.txt",
+        "/mnt/SDCARD/net_config.txt",
+        NULL
+    };
+
+    for (int i = 0; paths[i]; i++) {
+        if (app_config_load_network_file(paths[i]) == 0) {
+            if (used_path && used_path_size > 0) {
+                set_str(used_path, used_path_size, paths[i]);
+            }
+            return 0;
+        }
+    }
+
     if (used_path && used_path_size > 0) used_path[0] = '\0';
     return -1;
 }
@@ -365,12 +495,18 @@ int app_config_save_file(const char *path) {
     if (!path) return -1;
 
     /* 统一输出为 key=value 格式，便于完整保存所有配置项 */
-    char buf[4096];
+    char buf[8192];
     int n = 0;
     n += snprintf(buf + n, sizeof(buf) - (size_t)n,
                   "# app_lvgl 配置文件（推荐 key=value 格式）\n"
                   "# 说明：仍兼容旧格式（前两行 host/port），但一旦保存将输出为 key=value 全量配置。\n"
                   "# 注意：WSL/虚拟网卡的 172.* 地址通常对开发板不可达，请填写开发板可达的服务器IP。\n"
+                  "# 若服务跑在 WSL 且开发板需经 Windows 访问，请把 mqtt_host/ws_host 填成 Windows 主机局域网 IP，而不是 WSL 的 127.0.0.1 或 172.*。\n"
+                  "# MQTT 提示：本地联调通常使用 1883；后续部署到服务器时请同步修改 mqtt_host/mqtt_port/topic_prefix。\n"
+                  "# MQTT TLS 提示：当前板端客户端仍按明文 TCP 连接，mqtt_use_tls=true 仅保留配置位，暂未启用加密连接。\n"
+                  "\n"
+                  "# === 传输模式 ===\n"
+                  "transport_mode=%s\n"
                   "\n"
                   "# === WebSocket ===\n"
                   "ws_host=%s\n"
@@ -379,6 +515,17 @@ int app_config_save_file(const char *path) {
                   "ws_use_ssl=%s\n"
                   "ws_reconnect_interval_ms=%u\n"
                   "ws_keepalive_interval_s=%u\n"
+                  "\n"
+                  "# === MQTT ===\n"
+                  "mqtt_host=%s\n"
+                  "mqtt_port=%u\n"
+                  "mqtt_client_id=%s\n"
+                  "mqtt_username=%s\n"
+                  "mqtt_password=%s\n"
+                  "mqtt_keepalive_s=%u\n"
+                  "mqtt_qos=%u\n"
+                  "mqtt_topic_prefix=%s\n"
+                  "mqtt_use_tls=%s\n"
                   "\n"
                   "# === 日志 ===\n"
                   "log_file=%s\n"
@@ -391,10 +538,9 @@ int app_config_save_file(const char *path) {
                   "can_record_max_mb=%u\n"
                   "can_record_flush_ms=%u\n"
                   "\n"
-                  "# === 存储/网络 ===\n"
+                  "# === 存储 ===\n"
                   "storage_mount=%s\n"
-                  "net_iface=%s\n"
-                  "wifi_iface=%s\n"
+                  "# 板端IP/网卡配置请写入 /mnt/UDISK/net_config.txt\n"
                   "\n"
                   "# === 字体 ===\n"
                   "# font_path 为空则自动从常见路径列表中查找\n"
@@ -409,12 +555,22 @@ int app_config_save_file(const char *path) {
                   "# === WiFi 自动连接（可选，供脚本/系统服务使用）===\n"
                   "wifi_ssid=%s\n"
                   "wifi_psk=%s\n",
+                  app_config_transport_mode_to_string(g_app_config.transport_mode),
                   g_app_config.ws_host,
                   (unsigned)g_app_config.ws_port,
                   g_app_config.ws_path,
                   g_app_config.ws_use_ssl ? "true" : "false",
                   (unsigned)g_app_config.ws_reconnect_interval_ms,
                   (unsigned)g_app_config.ws_keepalive_interval_s,
+                  g_app_config.mqtt_host,
+                  (unsigned)g_app_config.mqtt_port,
+                  g_app_config.mqtt_client_id,
+                  g_app_config.mqtt_username,
+                  g_app_config.mqtt_password,
+                  (unsigned)g_app_config.mqtt_keepalive_s,
+                  (unsigned)g_app_config.mqtt_qos,
+                  g_app_config.mqtt_topic_prefix,
+                  g_app_config.mqtt_use_tls ? "true" : "false",
                   g_app_config.log_file[0] ? g_app_config.log_file : "",
                   (g_app_config.log_level == APP_LOG_DEBUG) ? "debug" :
                   (g_app_config.log_level == APP_LOG_INFO) ? "info" :
@@ -425,8 +581,6 @@ int app_config_save_file(const char *path) {
                   (unsigned)g_app_config.can_record_max_mb,
                   (unsigned)g_app_config.can_record_flush_ms,
                   g_app_config.storage_mount,
-                  g_app_config.net_iface,
-                  g_app_config.wifi_iface,
                   g_app_config.font_path[0] ? g_app_config.font_path : "",
                   g_app_config.font_size,
                   (unsigned)g_app_config.hw_interval_ms,
@@ -435,6 +589,36 @@ int app_config_save_file(const char *path) {
                   g_app_config.wifi_ssid,
                   g_app_config.wifi_psk);
 
+    if (n <= 0 || (size_t)n >= sizeof(buf)) {
+        return -1;
+    }
+
+    return write_atomic(path, buf);
+}
+
+int app_config_save_network_file(const char *path) {
+    char buf[1024];
+    int n;
+
+    if (!path) return -1;
+
+    n = snprintf(buf, sizeof(buf),
+                 "# app_lvgl 板端网络配置\n"
+                 "# 说明：此文件只描述开发板自身网卡参数，不包含服务端地址。\n"
+                 "# 服务端 WebSocket/MQTT 地址请写入 ws_config.txt。\n"
+                 "\n"
+                 "dhcp=%s\n"
+                 "ip=%s\n"
+                 "netmask=%s\n"
+                 "gateway=%s\n"
+                 "iface=%s\n"
+                 "wifi_iface=%s\n",
+                 g_app_config.net_use_dhcp ? "true" : "false",
+                 g_app_config.net_ip,
+                 g_app_config.net_netmask,
+                 g_app_config.net_gateway,
+                 g_app_config.net_iface,
+                 g_app_config.wifi_iface);
     if (n <= 0 || (size_t)n >= sizeof(buf)) {
         return -1;
     }
@@ -451,6 +635,26 @@ int app_config_save_best(char *used_path, size_t used_path_size) {
 
     for (int i = 0; paths[i]; i++) {
         if (app_config_save_file(paths[i]) == 0) {
+            if (used_path && used_path_size > 0) {
+                set_str(used_path, used_path_size, paths[i]);
+            }
+            return 0;
+        }
+    }
+
+    if (used_path && used_path_size > 0) used_path[0] = '\0';
+    return -1;
+}
+
+int app_config_save_network_best(char *used_path, size_t used_path_size) {
+    const char *paths[] = {
+        "/mnt/UDISK/net_config.txt",
+        "/mnt/SDCARD/net_config.txt",
+        NULL
+    };
+
+    for (int i = 0; paths[i]; i++) {
+        if (app_config_save_network_file(paths[i]) == 0) {
             if (used_path && used_path_size > 0) {
                 set_str(used_path, used_path_size, paths[i]);
             }

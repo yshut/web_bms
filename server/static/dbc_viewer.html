@@ -4,7 +4,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>DBC信号实时解析</title>
-    <link rel="icon" href="/static/dashboard/favicon.ico">
     <link rel="stylesheet" href="/static/shared.css">
     <style>
         * {
@@ -382,9 +381,11 @@
         </div>
     </div>
 
+    <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+    <script src="/static/mqtt_client.js"></script>
     <script>
         const API_BASE = window.location.origin;
-        let ws = null;
+        let realtimeClient = null;
         let messagesMap = new Map(); // 存储消息ID -> 消息数据
         let autoScroll = true;
         let filterText = '';
@@ -392,48 +393,39 @@
         let lastUpdateTime = Date.now();
         let updateRateTimer = null;
 
-        // 连接WebSocket
+        // 连接实时链路
         function connectWS() {
-            const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            const wsUrl = `${wsProtocol}//${window.location.host.split(':')[0]}:5052/ui`;
-            
-            console.log('连接WebSocket:', wsUrl);
-            
-            try {
-                ws = new WebSocket(wsUrl);
-                
-                ws.onopen = () => {
-                    console.log('✓ WebSocket已连接');
-                    document.getElementById('wsStatus').classList.add('active');
-                    document.getElementById('wsText').textContent = 'WebSocket: 已连接';
-                };
-                
-                ws.onmessage = (event) => {
-                    try {
-                        const msg = JSON.parse(event.data);
-                        handleMessage(msg);
-                    } catch (e) {
-                        console.error('解析消息失败:', e);
-                    }
-                };
-                
-                ws.onerror = (error) => {
-                    console.error('WebSocket错误:', error);
-                    document.getElementById('wsStatus').classList.remove('active');
-                    document.getElementById('wsText').textContent = 'WebSocket: 错误';
-                };
-                
-                ws.onclose = () => {
-                    console.log('WebSocket已断开');
-                    document.getElementById('wsStatus').classList.remove('active');
-                    document.getElementById('wsText').textContent = 'WebSocket: 断开';
-                    
-                    // 5秒后重连
-                    setTimeout(connectWS, 5000);
-                };
-            } catch (e) {
-                console.error('创建WebSocket失败:', e);
+            if (realtimeClient) {
+                realtimeClient.close();
             }
+
+            realtimeClient = new AppRealtimeClient({
+                reconnectDelayMs: 5000,
+                onOpen: (info) => {
+                    console.log('✓ 实时链路已连接:', info.transport, info.url || '');
+                    document.getElementById('wsStatus').classList.add('active');
+                    document.getElementById('wsText').textContent = `实时连接: ${info.transport}`;
+                },
+                onMessage: (packet) => {
+                    if (packet && packet.parsed) {
+                        handleMessage(packet.parsed);
+                    }
+                },
+                onError: (info) => {
+                    console.error('实时链路错误:', info);
+                    document.getElementById('wsStatus').classList.remove('active');
+                    document.getElementById('wsText').textContent = '实时连接: 错误';
+                },
+                onClose: () => {
+                    console.log('实时链路已断开');
+                    document.getElementById('wsStatus').classList.remove('active');
+                    document.getElementById('wsText').textContent = '实时连接: 断开';
+                }
+            });
+
+            realtimeClient.connect().catch((e) => {
+                console.error('创建实时链路失败:', e);
+            });
         }
 
         // 处理消息
@@ -664,8 +656,8 @@
             if (updateRateTimer) {
                 clearInterval(updateRateTimer);
             }
-            if (ws) {
-                ws.close();
+            if (realtimeClient) {
+                realtimeClient.close();
             }
         });
     </script>

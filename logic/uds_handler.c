@@ -1332,6 +1332,13 @@ int uds_start_flash(void)
         return -1;
     }
     
+
+    /* 保存已注册的回调，防止 uds_init 内部 memset 将其清零 */
+    uds_progress_cb saved_pcb = g_uds.progress_cb;
+    void           *saved_pud = g_uds.progress_ud;
+    uds_log_cb      saved_lcb = g_uds.log_cb;
+    void           *saved_lud = g_uds.log_ud;
+
     // 若尚未初始化（远程场景可能未进入设备UDS页面），用“网页端设置值/默认值”初始化一次
     if (g_uds.interface[0] == '\0' || g_uds.cfg.tx_id == 0 || g_uds.cfg.rx_id == 0 || g_uds.cfg.block_size == 0) {
         const char *iface = (g_uds_iface_buf[0] ? g_uds_iface_buf : "can0");
@@ -1350,6 +1357,10 @@ int uds_start_flash(void)
         if (g_s19_path_buf[0]) g_uds.cfg.s19_path = g_s19_path_buf;
     }
 
+
+    /* uds_init 的 memset 会清零回调，这里恢复 */
+    if (!g_uds.progress_cb) { g_uds.progress_cb = saved_pcb; g_uds.progress_ud = saved_pud; }
+    if (!g_uds.log_cb)      { g_uds.log_cb      = saved_lcb; g_uds.log_ud      = saved_lud; }
     // 开始刷写
     return uds_start();
 }

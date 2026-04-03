@@ -8,6 +8,7 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <stddef.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -86,9 +87,19 @@ void ui_remote_uds_click_stop(void);
 void ui_remote_uds_set_bitrate(uint32_t bitrate);
 
 /**
+ * @brief 远程同步UDS页面参数
+ */
+void ui_remote_uds_set_params(const char *iface, uint32_t bitrate, uint32_t tx_id, uint32_t rx_id, uint32_t block_size);
+
+/**
  * @brief 远程清除UDS日志
  */
 void ui_remote_uds_clear_log(void);
+
+/**
+ * @brief 获取UDS页面状态JSON
+ */
+int ui_remote_uds_get_state_json(char *buf, size_t size);
 
 /* ========== WiFi页面远程控制 ========== */
 

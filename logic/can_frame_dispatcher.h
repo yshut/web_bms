@@ -27,6 +27,13 @@ void can_frame_dispatcher_callback(int channel, const can_frame_t *frame, void *
  */
 void can_frame_dispatcher_register_ui_callback(can_frame_callback_t callback, void *user_data);
 
+/**
+ * @brief 注册 CAN-MQTT 引擎回调
+ * @param callback 回调函数（NULL表示注销）
+ * @param user_data 用户数据
+ */
+void can_frame_dispatcher_register_engine_callback(can_frame_callback_t callback, void *user_data);
+
 #ifdef __cplusplus
 }
 #endif

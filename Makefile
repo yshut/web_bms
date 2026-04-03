@@ -11,49 +11,39 @@ STRIP := $(CROSS_COMPILE)strip
 # 目标程序名
 TARGET := lvgl_app
 
-# 源文件目录
-SRC_DIRS := . ui logic drivers utils
-INC_DIRS := . ui logic drivers utils
+# 无屏幕模式：只编译 logic / utils / drivers（不含 ui/ 和 LVGL）
+SRC_DIRS := . logic drivers utils
+INC_DIRS := . logic drivers utils
 
-# LVGL路径（使用LVGL 8.x版本）
-LVGL_DIR := ../package/gui/littlevgl-8/lvgl
-LVGL_INC := $(LVGL_DIR)
-
-# 查找所有源文件（排除测试程序）
+# 查找所有源文件（排除测试程序和 UI 文件）
 SRCS := $(foreach dir,$(SRC_DIRS),$(wildcard $(dir)/*.c))
 SRCS := $(filter-out ./touch_test.c touch_test.c, $(SRCS))
+# 排除依赖 LVGL 的文件（由 headless_stubs.c 提供空实现）
+SRCS := $(filter-out logic/app_manager.c, $(SRCS))
+SRCS := $(filter-out logic/ui_remote_control.c, $(SRCS))
+SRCS := $(filter-out logic/ws_command_handler.c, $(SRCS))
+# 排除显示/触摸驱动（无屏幕模式不需要）
+SRCS := $(filter-out drivers/display_drv.c, $(SRCS))
+SRCS := $(filter-out drivers/touch_drv.c, $(SRCS))
+SRCS := $(filter-out drivers/touch_drv_alt.c, $(SRCS))
+# 排除字体管理器（依赖 LVGL）
+SRCS := $(filter-out utils/font_manager.c, $(SRCS))
 OBJS := $(SRCS:.c=.o)
 
-# 编译标志
+# 编译标志（不再需要 LVGL / FreeType）
 CFLAGS := -Wall -Wextra -O2 -g
-# 重要：项目的LVGL路径要放在最前面，避免使用系统安装的LVGL
-CFLAGS += -I$(LVGL_INC)
 CFLAGS += $(foreach dir,$(INC_DIRS),-I$(dir))
-CFLAGS += -DLV_CONF_INCLUDE_SIMPLE
-
-# FreeType 头文件路径（Tina-Linux 交叉编译环境）
-# 使用相对路径，从 app_lvgl 目录到 staging_dir
-FT_INC_DIR := ../out/t113-mq_r/staging_dir/target/usr/include/freetype2
-FT_LIB_DIR := ../out/t113-mq_r/staging_dir/target/usr/lib
-CFLAGS += -I$(FT_INC_DIR)
+CFLAGS += -DNO_DISPLAY
 
 # 链接标志
 LDFLAGS := -lpthread -lm -lrt
-LDFLAGS += -L$(FT_LIB_DIR) -lfreetype -lz -lbz2
 LDFLAGS += -ljson-c
-
-# LVGL库文件（如果已经预编译）
-# LDFLAGS += -L$(LVGL_DIR)/lib -llvgl
-
-# 或者直接链接LVGL对象文件
-LVGL_SRCS := $(shell find $(LVGL_DIR)/src -name '*.c')
-LVGL_OBJS := $(LVGL_SRCS:.c=.o)
 
 # 默认目标
 all: $(TARGET)
 
-# 链接目标程序
-$(TARGET): $(OBJS) $(LVGL_OBJS)
+# 链接目标程序（无 LVGL 对象）
+$(TARGET): $(OBJS)
 	@echo "链接 $@"
 	$(CC) -o $@ $^ $(LDFLAGS)
 	@echo "编译完成: $(TARGET)"
@@ -67,7 +57,6 @@ $(TARGET): $(OBJS) $(LVGL_OBJS)
 clean:
 	@echo "清理编译产物"
 	rm -f $(OBJS) $(TARGET)
-	rm -f $(LVGL_OBJS)
 	rm -f touch_test.o
 	@echo "注意: touch_test 由单独的 Makefile.touch_test 管理"
 

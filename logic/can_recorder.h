@@ -20,11 +20,12 @@
  * @brief 录制器配置
  */
 typedef struct {
-    bool record_can0;          /* 是否录制CAN0 */
-    bool record_can1;          /* 是否录制CAN1 */
-    char record_dir[256];      /* 录制文件目录 */
-    uint64_t max_file_size;    /* 单个文件最大大小（字节），默认40MB */
-    int flush_interval_ms;     /* 缓冲刷新间隔（毫秒），默认200ms */
+    bool record_can0;           /* 是否录制CAN0 */
+    bool record_can1;           /* 是否录制CAN1 */
+    char record_dir[256];       /* 录制文件目录 */
+    uint64_t max_file_size;     /* 单个文件最大大小（字节），默认40MB */
+    uint64_t max_total_bytes;   /* 录制目录总大小上限（字节），0=不限，默认8GB */
+    int flush_interval_ms;      /* 缓冲刷新间隔（毫秒），默认200ms */
 } can_recorder_config_t;
 
 /**

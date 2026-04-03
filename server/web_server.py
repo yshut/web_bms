@@ -6,10 +6,13 @@ import os
 import sys
 import time
 import base64
+import atexit
+import signal
 import posixpath
-from flask import Flask, request, jsonify, send_from_directory
+import socket
+from flask import Flask, request, jsonify, send_from_directory, Response, stream_with_context
 import re
-from typing import Optional
+from typing import Optional, Tuple
 
 # 支持作为包或脚本两种方式运行
 try:
@@ -24,12 +27,28 @@ except Exception:
     sys.path.append(os.path.dirname(__file__))
     from path_config import BASE_DIR  # type: ignore
 
-# WebSocket Hub - 唯一的通信协议
+SERVER_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# WebSocket Hub 已移除，仅保留 import 守护，防止旧引用报错
+WSHub = None  # noqa: F841 — stub, not used
+
 try:
-    from .ws_hub import WSHub  # type: ignore
+    from .mqtt_hub import MQTTHub  # type: ignore
 except Exception:
     sys.path.append(os.path.dirname(__file__))
-    from ws_hub import WSHub  # type: ignore
+    from mqtt_hub import MQTTHub  # type: ignore
+
+try:
+    from .embedded_mqtt_broker import EmbeddedMQTTBroker  # type: ignore
+except Exception:
+    sys.path.append(os.path.dirname(__file__))
+    from embedded_mqtt_broker import EmbeddedMQTTBroker  # type: ignore
+
+try:
+    from .local_mosquitto_broker import LocalMosquittoBroker  # type: ignore
+except Exception:
+    sys.path.append(os.path.dirname(__file__))
+    from local_mosquitto_broker import LocalMosquittoBroker  # type: ignore
 
 # DBC实时解析服务
 try:
@@ -48,12 +67,12 @@ from can_parser import parse_can_line  # type: ignore
 # 提前初始化 Flask 应用，确保后续所有 @app.route 装饰器可用
 app = Flask(
     __name__,
-    static_folder=os.path.join(os.path.dirname(__file__), 'static'),
+    static_folder=os.path.join(SERVER_DIR, 'static'),
     static_url_path='/static'
 )
 
 # DBC目录
-DBC_DIR = os.path.join(os.path.dirname(__file__), 'uploads', 'dbc')
+DBC_DIR = os.path.join(SERVER_DIR, 'uploads', 'dbc')
 
 # 初始化 DBC 解析服务
 _dbc_service = DBCService(DBC_DIR)
@@ -62,21 +81,121 @@ try:
 except Exception:
     pass
 
-# 初始化 WebSocket Hub
-_wshub = WSHub(getattr(cfg, 'WS_LISTEN_HOST', '0.0.0.0'), getattr(cfg, 'WS_LISTEN_PORT', 5052))
-try:
-    print(f"[Server] WebSocket 监听配置: {getattr(cfg, 'WS_LISTEN_HOST', '0.0.0.0')}:{getattr(cfg, 'WS_LISTEN_PORT', 5052)}")
-    # 注意：0.0.0.0 仅表示“监听所有网卡”，客户端应连接到可达的具体IP（建议用 cfg.PUBLIC_HOST_DISPLAY 做提示）。
-    _ws_port = getattr(cfg, 'WS_LISTEN_PORT', 5052)
-    _pub = getattr(cfg, 'PUBLIC_HOST_DISPLAY', getattr(cfg, 'WS_LISTEN_HOST', '0.0.0.0'))
-    print(f"[Server] 设备连接: ws://{_pub}:{_ws_port}/ws")
-    print(f"[Server] Web前端: ws://{_pub}:{_ws_port}/ui")
-except Exception:
+# WebSocket Hub 已移除（全面改用 MQTT 实时推送）
+_wshub = None
+
+# 可选：本地内嵌 MQTT Broker（仅建议临时联调，正式使用请连接外部 broker）
+_embedded_mqtt_broker = EmbeddedMQTTBroker(
+    bind_host=getattr(cfg, 'MQTT_EMBEDDED_BIND_HOST', '0.0.0.0'),
+    bind_port=getattr(cfg, 'MQTT_EMBEDDED_PORT', getattr(cfg, 'MQTT_PORT', 1883)),
+    enabled=getattr(cfg, 'MQTT_EMBEDDED_BROKER', False),
+)
+_embedded_mqtt_broker_started = _embedded_mqtt_broker.start()
+if getattr(cfg, 'MQTT_EMBEDDED_BROKER', False):
+    if _embedded_mqtt_broker_started:
+        try:
+            print(f"[Server] 本地 MQTT Broker 已启动: mqtt://{getattr(cfg, 'MQTT_EMBEDDED_BIND_HOST', '0.0.0.0')}:{getattr(cfg, 'MQTT_EMBEDDED_PORT', getattr(cfg, 'MQTT_PORT', 1883))}")
+            print("[Server] 警告: embedded MQTT broker 仅建议用于临时联调，正式环境请改用外部 broker。")
+        except Exception:
+            pass
+    else:
+        try:
+            print(f"[Server] 本地 MQTT Broker 启动失败: {_embedded_mqtt_broker.startup_error() or 'unknown error'}")
+        except Exception:
+            pass
+elif getattr(cfg, 'MQTT_ENABLE', False):
+    try:
+        print(f"[Server] 使用外部 MQTT Broker: mqtt://{getattr(cfg, 'MQTT_HOST', '127.0.0.1')}:{getattr(cfg, 'MQTT_PORT', 1883)}")
+    except Exception:
+        pass
+
+_mqtt_host_for_autostart = str(getattr(cfg, 'MQTT_HOST', '127.0.0.1') or '127.0.0.1').strip()
+_auto_local_mosquitto_enabled = bool(
+    getattr(cfg, 'MQTT_ENABLE', False)
+    and not getattr(cfg, 'MQTT_EMBEDDED_BROKER', False)
+    and getattr(cfg, 'MQTT_AUTO_START_LOCAL_BROKER', True)
+    and _mqtt_host_for_autostart in ('127.0.0.1', 'localhost', '::1')
+)
+_local_mosquitto_broker = LocalMosquittoBroker(
+    host=_mqtt_host_for_autostart,
+    port=getattr(cfg, 'MQTT_PORT', 1883),
+    ws_port=getattr(cfg, 'MQTT_WS_PORT', 9001),
+    enabled=_auto_local_mosquitto_enabled,
+    command=getattr(cfg, 'MQTT_MOSQUITTO_BIN', 'mosquitto'),
+)
+_local_mosquitto_started = _local_mosquitto_broker.start()
+if _auto_local_mosquitto_enabled:
+    if _local_mosquitto_started and _local_mosquitto_broker.started_by_me():
+        try:
+            print(
+                f"[Server] 已自动启动本地 Mosquitto: "
+                f"{getattr(cfg, 'MQTT_MOSQUITTO_BIN', 'mosquitto')} -p {getattr(cfg, 'MQTT_PORT', 1883)}"
+            )
+        except Exception:
+            pass
+    elif _local_mosquitto_started:
+        try:
+            print(f"[Server] 复用现有本地 MQTT Broker: mqtt://{getattr(cfg, 'MQTT_HOST', '127.0.0.1')}:{getattr(cfg, 'MQTT_PORT', 1883)}")
+        except Exception:
+            pass
+    else:
+        try:
+            print(f"[Server] 自动启动 Mosquitto 失败: {_local_mosquitto_broker.startup_error() or 'unknown error'}")
+        except Exception:
+            pass
+
+
+def _shutdown_local_mosquitto() -> None:
+    try:
+        _local_mosquitto_broker.stop()
+    except Exception:
+        pass
+
+
+atexit.register(_shutdown_local_mosquitto)
+
+
+def _handle_shutdown_signal(_signum, _frame) -> None:
+    _shutdown_local_mosquitto()
+    raise SystemExit(0)
+
+
+for _sig_name in ('SIGINT', 'SIGTERM'):
+    _sig = getattr(signal, _sig_name, None)
+    if _sig is None:
+        continue
+    try:
+        signal.signal(_sig, _handle_shutdown_signal)
+    except Exception:
+        pass
+
+# 初始化 MQTT Hub（启用时作为首选设备通道，同时把事件桥回 /ui WebSocket）
+_mqtt_hub = MQTTHub(
+    getattr(cfg, 'MQTT_HOST', '127.0.0.1'),
+    getattr(cfg, 'MQTT_PORT', 1883),
+    topic_prefix=getattr(cfg, 'MQTT_TOPIC_PREFIX', 'app_lvgl'),
+    client_id=getattr(cfg, 'MQTT_CLIENT_ID', 'app_lvgl_server'),
+    username=getattr(cfg, 'MQTT_USERNAME', ''),
+    password=getattr(cfg, 'MQTT_PASSWORD', ''),
+    keepalive_s=getattr(cfg, 'MQTT_KEEPALIVE_S', 30),
+    qos=getattr(cfg, 'MQTT_QOS', 1),
+    use_tls=getattr(cfg, 'MQTT_USE_TLS', False),
+    enabled=getattr(cfg, 'MQTT_ENABLE', False),
+)
+
+def _bridge_mqtt_event_to_ui(event_obj: dict) -> None:
+    """WebSocket Hub 已移除，mqtt_hub 直接发布到 MQTT UI topic。"""
     pass
 
-# 设置 WebSocket Hub 的 DBC 解析器
-_wshub.set_dbc_parser(_dbc_service.parse_can_frame)
-_wshub.start()
+_mqtt_hub.set_dbc_parser(_dbc_service.parse_can_frame)
+_mqtt_hub.set_event_callback(_bridge_mqtt_event_to_ui)
+_mqtt_hub_started = _mqtt_hub.start()
+# BMS collector 在 mqtt_hub 启动之后注入（避免循环依赖）
+if getattr(cfg, 'MQTT_ENABLE', False) and not _mqtt_hub_started:
+    try:
+        print(f"[Server] MQTT 服务未成功启动: {_mqtt_hub.startup_error() or 'unknown error'}")
+    except Exception:
+        pass
 
 # 可选：状态库（SQLite），用于前端刷新后快速恢复“最近状态”
 _state_store = None
@@ -86,10 +205,10 @@ try:
             from .state_store import StateStore  # type: ignore
         except Exception:
             from state_store import StateStore  # type: ignore
-        _state_store = StateStore(getattr(cfg, 'STATE_DB_PATH', os.path.join(os.path.dirname(__file__), 'uploads', 'state.sqlite3')))
+        _state_store = StateStore(getattr(cfg, 'STATE_DB_PATH', os.path.join(SERVER_DIR, 'uploads', 'state.sqlite3')))
         _state_store.start()
         try:
-            _wshub.set_state_store(_state_store)
+            _mqtt_hub.set_state_store(_state_store)
         except Exception:
             pass
         try:
@@ -103,6 +222,25 @@ except Exception as e:
     except Exception:
         pass
 
+
+# BMS 时序数据采集
+_bms_collector = None
+try:
+    try:
+        from .bms_collector import BmsCollector  # type: ignore
+    except Exception:
+        from bms_collector import BmsCollector  # type: ignore
+    _BMS_DB_PATH = os.path.join(SERVER_DIR, 'uploads', 'bms_timeseries.sqlite3')
+    _bms_collector = BmsCollector(_BMS_DB_PATH)
+    _bms_collector.start()
+    # 注册到 mqtt_hub，接收 can_parsed 事件
+    if hasattr(_mqtt_hub, 'set_bms_collector'):
+        _mqtt_hub.set_bms_collector(_bms_collector)
+    print(f"[Server] BMS时序数据库已启动: {_BMS_DB_PATH}")
+except Exception as _bms_err:
+    _bms_collector = None
+    print(f"[Server] BMS时序数据库初始化失败: {_bms_err}")
+
 # /api/status 缓存：减少每次刷新都 ping 设备导致卡顿/闪烁
 _status_cache = {"ts": 0.0, "resp": None}  # type: ignore
 _STATUS_CACHE_TTL = 0.5  # 秒
@@ -113,12 +251,93 @@ UDISK_DIR = BASE_DIR
 def qt_request(payload: dict, timeout: float = None) -> dict:
     if timeout is None:
         timeout = cfg.SOCKET_TIMEOUT
-    if _wshub and _wshub.is_connected():
+    if _mqtt_hub and _mqtt_hub.is_connected():
         try:
-            return _wshub.request(payload, timeout=timeout)
+            return _mqtt_hub.request(payload, timeout=timeout)
+        except Exception as e:
+            return {"ok": False, "error": f"MQTT request failed: {e}"}
+    if False:
+        try:
+            return _mqtt_hub.request(payload, timeout=timeout)
         except Exception as e:
             return {"ok": False, "error": f"WebSocket request failed: {e}"}
-    return {"ok": False, "error": "Device not connected via WebSocket"}
+    return {"ok": False, "error": "Device not connected via MQTT/WebSocket"}
+
+
+def _get_preferred_hub():
+    try:
+        if _mqtt_hub and _mqtt_hub.is_connected():
+            return _mqtt_hub, "mqtt"
+    except Exception:
+        pass
+    try:
+        if False:
+            return _mqtt_hub, "mqtt"
+    except Exception:
+        pass
+    if getattr(cfg, 'MQTT_ENABLE', False) and _mqtt_hub:
+        return _mqtt_hub, "mqtt"
+    return _mqtt_hub, "mqtt"
+
+
+def _get_preferred_hub_info() -> Tuple[dict, str]:
+    hub, protocol = _get_preferred_hub()
+    try:
+        info = hub.info() if hub else {"connected": False}
+    except Exception:
+        info = {"connected": False}
+    return info or {"connected": False}, protocol
+
+
+def _get_realtime_cache_hub():
+    try:
+        if _mqtt_hub and _mqtt_hub.is_connected():
+            return _mqtt_hub, "mqtt_cache"
+    except Exception:
+        pass
+    return _mqtt_hub, "mqtt_cache"
+
+
+@app.route('/api/realtime/config', methods=['GET'])
+def api_realtime_config():
+    """返回实时通信配置（纯 MQTT 模式，WebSocket Hub 已移除）。"""
+    mqtt_ws_url = getattr(cfg, 'MQTT_WS_URL', '')
+    # 若未配置 ws_url，自动推断（使用请求来源主机 + 默认 9001 端口）
+    if not mqtt_ws_url:
+        host = request.host.split(':')[0]
+        mqtt_ws_port = getattr(cfg, 'MQTT_WS_PORT', 9001)
+        scheme = 'wss' if request.scheme == 'https' else 'ws'
+        mqtt_ws_url = f"{scheme}://{host}:{mqtt_ws_port}"
+    topic_prefix = getattr(cfg, 'MQTT_TOPIC_PREFIX', 'app_lvgl')
+    import random, string
+    cid = 'browser_' + ''.join(random.choices(string.ascii_lowercase + string.digits, k=6))
+    return jsonify({
+        "ok": True,
+        "preferred_protocol": "mqtt",
+        "websocket": {"enabled": False, "url": ""},
+        "mqtt": {
+            "enabled": True,
+            "url": mqtt_ws_url,
+            "topic_prefix": topic_prefix,
+            "client_id": cid,
+            "ui_topic": f"{topic_prefix}/ui/events",
+        }
+    })
+
+def _can_bind(host: str, port: int) -> Tuple[bool, str]:
+    """启动前做一次端口可用性探测，便于给出明确错误提示。"""
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        s.bind((host, port))
+        return True, ""
+    except OSError as e:
+        return False, str(e)
+    finally:
+        try:
+            s.close()
+        except Exception:
+            pass
 
 _FS_BASE_CACHE = {"ts": 0.0, "base": None, "source": None}
 
@@ -170,6 +389,7 @@ def _device_write_file_chunked(dst_path: str, file_obj, total_size: int, chunk_s
     started = _time.time()
     offset = 0
     chunks = 0
+    retries = 0
     # 保护：限制 chunk_size（避免 JSON 过大）
     if chunk_size < 16 * 1024:
         chunk_size = 16 * 1024
@@ -182,20 +402,29 @@ def _device_write_file_chunked(dst_path: str, file_obj, total_size: int, chunk_s
             break
         b64 = base64.b64encode(buf).decode('ascii')
         truncate = (offset == 0)
-        resp = qt_request({"cmd": "fs_write_range", "path": dst_path, "offset": int(offset), "truncate": bool(truncate), "data": b64},
-                          timeout=max(getattr(cfg, 'SOCKET_TIMEOUT', 3.0), 10.0))
+        resp = None
+        last_error = "write failed"
+        for attempt in range(3):
+            resp = qt_request({"cmd": "fs_write_range", "path": dst_path, "offset": int(offset), "truncate": bool(truncate), "data": b64},
+                              timeout=max(getattr(cfg, 'SOCKET_TIMEOUT', 3.0), 10.0))
+            if resp and resp.get("ok"):
+                break
+            last_error = (resp.get("error") if isinstance(resp, dict) else "no response") or "write failed"
+            retries += 1
+            _time.sleep(0.2 * (attempt + 1))
         if not resp or not resp.get("ok"):
             return {
                 "ok": False,
-                "error": (resp.get("error") if isinstance(resp, dict) else "no response") or "write failed",
+                "error": last_error,
                 "offset": offset,
                 "chunks": chunks,
+                "retries": retries,
             }
         offset += len(buf)
         chunks += 1
 
     elapsed = _time.time() - started
-    return {"ok": True, "path": dst_path, "size": int(total_size), "written": int(offset), "chunks": int(chunks), "elapsed_s": float(elapsed)}
+    return {"ok": True, "path": dst_path, "size": int(total_size), "written": int(offset), "chunks": int(chunks), "retries": int(retries), "elapsed_s": float(elapsed)}
 
 
 def _sanitize_filename_ascii(name: str, default_name: str = "firmware.s19") -> str:
@@ -253,9 +482,8 @@ def hardware_page():
 def get_hardware_status():
     """获取设备硬件状态"""
     try:
-        if _wshub and _wshub.is_connected():
-            # 尝试从最近的events中获取hardware_status
-            info = _wshub.info()
+        info, _protocol = _get_preferred_hub_info()
+        if info.get('connected'):
             events = info.get('events', {})
             hw_status = events.get('hardware_status')
             
@@ -655,22 +883,6 @@ def dbc_viewer():
     resp.headers['Pragma'] = 'no-cache'
     return resp
 
-@app.route('/dashboard')
-def dashboard():
-    # 优先加载打包后的 Vue 仪表盘：/static/dashboard/index.html
-    try:
-        resp = send_from_directory(os.path.join(app.static_folder, 'dashboard'), 'index.html')
-        resp.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
-        resp.headers['Pragma'] = 'no-cache'
-        return resp
-    except Exception:
-        # 回退到旧版 dashboard.html（若还未完成前端打包）
-        resp = send_from_directory(app.static_folder, 'dashboard.html')
-        resp.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
-        resp.headers['Pragma'] = 'no-cache'
-        return resp
-
-
 @app.route('/api/status', methods=['GET'])
 def api_status():
     """获取服务器和设备连接状态（仅通过WebSocket）"""
@@ -683,14 +895,12 @@ def api_status():
     except Exception:
         pass
 
-    ws_info = None
-    try:
-        ws_info = _wshub.info() if _wshub else {"connected": False}
-    except Exception:
-        ws_info = {"connected": False}
+    hub_info, protocol = _get_preferred_hub_info()
+    ws_info = {"connected": False, "removed": True}
+    mqtt_info = _mqtt_hub.info() if _mqtt_hub else {"connected": False}
 
     # 获取WebSocket连接地址
-    client_addr = (ws_info or {}).get("client_addr")
+    client_addr = (hub_info or {}).get("client_addr")
 
     # 健康检查：ping 一次设备（fast=1 时跳过）
     device_id = None
@@ -704,20 +914,18 @@ def api_status():
 
     # 获取设备ID
     try:
-        if _wshub:
-            device_id = (_wshub.info() or {}).get('device_id')
+        device_id = (hub_info or {}).get('device_id')
     except Exception:
         device_id = None
 
-    # 连接状态判定（基于WebSocket）
     ws_connected = bool((ws_info or {}).get("connected"))
-    # 只要 WS 已连接就算“已连接”，避免 ping 偶发失败导致前端显示未连接
-    connected = bool(ws_connected or healthy)
+    mqtt_connected = bool((mqtt_info or {}).get("broker_connected", (mqtt_info or {}).get("connected")))
+    connected = bool((hub_info or {}).get("connected") or healthy)
     
     # 同步最近缓存的事件（供前端初始化）
     cached = None
     try:
-        cached = _wshub.info().get('events') if _wshub else {}
+        cached = (hub_info or {}).get('events') or {}
     except Exception:
         cached = {}
     
@@ -725,8 +933,8 @@ def api_status():
     devices = []
     history = []
     try:
-        if _wshub:
-            info = _wshub.info() or {}
+        info = hub_info or {}
+        if info:
             # 去重并过滤空字符串
             devices = [str(x).strip() for x in (info.get('devices') or []) if str(x).strip()]
             # 以 devices 与 history 的并集为历史（避免历史为空但刚上线导致总数为0）
@@ -745,8 +953,9 @@ def api_status():
             "healthy": healthy,
             "client_id": device_id,
             "client_addr": client_addr,
-            "protocol": "websocket",
+            "protocol": protocol,
             "ws_connected": ws_connected,
+            "mqtt_connected": mqtt_connected,
             # UI 前端（/ui）连接数：用于区分“服务端在线但设备未连”的情况
             "ui_clients": (ws_info or {}).get("ui_clients"),
             "events": cached or {},
@@ -780,33 +989,31 @@ def api_status_fast():
     except Exception:
         pass
 
-    ws_info = None
-    try:
-        ws_info = _wshub.info() if _wshub else {"connected": False}
-    except Exception:
-        ws_info = {"connected": False}
+    hub_info, protocol = _get_preferred_hub_info()
+    ws_info = {"connected": False, "removed": True}
+    mqtt_info = _mqtt_hub.info() if _mqtt_hub else {"connected": False}
 
-    client_addr = (ws_info or {}).get("client_addr")
+    client_addr = (hub_info or {}).get("client_addr")
     device_id = None
     try:
-        if _wshub:
-            device_id = (_wshub.info() or {}).get('device_id')
+        device_id = (hub_info or {}).get('device_id')
     except Exception:
         device_id = None
 
     ws_connected = bool((ws_info or {}).get("connected"))
+    mqtt_connected = bool((mqtt_info or {}).get("broker_connected", (mqtt_info or {}).get("connected")))
 
     cached = None
     try:
-        cached = _wshub.info().get('events') if _wshub else {}
+        cached = (hub_info or {}).get('events') or {}
     except Exception:
         cached = {}
 
     devices = []
     history = []
     try:
-        if _wshub:
-            info = _wshub.info() or {}
+        info = hub_info or {}
+        if info:
             devices = [str(x).strip() for x in (info.get('devices') or []) if str(x).strip()]
             hist = [str(x).strip() for x in (info.get('history') or []) if str(x).strip()]
             s = set(hist)
@@ -819,12 +1026,13 @@ def api_status_fast():
 
     resp = {
         "hub": {
-            "connected": bool(ws_connected),
+            "connected": bool((hub_info or {}).get("connected")),
             "healthy": None,
             "client_id": device_id,
             "client_addr": client_addr,
-            "protocol": "websocket",
+            "protocol": protocol,
             "ws_connected": bool(ws_connected),
+            "mqtt_connected": bool(mqtt_connected),
             "ui_clients": (ws_info or {}).get("ui_clients"),
             "events": cached or {},
             "devices": devices,
@@ -844,18 +1052,14 @@ def api_status_fast():
 @app.route('/api/ws/clients', methods=['GET'])
 def api_ws_clients():
     try:
-        devices = []
-        history = []
-        if _wshub:
-            info = _wshub.info() or {}
-            # 统一做去重&清洗，并构造并集 total
-            devices = [str(x).strip() for x in (info.get('devices') or []) if str(x).strip()]
-            hist = [str(x).strip() for x in (info.get('history') or []) if str(x).strip()]
-            s = set(hist)
-            for d in devices:
-                s.add(d)
-            history = sorted(list(s))
-        return jsonify({"ok": True, "devices": devices, "history": history})
+        info, protocol = _get_preferred_hub_info()
+        devices = [str(x).strip() for x in ((info or {}).get('devices') or []) if str(x).strip()]
+        hist = [str(x).strip() for x in ((info or {}).get('history') or []) if str(x).strip()]
+        merged = set(hist)
+        for d in devices:
+            merged.add(d)
+        history = sorted(list(merged))
+        return jsonify({"ok": True, "devices": devices, "history": history, "protocol": protocol})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)})
 
@@ -863,8 +1067,6 @@ def api_ws_clients():
 @app.route('/api/ws/history/clear', methods=['POST'])
 def api_ws_history_clear():
     try:
-        if _wshub:
-            _wshub.clear_history()
         return jsonify({"ok": True})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)})
@@ -875,8 +1077,6 @@ def api_ws_history_remove():
     try:
         ids = (request.get_json(silent=True) or {}).get('ids') or []
         ids = set([str(x) for x in ids if isinstance(x, (str, int))])
-        if _wshub and ids:
-            _wshub.remove_history(ids)
         return jsonify({"ok": True})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)})
@@ -924,22 +1124,67 @@ def api_can_clear():
 
 @app.route('/api/can/status', methods=['GET'])
 def api_can_status():
-    """获取CAN监控和录制状态"""
-    return jsonify(qt_request({"cmd": "can_get_status"}, timeout=2.0))
+    """获取CAN监控和录制状态 — 优先 MQTT can_get_status，备用设备 HTTP"""
+    # 优先通过 MQTT 查询（设备始终在线时此路径最快）
+    result = qt_request({"cmd": "can_get_status"}, timeout=3.0)
+    if result and result.get("ok") and result.get("data"):
+        d = result["data"]
+        data = {
+            "is_running":       bool(d.get("is_running", True)),
+            "running":          bool(d.get("running",    True)),
+            "is_recording":     bool(d.get("is_recording", False)),
+            "recording":        bool(d.get("recording",    False)),
+            "can0_bitrate":     int(d.get("can0_bitrate", 500000)),
+            "can1_bitrate":     int(d.get("can1_bitrate", 500000)),
+            "device_reachable": True,
+        }
+        return jsonify({"ok": True, "data": data})
+    # 备用：直连设备 HTTP /api/status
+    ok, j = _device_proxy_json(DEVICE_DEFAULT_IP, '/api/status', 'GET', timeout=3)
+    if ok and j:
+        data = {
+            "is_running":       True,
+            "running":          True,
+            "is_recording":     bool(j.get("can_recording", False)),
+            "recording":        bool(j.get("can_recording", False)),
+            "can0_bitrate":     int(j.get("can0_bitrate", 500000)),
+            "can1_bitrate":     int(j.get("can1_bitrate", 500000)),
+            "device_reachable": True,
+        }
+        return jsonify({"ok": True, "data": data})
+    return jsonify({"ok": False, "error": "device unreachable"})
 
 @app.route('/api/can/record/start', methods=['POST'])
 def api_can_record_start():
-    """开始录制CAN报文"""
-    return jsonify(qt_request({"cmd": "can_record_start"}))
+    """开始录制CAN报文 — MQTT"""
+    result = qt_request({"cmd": "can_record_start"}, timeout=3.0)
+    if result and result.get("ok"):
+        return jsonify({"ok": True, "data": result.get("data", {"recording": True})})
+    # 备用：设备 HTTP
+    ok, j = _device_proxy_json(DEVICE_DEFAULT_IP, '/api/recorder/start', 'POST', timeout=3)
+    if ok and j:
+        return jsonify({"ok": True, "data": j.get("data", {})})
+    return jsonify({"ok": False, "error": "failed to start recording"})
 
 @app.route('/api/can/record/stop', methods=['POST'])
 def api_can_record_stop():
-    """停止录制CAN报文"""
-    return jsonify(qt_request({"cmd": "can_record_stop"}))
+    """停止录制CAN报文 — MQTT"""
+    result = qt_request({"cmd": "can_record_stop"}, timeout=3.0)
+    if result and result.get("ok"):
+        d = result.get("data", {})
+        return jsonify({"ok": True, "data": {"recording": False, "filename": d.get("filename", "")}})
+    # 备用：设备 HTTP
+    ok, j = _device_proxy_json(DEVICE_DEFAULT_IP, '/api/recorder/stop', 'POST', timeout=3)
+    if ok and j:
+        return jsonify({"ok": True, "data": j.get("data", {})})
+    return jsonify({"ok": False, "error": "failed to stop recording"})
 
 @app.route('/api/can/config', methods=['GET'])
 def api_can_config():
-    """获取CAN配置信息（波特率等）"""
+    """获取CAN配置信息 — 优先直连设备 HTTP /api/config"""
+    ok, j = _device_proxy_json(DEVICE_DEFAULT_IP, '/api/config', 'GET', timeout=3)
+    if ok and j:
+        return jsonify({"ok": True, "data": j})
     return jsonify(qt_request({"cmd": "can_get_config"}, timeout=2.0))
 
 @app.route('/api/can/set_bitrates', methods=['POST'])
@@ -1197,7 +1442,7 @@ def api_dbc_recent_raw():
             pass
         lines = []
         try:
-            arr = _wshub.get_can_data(limit) if _wshub else []
+            arr = _mqtt_hub.get_can_data(limit) if _mqtt_hub else []
             for it in (arr or []):
                 if isinstance(it, dict):
                     v = it.get('frame')
@@ -1732,8 +1977,9 @@ def api_can_live_data():
 
         # 从WebSocket Hub获取缓存的CAN数据
         can_data_list = []
-        if _wshub:
-            can_data_list = _wshub.get_can_data(limit=limit)
+        hub, source = _get_realtime_cache_hub()
+        if hub:
+            can_data_list = hub.get_can_data(limit=limit)
 
         # 兼容：既返回结构化 items，也返回纯文本 lines
         items = []
@@ -1751,7 +1997,7 @@ def api_can_live_data():
             "items": items,
             "lines": lines,
             "timestamp": time.time(),
-            "source": "websocket_cache",
+            "source": source,
             "count": len(items)
         })
         
@@ -1763,11 +2009,12 @@ def api_can_live_data():
 def api_can_cache_clear():
     """清空CAN数据缓存"""
     try:
-        if _wshub:
-            _wshub.clear_can_data()
+        hub, _source = _get_realtime_cache_hub()
+        if hub:
+            hub.clear_can_data()
             return jsonify({"ok": True, "message": "CAN数据缓存已清空"})
         else:
-            return jsonify({"ok": False, "error": "WebSocket Hub不可用"}), 500
+            return jsonify({"ok": False, "error": "实时缓存不可用"}), 500
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
@@ -1776,28 +2023,65 @@ def api_can_cache_clear():
 def api_can_cache_status():
     """获取CAN数据缓存状态"""
     try:
-        if _wshub:
-            can_data_list = _wshub.get_can_data(limit=100)  # 获取更多数据用于统计
+        hub, source = _get_realtime_cache_hub()
+        if hub:
+            can_data_list = hub.get_can_data(limit=100)  # 获取更多数据用于统计
             return jsonify({
                 "ok": True,
                 "cache_size": len(can_data_list),
-                "max_cache": _wshub._max_can_cache,
+                "max_cache": getattr(hub, '_max_can_cache', 0),
+                "source": source,
                 "latest_timestamp": can_data_list[-1]['timestamp'] if can_data_list else None
             })
         else:
-            return jsonify({"ok": False, "error": "WebSocket Hub不可用"}), 500
+            return jsonify({"ok": False, "error": "实时缓存不可用"}), 500
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
 
 # UDS 细粒度控制
+def _normalize_uds_state_response(resp: dict) -> dict:
+    if not isinstance(resp, dict):
+        return {"ok": False, "error": "no response", "data": {}}
+    data = resp.get("data") if isinstance(resp.get("data"), dict) else {}
+    out = dict(data)
+    try:
+        out["percent"] = int(out.get("percent", out.get("total_percent", 0)) or 0)
+    except Exception:
+        out["percent"] = 0
+    out["running"] = bool(out.get("running"))
+    if not isinstance(out.get("logs"), list):
+        out["logs"] = []
+    return {"ok": bool(resp.get("ok")), "data": out, "error": resp.get("error")}
+
+
+def _query_uds_state(timeout: float = 2.0) -> dict:
+    """优先走设备 HTTP API，失败时回退 MQTT。"""
+    try:
+        status, data, _ = _device_proxy(DEVICE_DEFAULT_IP, '/api/uds/state', 'GET',
+                                         timeout=int(timeout) + 1)
+        if status < 400:
+            j = json.loads(data) if data else {}
+            return _normalize_uds_state_response(j)
+    except Exception:
+        pass
+    return _normalize_uds_state_response(qt_request({"cmd": "uds_state"}, timeout=timeout))
+
+
 @app.route('/api/uds/set_file', methods=['POST'])
 def api_uds_set_file():
     data = request.get_json(silent=True) or {}
-    path = data.get('path', '')
+    path = (data.get('path') or '').strip()
     if not path:
         return jsonify({"ok": False, "error": "empty path"}), 400
-    return jsonify(qt_request({"cmd": "uds_set_file", "path": path}))
+    # ensure_ascii=False 保留中文原始 UTF-8，避免 \u 转义导致设备 access() 校验失败
+    body = json.dumps({"path": path}, ensure_ascii=False).encode('utf-8')
+    ok, j = _device_proxy_json(DEVICE_DEFAULT_IP, '/api/uds/set_file', 'POST', body,
+                                'application/json; charset=utf-8')
+    if not ok:
+        # MQTT 兜底（不含中文路径的兼容情况）
+        j = qt_request({"cmd": "uds_click_select_file", "path": path})
+    return jsonify(j)
 
 @app.route('/api/uds/can_apply', methods=['POST'])
 def api_uds_can_apply():
@@ -1827,6 +2111,19 @@ def api_uds_config():
     default = {"iface": "can0", "bitrate": 500000, "tx_id": "7F3", "rx_id": "7FB", "block_size": 256}
 
     if request.method == 'GET':
+        state = _query_uds_state(timeout=2.0)
+        if state.get("ok") and isinstance(state.get("data"), dict):
+            dev = state["data"]
+            merged = dict(default)
+            merged.update({
+                "iface": dev.get("iface") or merged["iface"],
+                "bitrate": int(dev.get("bitrate") or merged["bitrate"]),
+                "tx_id": str(dev.get("tx_id") or merged["tx_id"]),
+                "rx_id": str(dev.get("rx_id") or merged["rx_id"]),
+                "block_size": int(dev.get("block_size") or merged["block_size"]),
+            })
+            return jsonify({"ok": True, "config": merged, "device": dev})
+
         # 读取服务端缓存/状态库
         try:
             if _state_store:
@@ -1855,17 +2152,17 @@ def api_uds_config():
     block_size = int(data.get("block_size", default["block_size"]) or default["block_size"])
     block_size = max(8, min(block_size, 4096))
 
-    # 1) 下发 UDS 参数（不要求已选择文件）
-    r1 = qt_request({"cmd": "uds_set_params", "iface": iface, "tx_id": tx_id, "rx_id": rx_id, "block_size": block_size}, timeout=3.0)
-    # 2) 配置波特率（沿用已有 /api/uds/can_apply 逻辑）
-    try:
-        if iface == "can1":
-            qt_request({"cmd": "can_set_channel_bitrate", "channel": 1, "bitrate": bitrate})
-        else:
-            qt_request({"cmd": "can_set_channel_bitrate", "channel": 0, "bitrate": bitrate})
-    except Exception:
-        pass
-    r2 = qt_request({"cmd": "uds_set_bitrate", "bitrate": bitrate})
+    # 1) 下发 UDS 参数 — 优先走设备 HTTP API
+    params_body = json.dumps({
+        "iface": iface, "bitrate": bitrate,
+        "tx_id": f"{tx_id:X}", "rx_id": f"{rx_id:X}", "block_size": block_size
+    }).encode()
+    ok1, r1 = _device_proxy_json(DEVICE_DEFAULT_IP, '/api/uds/set_params', 'POST',
+                                   params_body, 'application/json')
+    if not ok1:
+        r1 = qt_request({"cmd": "uds_set_params", "iface": iface,
+                          "tx_id": tx_id, "rx_id": rx_id, "block_size": block_size}, timeout=3.0)
+    r2 = {"ok": True}  # bitrate handled inside set_params on device
 
     cfg_out = {"iface": iface, "bitrate": bitrate, "tx_id": f"{tx_id:X}", "rx_id": f"{rx_id:X}", "block_size": block_size}
     try:
@@ -1874,37 +2171,71 @@ def api_uds_config():
     except Exception:
         pass
 
+    state = _query_uds_state(timeout=2.0)
+    dev_state = state.get("data") if state.get("ok") else {}
+    if isinstance(dev_state, dict):
+        cfg_out.update({
+            "iface": str(dev_state.get("iface") or cfg_out["iface"]),
+            "bitrate": int(dev_state.get("bitrate") or cfg_out["bitrate"]),
+            "tx_id": str(dev_state.get("tx_id") or cfg_out["tx_id"]),
+            "rx_id": str(dev_state.get("rx_id") or cfg_out["rx_id"]),
+            "block_size": int(dev_state.get("block_size") or cfg_out["block_size"]),
+        })
     ok = bool(isinstance(r1, dict) and r1.get("ok")) and bool(isinstance(r2, dict) and r2.get("ok"))
-    return jsonify({"ok": ok, "config": cfg_out, "device": {"uds_set_params": r1, "uds_set_bitrate": r2}})
+    return jsonify({"ok": ok, "config": cfg_out, "device": {"uds_set_params": r1, "uds_set_bitrate": r2, "state": dev_state}})
 
 @app.route('/api/uds/upload', methods=['POST'])
 def api_uds_upload():
+    # 将固件文件保存到服务器本地 uploads 目录
+    if 'file' not in request.files:
+        return jsonify({"ok": False, "error": "no file"}), 400
+    f = request.files['file']
+    name = f.filename or 'firmware.s19'
+    safe_name = _sanitize_filename_ascii(name, default_name="firmware.s19")
+    local_path = os.path.join(LOCAL_FS_ROOT, safe_name)
+    try:
+        os.makedirs(LOCAL_FS_ROOT, exist_ok=True)
+        f.save(local_path)
+        size = os.path.getsize(local_path)
+        print(f"UDS固件已保存到服务器: {local_path} ({size/(1024*1024):.2f} MB)")
+        # 尝试通知设备设置文件路径（非关键，失败不影响上传结果）
+        try:
+            setr = qt_request({"cmd": "uds_set_file", "path": local_path}, timeout=3.0)
+        except Exception:
+            setr = {"ok": False}
+        return jsonify({
+            "ok": True,
+            "path": local_path,
+            "name": safe_name,
+            "size": size,
+            "auto_set_file": bool(setr and setr.get("ok")),
+        })
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+def _api_uds_upload_old_unused():
+    # 以下为旧的设备端写入逻辑，已替换为本地保存，保留供参考
     # 通过服务器转发到设备端，在设备的 BASE_DIR 下生成文件
     if 'file' not in request.files:
         return jsonify({"ok": False, "error": "no file"}), 400
     f = request.files['file']
     name = f.filename or 'firmware.s19'
     safe_name = _sanitize_filename_ascii(name, default_name="firmware.s19")
-    # 优先使用前端传入 base（来自 /api/fs/base）；若 base 为 /mnt（旧版/未探测成功），则自动改用设备真实 base
     base = (request.form.get('base') or '').replace('\\', '/').strip()
     if not base or base.rstrip('/') == '/mnt':
         gb = _guess_device_base_dir()
         base = gb.get("base") or UDISK_DIR
     if not base.startswith('/mnt'):
         base = UDISK_DIR
-    # 使用 POSIX join，避免在 Windows 上产生反斜杠
     path = posixpath.join(base, safe_name)
-    # 优先走分块写入（更稳定，适合大文件）；如果设备端不支持则回退到旧 fs_upload
     try:
         total = 0
         try:
-            # werkzeug FileStorage
             total = int(getattr(f, 'content_length', 0) or 0)
         except Exception:
             total = 0
         if not total:
             try:
-                # 读取文件对象长度（不可靠则忽略）
                 pos = f.stream.tell()
                 f.stream.seek(0, 2)
                 total = int(f.stream.tell())
@@ -1916,7 +2247,6 @@ def api_uds_upload():
         f.stream.seek(0)
         resp = _device_write_file_chunked(path, f.stream, total_size=total, chunk_size=128 * 1024)
         if resp.get("ok"):
-            # 上传成功后自动设置 UDS 文件路径，减少用户手工输入出错
             try:
                 setr = qt_request({"cmd": "uds_set_file", "path": path}, timeout=5.0)
             except Exception:
@@ -1926,7 +2256,6 @@ def api_uds_upload():
             if not out["auto_set_file"]:
                 out["auto_set_error"] = setr.get("error") if isinstance(setr, dict) else "uds_set_file failed"
             return jsonify(out)
-        # 若提示 unknown cmd，则回退一次性上传（仅适合小文件）
         if "fs_write_range" in str(resp.get("error", "")) or "unknown" in str(resp.get("error", "")).lower():
             raise RuntimeError("device does not support fs_write_range")
         return jsonify(resp), 500
@@ -1947,215 +2276,247 @@ def api_uds_upload():
 
 @app.route('/api/uds/list', methods=['GET'])
 def api_uds_list():
-    # 让设备端列目录，返回 .s19 列表
-    return jsonify(qt_request({"cmd": "uds_list", "dir": UDISK_DIR}))
+    """列出设备 /mnt/SDCARD 目录下的固件文件（.s19/.hex/.bin/.mot）。"""
+    import urllib.parse
+    device_ip = request.args.get('device', DEVICE_DEFAULT_IP)
+    base = request.args.get('base', DEVICE_FS_DEFAULT)
+    exts = {'.s19', '.hex', '.bin', '.mot', '.srec'}
+    status, data, _ = _device_proxy(device_ip,
+        f'/api/files/list?path={urllib.parse.quote(base)}', 'GET', timeout=8)
+    try:
+        j = json.loads(data) if data else {}
+    except Exception:
+        j = {}
+    items_raw = j.get('items', []) if isinstance(j, dict) else []
+    files = []
+    for it in items_raw:
+        if isinstance(it, dict) and not it.get('is_dir', False):
+            ext = os.path.splitext(it.get('name', ''))[1].lower()
+            if ext in exts:
+                files.append({
+                    "name": it.get('name', ''),
+                    "path": it.get('path', base + '/' + it.get('name', '')),
+                    "size": it.get('size', 0),
+                    "mtime": it.get('mtime', 0),
+                })
+    # 设备不可达时，回退到服务器本地 uploads 目录
+    if status >= 400:
+        for fname in sorted(os.listdir(LOCAL_FS_ROOT)):
+            fp = os.path.join(LOCAL_FS_ROOT, fname)
+            if os.path.isfile(fp) and os.path.splitext(fname)[1].lower() in exts:
+                st = os.stat(fp)
+                files.append({
+                    "name": fname,
+                    "path": fp,
+                    "size": st.st_size,
+                    "mtime": int(st.st_mtime),
+                    "source": "server_local",
+                })
+    return jsonify({"ok": True, "files": files, "data": {"files": files}})
+
+@app.route('/api/uds/state', methods=['GET'])
+def api_uds_state():
+    state = _query_uds_state(timeout=2.0)
+    if not state.get("ok"):
+        return jsonify(state)
+    return jsonify({"ok": True, "state": state.get("data", {})})
 
 @app.route('/api/uds/start', methods=['POST'])
 def api_uds_start():
-    # 启动 UDS 下载默认给更长超时（固件擦写可能需要更久）
-    return jsonify(qt_request({"cmd": "uds_start"}, timeout=max(getattr(cfg, 'SOCKET_TIMEOUT', 3.0), 10.0)))
+    ok, j = _device_proxy_json(DEVICE_DEFAULT_IP, '/api/uds/start', 'POST', b'{}',
+                                'application/json', timeout=15)
+    if not ok:
+        j = qt_request({"cmd": "uds_click_start"},
+                        timeout=max(getattr(cfg, 'SOCKET_TIMEOUT', 3.0), 10.0))
+    return jsonify(j)
 
 @app.route('/api/uds/stop', methods=['POST'])
 def api_uds_stop():
-    return jsonify(qt_request({"cmd": "uds_stop"}))
+    ok, j = _device_proxy_json(DEVICE_DEFAULT_IP, '/api/uds/stop', 'POST', b'{}',
+                                'application/json')
+    if not ok:
+        j = qt_request({"cmd": "uds_click_stop"})
+    return jsonify(j)
 
 @app.route('/api/uds/progress', methods=['GET'])
 def api_uds_progress():
-    # 进度轮询允许较短超时提高刷新体验；对设备响应做扁平化，前端读取 j.percent 更直观
-    r = qt_request({"cmd": "uds_progress"}, timeout=2.0)
-    if not isinstance(r, dict):
-        return jsonify({"ok": False, "error": "no response"}), 500
-    if not r.get("ok"):
-        return jsonify(r)
-    data = r.get("data") if isinstance(r.get("data"), dict) else {}
-    percent = 0
-    try:
-        percent = int(data.get("percent", data.get("total_percent", 0)) or 0)
-    except Exception:
-        percent = 0
-    out = {"ok": True, "percent": percent, "data": data}
-    return jsonify(out)
+    state = _query_uds_state(timeout=2.0)
+    if not state.get("ok"):
+        return jsonify(state)
+    data = state.get("data") or {}
+    return jsonify({"ok": True, "percent": int(data.get("percent", 0) or 0), "running": bool(data.get("running")), "data": data})
 
 @app.route('/api/uds/logs', methods=['GET'])
 def api_uds_logs():
+    state = _query_uds_state(timeout=2.0)
+    if not state.get("ok"):
+        return jsonify(state)
+    data = state.get("data") or {}
+    logs = data.get("logs") if isinstance(data.get("logs"), list) else []
     try:
-        limit = int(request.args.get('limit', '100'))
+        limit = max(1, int(request.args.get('limit', '100')))
     except Exception:
         limit = 100
-    r = qt_request({"cmd": "uds_logs", "limit": limit})
-    if not isinstance(r, dict):
-        return jsonify({"ok": False, "error": "no response"}), 500
-    if not r.get("ok"):
-        return jsonify(r)
-    data = r.get("data") if isinstance(r.get("data"), dict) else {}
-    logs = []
-    if isinstance(data, dict):
-        if isinstance(data.get("logs"), list):
-            logs = data.get("logs")
-        elif isinstance(data.get("lines"), list):
-            logs = data.get("lines")
+    if len(logs) > limit:
+        logs = logs[-limit:]
     return jsonify({"ok": True, "logs": logs, "data": data})
 
-# 文件管理 API（代理到设备端）
-@app.route('/api/fs/list', methods=['GET'])
-def api_fs_list():
-    # 列出目录内容（限制在 UDISK_DIR 范围内）
-    path = request.args.get('path', UDISK_DIR)
-    safe = path.replace('\\','/').strip()
-    if not safe.startswith(UDISK_DIR):
-        safe = UDISK_DIR
-    return jsonify(qt_request({"cmd": "fs_list", "path": safe}))
+# 文件管理 API（代理到设备 HTTP 服务器 192.168.100.100:8080/api/files/）
+LOCAL_FS_ROOT = os.path.join(SERVER_DIR, 'uploads')  # 保留供 UDS/DBC 使用
+DEVICE_FS_DEFAULT = '/mnt/SDCARD'
+DEVICE_DEFAULT_IP = '192.168.100.100'
 
-@app.route('/api/fs/mkdir', methods=['POST'])
-def api_fs_mkdir():
-    data = request.get_json(silent=True) or {}
-    name = (data.get('name') or '').strip()
-    base = (data.get('base') or UDISK_DIR).replace('\\','/')
-    if not name:
-        return jsonify({"ok": False, "error": "empty name"}), 400
-    if not base.startswith(UDISK_DIR):
-        base = UDISK_DIR
-    path = posixpath.join(base, name)
-    return jsonify(qt_request({"cmd": "fs_mkdir", "path": path}))
 
-@app.route('/api/fs/delete', methods=['POST'])
-def api_fs_delete():
-    data = request.get_json(silent=True) or {}
-    path = (data.get('path') or '').replace('\\','/')
-    if not path or not path.startswith(UDISK_DIR):
-        return jsonify({"ok": False, "error": "invalid path"}), 400
-    return jsonify(qt_request({"cmd": "fs_delete", "path": path}))
+def _fs_device_ip():
+    return request.args.get('device', DEVICE_DEFAULT_IP)
 
-@app.route('/api/fs/rename', methods=['POST'])
-def api_fs_rename():
-    data = request.get_json(silent=True) or {}
-    path = (data.get('path') or '').replace('\\','/')
-    new_name = (data.get('new_name') or '').strip()
-    if not path or not new_name or not path.startswith(UDISK_DIR):
-        return jsonify({"ok": False, "error": "invalid args"}), 400
-    return jsonify(qt_request({"cmd": "fs_rename", "path": path, "new_name": new_name}))
 
-@app.route('/api/fs/upload', methods=['POST'])
-def api_fs_upload():
-    # 上传文件到指定目录（限制在 UDISK_DIR）
-    base = request.form.get('base', UDISK_DIR).replace('\\','/')
-    if not base.startswith(UDISK_DIR):
-        base = UDISK_DIR
-    if 'file' not in request.files:
-        return jsonify({"ok": False, "error": "no file"}), 400
-    f = request.files['file']
-    name = f.filename or 'upload.bin'
-    safe_name = name.replace('\\','_').replace('/','_').replace('\r','').replace('\n','')
-    path = posixpath.join(base, safe_name)
-    # 优先走分块写入（更稳定）；如果设备端不支持则回退到旧 fs_upload（小文件）
+def _device_proxy_json(device_ip, path, method='GET', body=None, content_type=None, timeout=8):
+    """向设备发起请求，返回 (ok, json_dict)。失败时返回 (False, {'error':...})。"""
+    status, data, _ = _device_proxy(device_ip, path, method, body, content_type)
     try:
-        total = 0
-        try:
-            total = int(getattr(f, 'content_length', 0) or 0)
-        except Exception:
-            total = 0
-        if not total:
-            try:
-                pos = f.stream.tell()
-                f.stream.seek(0, 2)
-                total = int(f.stream.tell())
-                f.stream.seek(pos, 0)
-            except Exception:
-                total = 0
-        f.stream.seek(0)
-        resp = _device_write_file_chunked(path, f.stream, total_size=total, chunk_size=128 * 1024)
-        if resp.get("ok"):
-            return jsonify(resp)
-        if "fs_write_range" in str(resp.get("error", "")) or "unknown" in str(resp.get("error", "")).lower():
-            raise RuntimeError("device does not support fs_write_range")
-        return jsonify(resp), 500
+        j = json.loads(data) if data else {}
     except Exception:
-        content = f.read()
-        b64 = base64.b64encode(content).decode('ascii')
-        return jsonify(qt_request({"cmd": "fs_upload", "path": path, "data": b64}))
+        j = {"ok": False, "raw": data.decode(errors='replace') if data else ''}
+    if status >= 400 and 'ok' not in j:
+        j['ok'] = False
+    return j.get('ok', status < 300), j
+
 
 @app.route('/api/fs/base', methods=['GET'])
 def api_fs_base():
-    gb = _guess_device_base_dir()
-    return jsonify({"ok": True, "base": gb.get("base"), "source": gb.get("source")})
+    return jsonify({"ok": True, "base": DEVICE_FS_DEFAULT, "source": "device"})
+
+
+@app.route('/api/fs/list', methods=['GET'])
+def api_fs_list():
+    device_ip = _fs_device_ip()
+    path = request.args.get('path', DEVICE_FS_DEFAULT)
+    import urllib.parse
+    status, data, ct = _device_proxy(device_ip,
+        f'/api/files/list?path={urllib.parse.quote(path)}', 'GET', timeout=8)
+    from flask import Response
+    return Response(data, status=status,
+                    content_type=ct or 'application/json')
+
+
+@app.route('/api/fs/mkdir', methods=['POST'])
+def api_fs_mkdir():
+    device_ip = _fs_device_ip()
+    req_data = request.get_json(silent=True) or {}
+    name = (req_data.get('name') or '').strip()
+    base = (req_data.get('base') or DEVICE_FS_DEFAULT).rstrip('/')
+    if not name:
+        return jsonify({"ok": False, "error": "empty name"}), 400
+    path = base + '/' + name
+    body = json.dumps({"path": path}, ensure_ascii=False).encode('utf-8')
+    ok, j = _device_proxy_json(device_ip, '/api/files/mkdir', 'POST', body,
+                                'application/json; charset=utf-8')
+    return jsonify(j)
+
+
+@app.route('/api/fs/delete', methods=['POST'])
+def api_fs_delete():
+    device_ip = _fs_device_ip()
+    req_data = request.get_json(silent=True) or {}
+    path = (req_data.get('path') or '').strip()
+    if not path:
+        return jsonify({"ok": False, "error": "no path"}), 400
+    body = json.dumps({"path": path}, ensure_ascii=False).encode('utf-8')
+    ok, j = _device_proxy_json(device_ip, '/api/files/delete', 'POST', body,
+                                'application/json; charset=utf-8')
+    return jsonify(j)
+
+
+@app.route('/api/fs/rename', methods=['POST'])
+def api_fs_rename():
+    device_ip = _fs_device_ip()
+    req_data = request.get_json(silent=True) or {}
+    path = (req_data.get('path') or '').strip()
+    new_name = (req_data.get('new_name') or '').strip()
+    if not path or not new_name:
+        return jsonify({"ok": False, "error": "invalid args"}), 400
+    body = json.dumps({"path": path, "new_name": new_name}, ensure_ascii=False).encode('utf-8')
+    ok, j = _device_proxy_json(device_ip, '/api/files/rename', 'POST', body,
+                                'application/json; charset=utf-8')
+    return jsonify(j)
+
+
+@app.route('/api/fs/upload', methods=['POST'])
+def api_fs_upload():
+    device_ip = _fs_device_ip()
+    base = (request.form.get('base') or request.form.get('path') or DEVICE_FS_DEFAULT).rstrip('/')
+    if 'file' not in request.files:
+        return jsonify({"ok": False, "error": "no file"}), 400
+    f = request.files['file']
+    name = os.path.basename((f.filename or 'upload.bin').replace('\\', '/')) or 'upload.bin'
+    file_path = base + '/' + name
+    try:
+        data = f.read()
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+    url = f'http://{device_ip}:8080/api/files/upload'
+    req = urllib.request.Request(url, data=data, method='POST')
+    req.add_header('Content-Type', 'application/octet-stream')
+    req.add_header('Content-Length', str(len(data)))
+    # X-File-Path 必须 URL 编码，HTTP 头只允许 ASCII
+    req.add_header('X-File-Path', urllib.parse.quote(file_path, safe='/:'))
+    req.add_header('Connection', 'close')
+    try:
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            j = json.loads(resp.read())
+            return jsonify(j)
+    except urllib.error.HTTPError as e:
+        return jsonify({"ok": False, "error": f"HTTP {e.code}"}), e.code
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 502
+
 
 @app.route('/api/fs/download', methods=['GET'])
 def api_fs_download():
-    # 下载指定文件（限制在 UDISK_DIR 范围内）
-    path = request.args.get('path', '').replace('\\','/').strip()
-    if not path or not path.startswith(UDISK_DIR):
-        return jsonify({"ok": False, "error": "invalid path"}), 400
-    # 优先使用分块读取，降低设备内存与WS压力
-    try:
-        from flask import Response
-        # 允许通过 query 参数自定义分块大小（16KB ~ 256KB）
-        try:
-            # 提升到 512KB 默认（T113-S3 可承受时更快），允许 32KB ~ 1MB 调整
-            chunk_q = int(request.args.get('chunk', '524288'))
-        except Exception:
-            chunk_q = 524288
-        chunk = max(32 * 1024, min(chunk_q, 1024 * 1024))
-        offset = 0
-        first = True
-        def generate():
-            nonlocal offset, first
-            while True:
-                # 读取一个分块
-                try:
-                    resp = qt_request({"cmd": "fs_read_range", "path": path, "offset": int(offset), "length": int(chunk)}, timeout=15.0)
-                except Exception as e:
-                    print(f"文件分块读取异常: {e}")
-                    break
-                if not resp or not resp.get('ok'):
-                    # 记录错误但不抛出异常，让生成器正常结束
-                    error_msg = resp.get('error', 'unknown') if resp else 'no response'
-                    print(f"文件分块读取失败 offset={offset}: {error_msg}")
-                    break
-                data = resp.get('data') or {}
-                b64 = data.get('data') or ''
-                if not b64:
-                    break
-                try:
-                    content = base64.b64decode(b64.encode('ascii'))
-                except Exception as e:
-                    print(f"分块Base64解码失败: {e}")
-                    break
-                offset += len(content)
-                yield content
-                if data.get('eof') or len(content) < chunk:
-                    break
-        # 先取一次，获取文件名与大小；失败再回退到一次性读取
-        head = qt_request({"cmd": "fs_stat", "path": path}, timeout=5.0)
-        if head and head.get('ok'):
-            d = (head.get('data') or {})
-            name = d.get('name') or 'download.bin'
-            total = int(d.get('size') or 0)
-            r = Response(generate(), mimetype='application/octet-stream')
-            r.headers['Content-Disposition'] = f"attachment; filename={name}"
-            r.headers['Cache-Control'] = 'no-store'
-            if total > 0:
-                r.headers['Content-Length'] = str(total)
-            return r
-    except Exception as e:
-        print(f"分块读取模式失败: {e}")
-        import traceback
-        traceback.print_exc()
-    # 回退：一次性读取（小文件）
-    resp = qt_request({"cmd": "fs_read", "path": path}, timeout=15.0)
-    if not resp or not resp.get('ok'):
-        return jsonify(resp or {"ok": False, "error": "read failed"}), 500
-    data = resp.get('data') or {}
-    name = data.get('name') or 'download.bin'
-    b64 = data.get('data') or ''
-    try:
-        content = base64.b64decode(b64.encode('ascii'))
-    except Exception:
-        return jsonify({"ok": False, "error": "decode failed"}), 500
     from flask import Response
-    r = Response(content, mimetype='application/octet-stream')
-    r.headers['Content-Disposition'] = f"attachment; filename={name}"
-    r.headers['Cache-Control'] = 'no-store'
-    return r
+    import urllib.parse, urllib.request, urllib.error
+    device_ip = _fs_device_ip()
+    path = request.args.get('path', '').strip()
+    if not path:
+        return jsonify({"ok": False, "error": "no path"}), 400
+    fname = os.path.basename(path)
+    url = f"http://{device_ip}:8080/api/files/download?path={urllib.parse.quote(path)}"
+    req = urllib.request.Request(url, method='GET')
+    req.add_header('Connection', 'close')
+    try:
+        resp_dev = urllib.request.urlopen(req, timeout=60)
+    except urllib.error.HTTPError as e:
+        return jsonify({"ok": False, "error": f"device error {e.code}"}), 502
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 502
+
+    def stream_body():
+        try:
+            while True:
+                chunk = resp_dev.read(65536)
+                if not chunk:
+                    break
+                yield chunk
+        finally:
+            resp_dev.close()
+
+    # RFC 5987: 支持非 ASCII 文件名（如中文）
+    try:
+        fname.encode('latin-1')
+        cd = f'attachment; filename="{fname}"'
+    except (UnicodeEncodeError, AttributeError):
+        fname_encoded = urllib.parse.quote(fname, safe='')
+        cd = f"attachment; filename*=UTF-8''{fname_encoded}"
+    headers = {
+        'Content-Disposition': cd,
+        'Content-Type': 'application/octet-stream',
+    }
+    cl = resp_dev.headers.get('Content-Length')
+    if cl:
+        headers['Content-Length'] = cl
+    return Response(stream_with_context(stream_body()), status=200,
+                    headers=headers, direct_passthrough=True)
 
 # ==================== 高级控制API ====================
 
@@ -2312,25 +2673,22 @@ def print_startup_info():
     print("\n" + "="*60)
     print("🚀 Tina-Linux远程控制服务器")
     print("="*60)
-    print(f"📡 HTTP API服务器: http://{cfg.WEB_HOST}:{cfg.WEB_PORT}")
-    _ws_host = getattr(cfg, 'WS_LISTEN_HOST', '0.0.0.0')
-    _ws_port = getattr(cfg, 'WS_LISTEN_PORT', 5052)
-    _pub = getattr(cfg, 'PUBLIC_HOST_DISPLAY', _ws_host)
-    print(f"🔌 WebSocket监听: ws://{_ws_host}:{_ws_port}")
-    print(f"🔌 设备连接:     ws://{_pub}:{_ws_port}/ws")
-    print(f"🔌 Web前端:      ws://{_pub}:{_ws_port}/ui")
+    print(f"📡 HTTP API服务器: http://{cfg.WEB_HOST_DISPLAY}:{cfg.WEB_PORT}")
+    _pub = getattr(cfg, 'PUBLIC_HOST_DISPLAY', '0.0.0.0')
+    _mqtt_ws_port = getattr(cfg, 'MQTT_WS_PORT', 9001)
+    print(f"🔌 MQTT TCP:      mqtt://{_pub}:1883")
+    print(f"🔌 MQTT WebSocket: ws://{_pub}:{_mqtt_ws_port}  (浏览器直接订阅)")
     print(f"📊 DBC解析目录: {DBC_DIR}")
     print(f"📁 文件基础目录: {UDISK_DIR}")
     print("\n" + "="*60)
     print("📖 快速链接")
     print("="*60)
-    print(f"🏠 主页: http://{cfg.WEB_HOST}:{cfg.WEB_PORT}/")
-    print(f"🧪 测试页面: http://{cfg.WEB_HOST}:{cfg.WEB_PORT}/test")
-    print(f"🚗 CAN监控: http://{cfg.WEB_HOST}:{cfg.WEB_PORT}/can")
-    print(f"📊 仪表板: http://{cfg.WEB_HOST}:{cfg.WEB_PORT}/dashboard")
-    print(f"🔍 API状态: http://{cfg.WEB_HOST}:{cfg.WEB_PORT}/api/status")
-    print(f"📝 DBC工具: http://{cfg.WEB_HOST}:{cfg.WEB_PORT}/dbc")
-    print(f"🔧 UDS刷写: http://{cfg.WEB_HOST}:{cfg.WEB_PORT}/uds")
+    print(f"🏠 主页: http://{cfg.WEB_HOST_DISPLAY}:{cfg.WEB_PORT}/")
+    print(f"🚗 CAN监控: http://{cfg.WEB_HOST_DISPLAY}:{cfg.WEB_PORT}/can")
+    print(f"🖥️ 硬件监控: http://{cfg.WEB_HOST_DISPLAY}:{cfg.WEB_PORT}/hardware")
+    print(f"📝 DBC解析: http://{cfg.WEB_HOST_DISPLAY}:{cfg.WEB_PORT}/dbc")
+    print(f"🔧 UDS刷写: http://{cfg.WEB_HOST_DISPLAY}:{cfg.WEB_PORT}/uds")
+    print(f"🔍 API状态: http://{cfg.WEB_HOST_DISPLAY}:{cfg.WEB_PORT}/api/status")
     print("\n" + "="*60)
     print("🔧 主要功能")
     print("="*60)
@@ -2343,7 +2701,8 @@ def print_startup_info():
     print("\n" + "="*60)
     print("📚 文档")
     print("="*60)
-    print("📖 API文档: server/API_DOCUMENTATION.md")
+    print("📖 API文档: docs/api.md")
+    print("📖 OpenAPI: docs/openapi.yaml")
     print("📖 使用指南: REMOTE_CONTROL_GUIDE.md")
     print("📖 测试说明: server/TEST_PAGE_README.md")
     print("📖 调试指南: COMMAND_MAPPING_DEBUG.md")
@@ -2355,10 +2714,510 @@ def print_startup_info():
     print("3. 使用Ctrl+C优雅退出服务器")
     print("="*60 + "\n")
 
+# ==================== 设备端配置页代理 ====================
+# 通过服务端转发对设备 HTTP Server (port 8080) 的请求
+# 设备 IP 通过 ?device=<ip> 参数指定，默认 192.168.100.100
+
+import urllib.request
+import urllib.error
+
+def _device_proxy(device_ip: str, path: str, method: str, body: bytes = None,
+                  content_type: str = None, timeout: int = 8):
+    """向设备发起 HTTP 请求并返回 (status, data, content_type)"""
+    url = f"http://{device_ip}:8080/{path.lstrip('/')}"
+    req = urllib.request.Request(url, data=body, method=method)
+    if content_type:
+        req.add_header('Content-Type', content_type)
+    req.add_header('Connection', 'close')
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return resp.status, resp.read(), resp.headers.get('Content-Type', 'application/json')
+    except urllib.error.HTTPError as e:
+        return e.code, e.read(), 'application/json'
+    except Exception as exc:
+        return 502, json.dumps({"error": str(exc)}).encode(), 'application/json'
+
+@app.route('/device_config')
+def device_config_page():
+    return send_from_directory('static', 'device_config.html')
+
+@app.route('/files')
+def file_manager_page():
+    return send_from_directory('static', 'file_manager.html')
+
+@app.route('/api/device/proxy/<path:subpath>', methods=['GET', 'POST', 'PUT', 'DELETE'])
+def device_api_proxy(subpath):
+    device_ip = request.args.get('device', '192.168.100.100')
+    body = request.get_data() if request.method in ('POST', 'PUT') else None
+    ct   = request.content_type if request.method in ('POST', 'PUT') else None
+    status, data, resp_ct = _device_proxy(device_ip, f'/api/{subpath}',
+                                          request.method, body, ct)
+    from flask import Response
+    return Response(data, status=status, content_type=resp_ct)
+
+@app.route('/api/device/list', methods=['GET'])
+def device_list():
+    """返回已知设备列表（当前从 MQTT hub 获取在线设备）"""
+    try:
+        hub_info = _mqtt_hub.info() if _mqtt_hub else {}
+        devices = list((hub_info or {}).get('devices', []))
+    except Exception:
+        devices = []
+    default_ip = '192.168.100.100'
+    return jsonify({"ok": True, "devices": devices, "default_ip": default_ip})
+
+
+_CAN_CONFIG_DEFAULTS = {
+    "can0_bitrate": 500000,
+    "can1_bitrate": 500000,
+    "can_record_dir": "/mnt/SDCARD/can_records",
+    "can_record_max_mb": 40,
+}
+
+@app.route('/api/device/can_config', methods=['GET', 'POST'])
+def device_can_config():
+    """
+    CAN 配置同步端点：
+    - GET  : 从设备读取 CAN 配置，缓存到 state_store 后返回
+    - POST : 将 CAN 配置写入设备，同时更新 state_store 缓存
+    """
+    device_ip = request.args.get('device', DEVICE_DEFAULT_IP)
+
+    if request.method == 'GET':
+        # 1. 先读设备
+        ok, j = _device_proxy_json(device_ip, '/api/config', 'GET', timeout=4)
+        if ok and isinstance(j, dict):
+            cfg = {
+                "can0_bitrate":     int(j.get("can0_bitrate") or _CAN_CONFIG_DEFAULTS["can0_bitrate"]),
+                "can1_bitrate":     int(j.get("can1_bitrate") or _CAN_CONFIG_DEFAULTS["can1_bitrate"]),
+                "can_record_dir":   j.get("can_record_dir",   _CAN_CONFIG_DEFAULTS["can_record_dir"]),
+                "can_record_max_mb":int(j.get("can_record_max_mb") or _CAN_CONFIG_DEFAULTS["can_record_max_mb"]),
+            }
+            try:
+                if _state_store:
+                    _state_store.set("device.can_config", cfg)
+            except Exception:
+                pass
+            return jsonify({"ok": True, "config": cfg, "source": "device"})
+
+        # 2. 设备不可达 — 返回缓存
+        try:
+            if _state_store:
+                cached = _state_store.get("device.can_config", None)
+                if isinstance(cached, dict):
+                    return jsonify({"ok": True, "config": cached, "source": "cache"})
+        except Exception:
+            pass
+
+        return jsonify({"ok": True, "config": dict(_CAN_CONFIG_DEFAULTS), "source": "default"})
+
+    # POST — 将前端提交的 CAN 参数写入设备
+    data = request.get_json(silent=True) or {}
+    cfg = {
+        "can0_bitrate":     int(data.get("can0_bitrate") or _CAN_CONFIG_DEFAULTS["can0_bitrate"]),
+        "can1_bitrate":     int(data.get("can1_bitrate") or _CAN_CONFIG_DEFAULTS["can1_bitrate"]),
+        "can_record_dir":   str(data.get("can_record_dir",   _CAN_CONFIG_DEFAULTS["can_record_dir"])),
+        "can_record_max_mb":int(data.get("can_record_max_mb") or _CAN_CONFIG_DEFAULTS["can_record_max_mb"]),
+    }
+    body = json.dumps(cfg).encode()
+    ok, j = _device_proxy_json(device_ip, '/api/config', 'POST', body, 'application/json', timeout=6)
+    if ok:
+        # 成功后回读实际值
+        ok2, j2 = _device_proxy_json(device_ip, '/api/config', 'GET', timeout=4)
+        if ok2 and isinstance(j2, dict):
+            cfg.update({
+                "can0_bitrate":     int(j2.get("can0_bitrate") or cfg["can0_bitrate"]),
+                "can1_bitrate":     int(j2.get("can1_bitrate") or cfg["can1_bitrate"]),
+                "can_record_dir":   j2.get("can_record_dir",   cfg["can_record_dir"]),
+                "can_record_max_mb":int(j2.get("can_record_max_mb") or cfg["can_record_max_mb"]),
+            })
+        try:
+            if _state_store:
+                _state_store.set("device.can_config", cfg)
+        except Exception:
+            pass
+    can_restarted = bool(j.get("can_restarted")) if isinstance(j, dict) else False
+    return jsonify({"ok": ok, "config": cfg, "can_restarted": can_restarted,
+                    "device": j})
+
+# ===========================================================
+
+# ═══════════════════════════════════════════════════════════════════════
+#   BMS 时序数据库 API
+# ═══════════════════════════════════════════════════════════════════════
+
+@app.route('/bms')
+def bms_dashboard():
+    """BMS 时序数据看板"""
+    resp = send_from_directory(app.static_folder, 'bms_dashboard.html')
+    resp.headers['Cache-Control'] = 'no-store, no-cache'
+    return resp
+
+@app.route('/api/bms/stats', methods=['GET'])
+def api_bms_stats():
+    if not _bms_collector:
+        return jsonify({"ok": False, "error": "BMS collector not initialized"}), 503
+    return jsonify({"ok": True, "data": _bms_collector.get_stats()})
+
+@app.route('/api/bms/signals', methods=['GET'])
+def api_bms_signals():
+    if not _bms_collector:
+        return jsonify({"ok": False, "error": "BMS collector not initialized"}), 503
+    return jsonify({"ok": True, "data": _bms_collector.query_latest_values()})
+
+@app.route('/api/bms/query', methods=['GET'])
+def api_bms_query():
+    if not _bms_collector:
+        return jsonify({"ok": False, "error": "BMS collector not initialized"}), 503
+    signal_names_raw = request.args.get('signals', '')
+    signal_names = [s.strip() for s in signal_names_raw.split(',') if s.strip()] or None
+    start_ts = float(request.args.get('start', 0)) or None
+    end_ts   = float(request.args.get('end',   0)) or None
+    limit    = min(int(request.args.get('limit', 2000)), 10000)
+    data = _bms_collector.query_signals(signal_names, start_ts, end_ts, limit)
+    return jsonify({"ok": True, "data": data})
+
+@app.route('/api/bms/alerts', methods=['GET'])
+def api_bms_alerts():
+    if not _bms_collector:
+        return jsonify({"ok": False, "error": "BMS collector not initialized"}), 503
+    start_ts = float(request.args.get('start', 0)) or None
+    end_ts   = float(request.args.get('end',   0)) or None
+    limit    = min(int(request.args.get('limit', 500)), 5000)
+    data = _bms_collector.query_alerts(start_ts, end_ts, limit)
+    return jsonify({"ok": True, "data": data})
+
+@app.route('/api/bms/config', methods=['GET', 'POST'])
+def api_bms_config():
+    if not _bms_collector:
+        return jsonify({"ok": False, "error": "BMS collector not initialized"}), 503
+    if request.method == 'GET':
+        return jsonify({"ok": True, "data": _bms_collector.get_config()})
+    body = request.get_json(force=True, silent=True) or {}
+    try:
+        _bms_collector.update_config(body)
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+
+@app.route('/api/bms/messages', methods=['GET'])
+def api_bms_messages():
+    """返回数据库中所有消息分组及其信号最新值（用于看板分组展示）。"""
+    if not _bms_collector:
+        return jsonify({"ok": False, "error": "BMS collector not initialized"}), 503
+    import sqlite3 as _sq
+    try:
+        db_path = _bms_collector._db_path
+        with _sq.connect(db_path) as conn:
+            conn.row_factory = _sq.Row
+            rows = conn.execute("""
+                SELECT r.ts, r.can_id, r.msg_name, r.signal_name, r.value, r.unit, r.channel
+                FROM bms_records r
+                INNER JOIN (
+                    SELECT signal_name, MAX(ts) AS mts
+                    FROM bms_records GROUP BY signal_name
+                ) latest ON r.signal_name = latest.signal_name AND r.ts = latest.mts
+                ORDER BY r.msg_name, r.signal_name
+            """).fetchall()
+        groups = {}
+        for row in rows:
+            mn = row["msg_name"] or "unknown"
+            groups.setdefault(mn, []).append({
+                "ts":          row["ts"],
+                "can_id":      row["can_id"],
+                "signal_name": row["signal_name"],
+                "value":       row["value"],
+                "unit":        row["unit"],
+                "channel":     row["channel"],
+            })
+        return jsonify({"ok": True, "data": groups})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+@app.route('/api/bms/export', methods=['GET'])
+def api_bms_export():
+    if not _bms_collector:
+        return jsonify({"ok": False, "error": "BMS collector not initialized"}), 503
+    signal_names_raw = request.args.get('signals', '')
+    signal_names = [s.strip() for s in signal_names_raw.split(',') if s.strip()] or None
+    start_ts = float(request.args.get('start', 0)) or None
+    end_ts   = float(request.args.get('end',   0)) or None
+    limit    = min(int(request.args.get('limit', 50000)), 200000)
+    fname = f"bms_export_{int(time.time())}.csv"
+    return Response(
+        stream_with_context(_bms_collector.export_csv(signal_names, start_ts, end_ts, limit)),
+        mimetype='text/csv',
+        headers={
+            'Content-Disposition': f'attachment; filename="{fname}"',
+            'Cache-Control': 'no-store',
+        }
+    )
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#   CAN-MQTT 规则 Excel 导入 / 导出
+# ═══════════════════════════════════════════════════════════════════════
+
+@app.route('/api/rules/template', methods=['GET'])
+def api_rules_template():
+    """下载 Excel 规则模板"""
+    return send_from_directory(
+        app.static_folder,
+        'can_mqtt_rules_template.xlsx',
+        as_attachment=True,
+        download_name='can_mqtt_rules_template.xlsx'
+    )
+
+@app.route('/api/rules/import_excel', methods=['POST'])
+def api_rules_import_excel():
+    """
+    上传 Excel 文件 → 转换为 JSON 规则 → 推送到设备
+    multipart/form-data  字段 file=<xlsx>
+    可选 query param: push=1 (default) 推送到设备; push=0 仅返回 JSON 预览
+    """
+    import io, sys
+    _tools_dir = os.path.join(SERVER_DIR, '..', 'tools')
+    if _tools_dir not in sys.path:
+        sys.path.insert(0, os.path.abspath(_tools_dir))
+    try:
+        from can_mqtt_excel import excel_to_rules  # type: ignore
+    except ImportError as e:
+        return jsonify({"ok": False, "error": f"导入模块缺失: {e}"}), 500
+
+    if 'file' not in request.files:
+        return jsonify({"ok": False, "error": "缺少 file 字段"}), 400
+    f = request.files['file']
+    if not f.filename.lower().endswith('.xlsx'):
+        return jsonify({"ok": False, "error": "仅支持 .xlsx 格式"}), 400
+
+    try:
+        import tempfile
+        with tempfile.NamedTemporaryFile(suffix='.xlsx', delete=False) as tmp:
+            f.save(tmp.name)
+            tmp_path = tmp.name
+        rules_obj = excel_to_rules(tmp_path)
+        os.unlink(tmp_path)
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"Excel 解析失败: {e}"}), 400
+
+    rule_count = len(rules_obj.get("rules", []))
+    push = request.args.get('push', '1') != '0'
+
+    if push:
+        # 推送到设备
+        device_ip = getattr(cfg, 'DEVICE_IP', '192.168.100.100')
+        json_str  = json.dumps(rules_obj, ensure_ascii=False)
+        ok, resp = _device_proxy_json(
+            device_ip, '/api/rules',
+            method='POST',
+            body=json_str.encode('utf-8'),
+            content_type='application/json'
+        )
+        if ok:
+            return jsonify({
+                "ok": True,
+                "rule_count": rule_count,
+                "device_response": resp,
+                "message": f"已成功导入 {rule_count} 条规则并推送到设备"
+            })
+        else:
+            # 推送失败：保存到本地文件，等待设备上线后手动同步
+            save_path = os.path.join(SERVER_DIR, 'uploads', 'can_mqtt_rules.json')
+            with open(save_path, 'w', encoding='utf-8') as sf:
+                json.dump(rules_obj, sf, ensure_ascii=False, indent=2)
+            return jsonify({
+                "ok": True,
+                "rule_count": rule_count,
+                "push_failed": True,
+                "saved_to": save_path,
+                "message": f"已解析 {rule_count} 条规则，设备不可达，规则已保存到服务端（设备上线后可重新推送）"
+            })
+    else:
+        return jsonify({
+            "ok": True,
+            "rule_count": rule_count,
+            "rules": rules_obj
+        })
+
+@app.route('/api/rules/export_excel', methods=['GET'])
+def api_rules_export_excel():
+    """将本地缓存规则导出为 Excel（优先本地缓存，避免设备超时）"""
+    import sys as _sys
+    _tools_dir = os.path.join(SERVER_DIR, '..', 'tools')
+    if _tools_dir not in _sys.path:
+        _sys.path.insert(0, os.path.abspath(_tools_dir))
+    try:
+        from can_mqtt_excel import rules_to_excel  # type: ignore
+    except ImportError as e:
+        return jsonify({"ok": False, "error": f"导入模块缺失: {e}"}), 500
+
+    # 优先使用本地缓存（速度快、不依赖设备连接）
+    cache = os.path.join(SERVER_DIR, 'uploads', 'can_mqtt_rules.json')
+    if os.path.exists(cache):
+        with open(cache, 'r', encoding='utf-8') as rf:
+            rules_obj = json.load(rf)
+    else:
+        # 尝试从设备获取
+        device_ip = getattr(cfg, 'DEVICE_IP', '192.168.100.100')
+        ok, rules_obj = _device_proxy_json(device_ip, '/api/rules', method='GET')
+        if not ok:
+            return jsonify({"ok": False, "error": "本地无规则缓存且设备不可达"}), 503
+
+    import tempfile
+    with tempfile.NamedTemporaryFile(suffix='.xlsx', delete=False) as tmp:
+        tmp_path = tmp.name
+    try:
+        rules_to_excel(rules_obj, tmp_path)
+        with open(tmp_path, 'rb') as xf:
+            data = xf.read()
+    finally:
+        try:
+            os.unlink(tmp_path)
+        except Exception:
+            pass
+
+    fname = f"can_mqtt_rules_{int(time.time())}.xlsx"
+    return Response(
+        data,
+        mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        headers={
+            'Content-Disposition': f'attachment; filename="{fname}"',
+            'Cache-Control': 'no-store',
+        }
+    )
+
+@app.route('/api/rules/push_local', methods=['POST'])
+def api_rules_push_local():
+    """将本地保存的 can_mqtt_rules.json 推送到设备"""
+    cache = os.path.join(SERVER_DIR, 'uploads', 'can_mqtt_rules.json')
+    if not os.path.exists(cache):
+        return jsonify({"ok": False, "error": "本地无规则缓存"}), 404
+    with open(cache, 'r', encoding='utf-8') as rf:
+        rules_obj = json.load(rf)
+    device_ip = getattr(cfg, 'DEVICE_IP', '192.168.100.100')
+    ok, resp = _device_proxy_json(
+        device_ip, '/api/rules', method='POST',
+        body=json.dumps(rules_obj, ensure_ascii=False).encode('utf-8'),
+        content_type='application/json'
+    )
+    return jsonify({"ok": ok, "device_response": resp,
+                    "rule_count": len(rules_obj.get("rules", []))})
+
+@app.route('/rules')
+def rules_page():
+    """CAN-MQTT 规则管理页面"""
+    resp = send_from_directory(app.static_folder, 'can_mqtt_rules.html')
+    resp.headers['Cache-Control'] = 'no-store, no-cache'
+    return resp
+
+@app.route('/rules/editor')
+def rules_editor_page():
+    """CAN-MQTT 信号解析规则编辑器"""
+    resp = send_from_directory(app.static_folder, 'rules_editor.html')
+    resp.headers['Cache-Control'] = 'no-store, no-cache'
+    return resp
+
+@app.route('/api/rules/editor', methods=['GET'])
+def api_rules_editor():
+    """返回规则列表 + BMS DB 最新信号值（用于规则编辑器）。"""
+    cache = os.path.join(SERVER_DIR, 'uploads', 'can_mqtt_rules.json')
+    if not os.path.exists(cache):
+        return jsonify({"ok": False, "error": "本地无规则缓存，请先从设备同步或上传规则文件"}), 404
+    with open(cache, 'r', encoding='utf-8') as rf:
+        rules_obj = json.load(rf)
+
+    # 从 BMS 数据库获取各信号最新值
+    live_map = {}   # signal_name -> {value, unit, ts}
+    if _bms_collector:
+        try:
+            rows = _bms_collector.query_latest_values()
+            for r in rows:
+                live_map[r['signal_name']] = {
+                    'value': r['value'],
+                    'unit':  r.get('unit', ''),
+                    'ts':    r.get('ts', 0),
+                }
+        except Exception:
+            pass
+
+    # 为每条规则附加 live_value
+    # 规则 JSON 使用嵌套结构: source.signal_name
+    for rule in rules_obj.get('rules', []):
+        sn = (rule.get('source') or rule).get('signal_name', '')
+        if sn and sn in live_map:
+            rule['_live'] = live_map[sn]
+
+    return jsonify({"ok": True, "data": rules_obj})
+
+@app.route('/api/rules/save', methods=['POST'])
+def api_rules_save():
+    """保存编辑后的规则到本地文件，并推送到设备。
+    Body: {"rules": [...]} 或 {"patch": [{id, field, value}, ...]}
+    """
+    body = request.get_json(force=True, silent=True) or {}
+    cache = os.path.join(SERVER_DIR, 'uploads', 'can_mqtt_rules.json')
+
+    if 'patch' in body:
+        # 增量更新：只更新指定字段
+        if not os.path.exists(cache):
+            return jsonify({"ok": False, "error": "无本地规则文件"}), 404
+        with open(cache, 'r', encoding='utf-8') as rf:
+            rules_obj = json.load(rf)
+        id_map = {r['id']: r for r in rules_obj.get('rules', [])}
+        changes = 0
+        for patch in body['patch']:
+            rid   = patch.get('id')
+            field = patch.get('field')
+            value = patch.get('value')
+            if rid not in id_map or not field:
+                continue
+            rule = id_map[rid]
+            # 支持点路径: decode.start_bit, decode.factor, mqtt.topic_template, etc.
+            parts = field.split('.')
+            obj = rule
+            for p in parts[:-1]:
+                obj = obj.setdefault(p, {})
+            obj[parts[-1]] = value
+            changes += 1
+        with open(cache, 'w', encoding='utf-8') as wf:
+            json.dump(rules_obj, wf, ensure_ascii=False, separators=(',', ':'))
+    elif 'rules' in body or 'version' in body:
+        rules_obj = body
+        with open(cache, 'w', encoding='utf-8') as wf:
+            json.dump(rules_obj, wf, ensure_ascii=False, separators=(',', ':'))
+        changes = len(rules_obj.get('rules', []))
+    else:
+        return jsonify({"ok": False, "error": "请提供 rules 或 patch 字段"}), 400
+
+    # 推送到设备
+    device_ip = getattr(cfg, 'DEVICE_IP', '192.168.100.100')
+    with open(cache, 'r', encoding='utf-8') as rf:
+        rules_obj_final = json.load(rf)
+    ok, resp = _device_proxy_json(
+        device_ip, '/api/rules', method='POST',
+        body=json.dumps(rules_obj_final, ensure_ascii=False).encode('utf-8'),
+        content_type='application/json'
+    )
+    rule_cnt = len(rules_obj_final.get('rules', []))
+    return jsonify({"ok": ok, "changes": changes, "rule_count": rule_cnt, "device_response": resp})
+
+
 if __name__ == '__main__':
     try:
         # 打印启动信息
         print_startup_info()
+
+        if False:  # ws_hub removed
+            print(f"❌ WebSocket 服务启动失败: {msg}")
+            print("请先关闭占用端口的旧进程，或修改 WS_LISTEN_PORT 后重试。")
+            raise SystemExit(2)
+
+        can_bind_http, http_bind_err = _can_bind(cfg.WEB_HOST, cfg.WEB_PORT)
+        if not can_bind_http:
+            print(f"❌ HTTP 端口不可用: {cfg.WEB_HOST}:{cfg.WEB_PORT}")
+            print(f"原因: {http_bind_err}")
+            print("请先关闭占用端口的旧进程，或修改 WEB_SERVER_HOST/WEB_SERVER_PORT 后重试。")
+            raise SystemExit(2)
         
         # 启动Flask服务器
         # 在 Windows 上若出现"以一种访问权限不允许的方式做了一个访问套接字的尝试"，

@@ -13,7 +13,11 @@
 #include <time.h>
 #include <sys/time.h>
 #include <sys/stat.h>
+#include <dirent.h>
 #include <errno.h>
+
+/* 默认总大小上限：8 GB */
+#define DEFAULT_MAX_TOTAL_BYTES  (8ULL * 1024 * 1024 * 1024)
 
 /* 录制器上下文 */
 typedef struct {
@@ -25,7 +29,8 @@ typedef struct {
     char record_dir[256];              /* 录制目录 */
     char record_basename[128];         /* 文件基础名 */
     int file_seq;                      /* 文件序号 */
-    uint64_t max_file_size;            /* 最大文件大小 */
+    uint64_t max_file_size;            /* 单文件最大大小 */
+    uint64_t max_total_bytes;          /* 录制目录总大小上限 */
     uint64_t current_file_size;        /* 当前文件大小 */
     
     char *write_buffer;                /* 写入缓冲区 */
@@ -45,9 +50,10 @@ static can_recorder_ctx_t g_recorder = {
     .record_can0 = true,
     .record_can1 = true,
     .record_file = NULL,
-    .max_file_size = 40 * 1024 * 1024,  // 40MB
-    .buffer_size = 256 * 1024,          // 256KB缓冲
-    .flush_interval_ms = 200,           // 200ms刷新
+    .max_file_size   = 40ULL * 1024 * 1024,   /* 40MB / 文件 */
+    .max_total_bytes = DEFAULT_MAX_TOTAL_BYTES, /* 8GB 总上限 */
+    .buffer_size = 256 * 1024,                 /* 256KB 写入缓冲 */
+    .flush_interval_ms = 200,                  /* 200ms 刷新 */
 };
 
 /**
@@ -68,24 +74,119 @@ static int ensure_record_directory(void)
     return 0;
 }
 
+/* ------------------------------------------------------------------ */
+/*  循环录制：扫描目录，按文件名排序，删除最旧的文件直到总大小在上限以下   */
+/* ------------------------------------------------------------------ */
+
+#define MAX_RECORD_FILES 4096
+
+typedef struct {
+    char path[512];
+    uint64_t size;
+} rec_file_info_t;
+
+static int rec_file_cmp(const void *a, const void *b)
+{
+    /* 文件名含时间戳，字典序 = 时间序 */
+    return strcmp(((const rec_file_info_t *)a)->path,
+                  ((const rec_file_info_t *)b)->path);
+}
+
 /**
- * @brief 生成ASC文件头
+ * @brief 扫描录制目录，统计总大小，按需删除最旧文件使总大小 <= max_total_bytes
+ *        调用者无需持锁（只在 open_record_file 内调用，已在 flush_thread 外）
+ */
+static void cleanup_old_records(void)
+{
+    if (g_recorder.max_total_bytes == 0) return;
+
+    DIR *dir = opendir(g_recorder.record_dir);
+    if (!dir) return;
+
+    rec_file_info_t *files = (rec_file_info_t *)malloc(
+                                MAX_RECORD_FILES * sizeof(rec_file_info_t));
+    if (!files) { closedir(dir); return; }
+
+    int count = 0;
+    uint64_t total = 0;
+    struct dirent *ent;
+    while ((ent = readdir(dir)) != NULL && count < MAX_RECORD_FILES) {
+        /* 只处理 .asc 文件 */
+        const char *dot = strrchr(ent->d_name, '.');
+        if (!dot || strcmp(dot, ".asc") != 0) continue;
+
+        char fpath[512];
+        snprintf(fpath, sizeof(fpath), "%s/%s",
+                 g_recorder.record_dir, ent->d_name);
+
+        struct stat st;
+        if (stat(fpath, &st) != 0) continue;
+        if (!S_ISREG(st.st_mode)) continue;
+
+        strncpy(files[count].path, fpath, sizeof(files[count].path) - 1);
+        files[count].path[sizeof(files[count].path) - 1] = '\0';
+        files[count].size = (uint64_t)st.st_size;
+        total += files[count].size;
+        count++;
+    }
+    closedir(dir);
+
+    if (count == 0) { free(files); return; }
+
+    /* 按文件名（时间序）排序 */
+    qsort(files, count, sizeof(rec_file_info_t), rec_file_cmp);
+
+    /* 保留当前正在写的文件，不删除 */
+    const char *current = g_recorder.stats.current_file;
+
+    /* 删除最旧的文件直到 total <= max_total_bytes */
+    int i = 0;
+    while (total > g_recorder.max_total_bytes && i < count) {
+        /* 不删除当前正在写的文件 */
+        if (current[0] && strcmp(files[i].path, current) == 0) {
+            i++;
+            continue;
+        }
+        log_info("循环录制：总大小 %.1f GB 超限，删除最旧文件: %s (%.1f MB)",
+                 (double)total / (1024.0*1024.0*1024.0),
+                 files[i].path,
+                 (double)files[i].size / (1024.0*1024.0));
+        if (remove(files[i].path) == 0) {
+            total -= files[i].size;
+        } else {
+            log_warn("删除旧录制文件失败: %s - %s", files[i].path, strerror(errno));
+        }
+        i++;
+    }
+
+    log_info("录制目录总大小: %.2f GB / %.2f GB (文件数: %d)",
+             (double)total / (1024.0*1024.0*1024.0),
+             (double)g_recorder.max_total_bytes / (1024.0*1024.0*1024.0),
+             count - i);
+
+    free(files);
+}
+
+/**
+ * @brief 生成ASC文件头（使用实际系统时间）
  */
 static void generate_asc_header(char *buffer, size_t size)
 {
     time_t now = time(NULL);
     struct tm *tm_info = localtime(&now);
-    
+
+    /* 格式化日期部分，如 "Thu Apr  2 17:28:00 2026" */
+    char date_str[64];
+    strftime(date_str, sizeof(date_str), "%a %b %e %H:%M:%S %Y", tm_info);
+
     snprintf(buffer, size,
-             "date %s %02d:%02d:%02d.000\n"
+             "date %s\n"
              "base hex  timestamps absolute\n"
              "internal events logged\n"
-             "Begin Triggerblock %s %02d:%02d:%02d.000\n"
+             "Begin Triggerblock %s\n"
              "   0.000000 Start of measurement\n",
-             "Mon Jan 1 00:00:00 2024",
-             tm_info->tm_hour, tm_info->tm_min, tm_info->tm_sec,
-             "Mon Jan 1 00:00:00 2024",
-             tm_info->tm_hour, tm_info->tm_min, tm_info->tm_sec);
+             date_str,
+             date_str);
 }
 
 /**
@@ -98,10 +199,14 @@ static int open_record_file(void)
     
     // 关闭旧文件
     if (g_recorder.record_file) {
+        fprintf(g_recorder.record_file, "End TriggerBlock\n");
         fclose(g_recorder.record_file);
         g_recorder.record_file = NULL;
     }
-    
+
+    // 超总限时删除最旧文件（新文件打开前执行）
+    cleanup_old_records();
+
     // 生成文件名
     snprintf(filepath, sizeof(filepath), "%s/%s_%03d.asc",
              g_recorder.record_dir, g_recorder.record_basename, g_recorder.file_seq);
@@ -193,23 +298,11 @@ static void flush_buffer_to_file(void)
 {
     pthread_mutex_lock(&g_recorder.mutex);
     
-    // 调试：定期打印刷新状态
-    static int flush_count = 0;
-    flush_count++;
-    
-    if (flush_count % 50 == 1) {
-        log_info("刷新状态: buffer_used=%zu, file=%p, recording=%d",
-                 g_recorder.buffer_used, (void*)g_recorder.record_file, g_recorder.recording);
-    }
-    
     if (g_recorder.buffer_used > 0 && g_recorder.record_file) {
-        log_info("刷新缓冲区: %zu字节 -> 文件", g_recorder.buffer_used);
-        
         size_t written = fwrite(g_recorder.write_buffer, 1, g_recorder.buffer_used, g_recorder.record_file);
-        fflush(g_recorder.record_file); // 强制刷新到磁盘
+        fflush(g_recorder.record_file);
         
         if (written == g_recorder.buffer_used) {
-            log_info("写入成功: %zu字节", written);
             g_recorder.current_file_size += written;
             g_recorder.stats.bytes_written += written;
             g_recorder.buffer_used = 0;
@@ -269,7 +362,11 @@ int can_recorder_init(const can_recorder_config_t *config)
         if (config->max_file_size > 0) {
             g_recorder.max_file_size = config->max_file_size;
         }
-        
+
+        if (config->max_total_bytes > 0) {
+            g_recorder.max_total_bytes = config->max_total_bytes;
+        }
+
         if (config->flush_interval_ms > 0) {
             g_recorder.flush_interval_ms = config->flush_interval_ms;
         }
@@ -339,13 +436,38 @@ int can_recorder_start(void)
         return -1;
     }
     
+    /* 等待系统时钟有效（年份 >= 2020），最长等待 30 秒
+     * 设备启动时 RTC 可能还未同步，time(NULL) 会返回 epoch 附近的值 */
+    {
+        time_t now;
+        int waited = 0;
+        do {
+            now = time(NULL);
+            struct tm *t = localtime(&now);
+            if (t && (t->tm_year + 1900) >= 2020) break;
+            if (waited == 0)
+                log_warn("系统时钟无效(year=%d)，等待时钟同步...",
+                         t ? t->tm_year + 1900 : 0);
+            sleep(1);
+            waited++;
+        } while (waited < 30);
+    }
+
     // 生成文件基础名（时间戳）
     time_t now = time(NULL);
     struct tm *tm_info = localtime(&now);
-    snprintf(g_recorder.record_basename, sizeof(g_recorder.record_basename),
-             "can_%04d%02d%02d_%02d%02d%02d",
-             tm_info->tm_year + 1900, tm_info->tm_mon + 1, tm_info->tm_mday,
-             tm_info->tm_hour, tm_info->tm_min, tm_info->tm_sec);
+    if (!tm_info || (tm_info->tm_year + 1900) < 2020) {
+        /* 时钟仍然无效，使用单调计数器代替日期 */
+        static unsigned int seq_counter = 0;
+        snprintf(g_recorder.record_basename, sizeof(g_recorder.record_basename),
+                 "can_seq%06u", ++seq_counter);
+        log_warn("系统时钟仍然无效，使用序列号命名: %s", g_recorder.record_basename);
+    } else {
+        snprintf(g_recorder.record_basename, sizeof(g_recorder.record_basename),
+                 "can_%04d%02d%02d_%02d%02d%02d",
+                 tm_info->tm_year + 1900, tm_info->tm_mon + 1, tm_info->tm_mday,
+                 tm_info->tm_hour, tm_info->tm_min, tm_info->tm_sec);
+    }
     
     log_info("录制文件基础名: %s", g_recorder.record_basename);
     
@@ -453,10 +575,6 @@ void can_recorder_frame_callback(int channel, const can_frame_t *frame, void *us
 {
     (void)user_data;
     
-    // 调试：每100帧打印一次
-    static uint32_t debug_count = 0;
-    debug_count++;
-    
     if (!frame) {
         log_error("录制回调：frame为NULL");
         return;
@@ -465,13 +583,6 @@ void can_recorder_frame_callback(int channel, const can_frame_t *frame, void *us
     if (!g_recorder.recording) {
         // 未录制时静默返回，不输出日志
         return;
-    }
-    
-    // 调试：打印前几个帧
-    if (g_recorder.stats.total_frames < 5) {
-        log_info("录制回调：channel=%d, id=0x%03X, dlc=%d, record_can0=%d, record_can1=%d",
-                 channel, frame->can_id, frame->can_dlc, 
-                 g_recorder.record_can0, g_recorder.record_can1);
     }
     
     // 检查是否录制此通道
@@ -494,12 +605,6 @@ void can_recorder_frame_callback(int channel, const can_frame_t *frame, void *us
         g_recorder.stats.can1_frames++;
     }
     
-    // 每100帧打印一次统计
-    if (g_recorder.stats.total_frames % 100 == 0) {
-        log_info("录制统计: 总帧数=%llu, CAN0=%llu, CAN1=%llu, 缓冲=%zu字节",
-                 g_recorder.stats.total_frames, g_recorder.stats.can0_frames,
-                 g_recorder.stats.can1_frames, g_recorder.buffer_used);
-    }
     
     pthread_mutex_unlock(&g_recorder.mutex);
 }

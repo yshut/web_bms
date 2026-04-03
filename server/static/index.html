@@ -4,7 +4,6 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>设备主页</title>
-  <link rel="icon" href="/static/dashboard/favicon.ico">
   <link rel="stylesheet" href="/static/shared.css">
   <style>
     :root { --bg:#0b2447; --panel:#0d366b40; --border:#3f8cff4d; --text:#d7e3ff; --acc:#7fb3ff; }
@@ -31,23 +30,23 @@
   <div class="container">
     <div class="title">
       <h1>设备主页</h1>
-      <div class="row"><a href="/dashboard">进入仪表盘</a></div>
+      <div class="row"><a href="/can">进入 CAN 监控</a></div>
     </div>
 
     <div class="grid">
       <div class="panel">
         <div style="font-weight:bold; margin-bottom:8px">快速入口</div>
         <ul class="links">
-          <li><a href="/can">🚗 CAN 监控</a> <span class="hint">(新)</span></li>
-          <li><a href="/test">🧪 API 测试工具</a></li>
-          <li><a href="/dashboard">📊 实时仪表盘</a></li>
-          <li><a href="/dbc">📝 DBC 解析工具</a></li>
+          <li><a href="/device_config">⚙️ 设备配置</a></li>
+          <li><a href="/can">🚗 CAN 监控</a></li>
+          <li><a href="/hardware">🖥️ 硬件监控</a></li>
+          <li><a href="/dbc">📝 DBC 解析</a></li>
           <li><a href="/uds">🔧 UDS 固件刷写</a></li>
-          <li><a href="/static/file_manager.html">📁 文件管理</a></li>
-          <li><a href="/static/can_test.html">🔬 CAN 测试 (旧版)</a></li>
+          <li><a href="/rules">⚙️ CAN-MQTT 规则管理</a></li>
+          <li><a href="/bms">📊 BMS 时序数据库</a></li>
         </ul>
         <div class="hint" style="margin-top:12px">
-          💡 提示：主页仅提供入口导航；连接/设备状态请在各功能页查看（例如 CAN 监控页）。
+          当前首页只保留主流程入口；调试类和旧版工具页已从导航中移除。
         </div>
       </div>
     </div>

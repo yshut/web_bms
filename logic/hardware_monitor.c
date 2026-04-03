@@ -5,7 +5,7 @@
 
 #include "hardware_monitor.h"
 #include "can_handler.h"
-#include "ws_client.h"
+#include "remote_transport.h"
 #include "../utils/logger.h"
 #include "../utils/app_config.h"
 #include <stdio.h>
@@ -213,11 +213,28 @@ static int update_can_status(const char *interface, hw_can_status_t *status)
             }
         }
         
-        /* 解析统计信息 */
-        if (strstr(line, "RX:")) {
-            char *p = strstr(line, "bytes");
-            if (p) {
-                // 可以进一步解析字节数和帧数
+        /* 解析统计信息：
+         * ip -s 输出格式:
+         *   RX: bytes  packets  errors  dropped overrun mcast
+         *   <数值行>
+         *   TX: bytes  packets  errors  dropped carrier collsns
+         *   <数值行>
+         */
+        if (strstr(line, "RX:") && strstr(line, "packets")) {
+            /* 下一行是 RX 数值 */
+            if (fgets(line, sizeof(line), fp)) {
+                unsigned long rx_bytes=0, rx_pkts=0, rx_err=0;
+                sscanf(line, " %lu %lu %lu", &rx_bytes, &rx_pkts, &rx_err);
+                status->rx_count    = (uint32_t)rx_pkts;
+                status->error_count = (uint32_t)rx_err;
+            }
+        }
+        if (strstr(line, "TX:") && strstr(line, "packets")) {
+            /* 下一行是 TX 数值 */
+            if (fgets(line, sizeof(line), fp)) {
+                unsigned long tx_bytes=0, tx_pkts=0;
+                sscanf(line, " %lu %lu", &tx_bytes, &tx_pkts);
+                status->tx_count = (uint32_t)tx_pkts;
             }
         }
     }
@@ -228,15 +245,6 @@ static int update_can_status(const char *interface, hw_can_status_t *status)
         status->status = HW_STATUS_OFFLINE;
         snprintf(status->last_error, sizeof(status->last_error), "Interface not found");
         return -1;
-    }
-    
-    /* 从 can_handler 获取统计信息 */
-    if (can_handler_is_running()) {
-        can_stats_t stats;
-        can_handler_get_stats(&stats);
-        status->rx_count = stats.rx_count;
-        status->tx_count = stats.tx_count;
-        status->error_count = stats.error_count;
     }
     
     return 0;
@@ -292,12 +300,41 @@ static int update_system_status(hw_system_status_t *status)
     if (sysinfo(&info) != 0) {
         return -1;
     }
-    
-    status->memory_total = info.totalram / 1024;
-    status->memory_free = info.freeram / 1024;
-    status->memory_used = status->memory_total - status->memory_free;
-    status->memory_usage = (float)status->memory_used / status->memory_total * 100.0f;
+
     status->uptime_seconds = info.uptime;
+
+    /* 从 /proc/meminfo 读取 MemTotal / MemAvailable（与 LuCI 一致） */
+    {
+        uint64_t mem_total_kb = 0, mem_available_kb = 0, mem_free_kb = 0;
+        FILE *mfp = fopen("/proc/meminfo", "r");
+        if (mfp) {
+            char mline[128];
+            while (fgets(mline, sizeof(mline), mfp)) {
+                uint64_t v = 0;
+                if (sscanf(mline, "MemTotal: %llu kB", (unsigned long long *)&v) == 1)
+                    mem_total_kb = v;
+                else if (sscanf(mline, "MemAvailable: %llu kB", (unsigned long long *)&v) == 1)
+                    mem_available_kb = v;
+                else if (sscanf(mline, "MemFree: %llu kB", (unsigned long long *)&v) == 1)
+                    mem_free_kb = v;
+            }
+            fclose(mfp);
+        }
+        if (mem_total_kb == 0) {
+            /* /proc/meminfo 不可用时回退到 sysinfo */
+            mem_total_kb     = info.totalram / 1024;
+            mem_free_kb      = info.freeram  / 1024;
+            mem_available_kb = mem_free_kb;
+        }
+        if (mem_available_kb == 0) mem_available_kb = mem_free_kb;
+        status->memory_total = mem_total_kb;
+        /* memory_free 存储 MemAvailable，与 LuCI 保持一致 */
+        status->memory_free  = mem_available_kb;
+        status->memory_used  = mem_total_kb > mem_available_kb
+                               ? (mem_total_kb - mem_available_kb) : 0;
+        status->memory_usage = mem_total_kb > 0
+                               ? (float)status->memory_used / mem_total_kb * 100.0f : 0.0f;
+    }
     
     /* 读取CPU使用率（简化版：从/proc/stat） */
     FILE *fp = fopen("/proc/stat", "r");
@@ -489,17 +526,13 @@ int hw_monitor_get_status_json(char *buffer, size_t buffer_size)
  */
 void hw_monitor_report_now(void)
 {
-    if (!ws_client_is_connected()) {
+    if (!remote_transport_is_connected()) {
         return;
     }
     
     char status_json[4096];
     if (hw_monitor_get_status_json(status_json, sizeof(status_json)) == 0) {
-        char message[5120];
-        snprintf(message, sizeof(message),
-                "{\"event\":\"hardware_status\",\"data\":%s}",
-                status_json);
-        ws_client_send_json(message);
+        remote_transport_publish_event("hardware_status", status_json);
         log_debug("硬件状态已上报");
     }
 }
@@ -539,7 +572,7 @@ static void* monitor_thread_func(void *arg)
         pthread_mutex_unlock(&g_hw_ctx.mutex);
         
         /* 定期上报 */
-        if (g_hw_ctx.config.enable_auto_report && ws_client_is_connected()) {
+        if (g_hw_ctx.config.enable_auto_report && remote_transport_is_connected()) {
             if (now_ms - g_hw_ctx.last_report_ms >= g_hw_ctx.config.report_interval_ms) {
                 hw_monitor_report_now();
                 g_hw_ctx.last_report_ms = now_ms;

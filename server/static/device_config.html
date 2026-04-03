@@ -1,0 +1,700 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>设备配置 - T113-S3</title>
+<link rel="stylesheet" href="/static/shared.css">
+<style>
+:root{--bg:#0f172a;--bg2:#1e293b;--bg3:#334155;--acc:#0284c7;--acc2:#0ea5e9;--txt:#f1f5f9;--txt2:#94a3b8;--ok:#22c55e;--err:#ef4444;--warn:#f59e0b}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--txt);font-family:'Segoe UI',system-ui,sans-serif;font-size:14px}
+.topbar{background:var(--bg2);border-bottom:1px solid var(--bg3);padding:10px 20px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.topbar h1{font-size:16px;font-weight:600;color:var(--txt)}
+.device-sel{display:flex;align-items:center;gap:8px;margin-left:auto}
+.device-sel label{color:var(--txt2);font-size:13px}
+.device-sel input{background:var(--bg3);border:1px solid #475569;color:var(--txt);padding:5px 10px;border-radius:6px;font-size:13px;width:160px}
+.status-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0}
+.dok{background:var(--ok)}.derr{background:var(--err)}.dwarn{background:var(--warn)}
+.badge{display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600}
+.bok{background:#166534;color:#bbf7d0}.berr{background:#7f1d1d;color:#fecaca}.bwarn{background:#78350f;color:#fde68a}
+.nav{background:var(--bg2);border-bottom:1px solid var(--bg3);display:flex;gap:2px;padding:0 16px;overflow-x:auto}
+.nav button{background:none;border:none;color:var(--txt2);padding:11px 16px;cursor:pointer;border-bottom:2px solid transparent;font-size:13px;white-space:nowrap;transition:.15s}
+.nav button:hover{color:var(--txt)}
+.nav button.active{color:var(--acc2);border-bottom-color:var(--acc2)}
+.tab{display:none;padding:20px;max-width:900px;margin:0 auto}
+.tab.active{display:block}
+.card{background:var(--bg2);border:1px solid var(--bg3);border-radius:10px;padding:18px;margin-bottom:16px}
+.card h3{font-size:13px;font-weight:600;color:var(--txt2);margin-bottom:14px;text-transform:uppercase;letter-spacing:.05em}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px}
+.row.w1{grid-template-columns:1fr}
+label.lbl{display:block;font-size:12px;color:var(--txt2);margin-bottom:4px}
+input,select,textarea{width:100%;background:var(--bg3);border:1px solid #475569;color:var(--txt);padding:8px 10px;border-radius:6px;font-size:13px}
+input:focus,select:focus,textarea:focus{outline:none;border-color:var(--acc)}
+textarea{resize:vertical;font-family:monospace;font-size:12px}
+.btn{padding:8px 18px;border:none;border-radius:6px;cursor:pointer;font-size:13px;font-weight:500;transition:.15s}
+.btn:hover{opacity:.85}.btn:disabled{opacity:.5;cursor:default}
+.btn-p{background:var(--acc);color:#fff}
+.btn-s{background:var(--bg3);color:var(--txt)}
+.btn-d{background:#7f1d1d;color:#fecaca}
+.msg{margin-top:8px;font-size:13px;min-height:20px;transition:.3s}
+.mok{color:var(--ok)}.merr{color:var(--err)}
+.prog-wrap{background:var(--bg3);border-radius:3px;height:6px;margin-top:4px}
+.prog-bar{height:6px;border-radius:3px;transition:.3s}
+.info-grid{display:grid;grid-template-columns:auto 1fr;gap:6px 16px;font-size:13px}
+.info-grid .ik{color:var(--txt2)}
+.info-grid .iv{font-family:monospace}
+table{width:100%;border-collapse:collapse;font-size:13px}
+table th{background:var(--bg3);padding:8px 10px;text-align:left;font-weight:600;color:var(--txt2)}
+table td{padding:8px 10px;border-top:1px solid var(--bg3)}
+table tr:hover td{background:#1e293b55}
+.tag{display:inline-block;padding:1px 6px;border-radius:4px;font-size:11px}
+.tag-ok{background:#14532d;color:#86efac}
+.tag-err{background:#7f1d1d;color:#fca5a5}
+.mon-box{background:#0a0f1e;border:1px solid var(--bg3);border-radius:8px;height:320px;overflow-y:auto;font-family:monospace;font-size:12px;padding:10px}
+.mon-row{display:grid;grid-template-columns:90px 60px 80px 30px 1fr;gap:4px;padding:2px 0;border-bottom:1px solid #1e293b33}
+.mon-hdr{color:var(--txt2);font-weight:600;border-bottom:1px solid var(--bg3)!important;margin-bottom:4px}
+.offline-banner{text-align:center;padding:40px;color:var(--txt2)}
+.offline-banner .ico{font-size:48px;margin-bottom:12px}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div style="display:flex;align-items:center;gap:8px">
+    <span class="status-dot" id="conn-dot" style="background:var(--warn)"></span>
+    <h1>T113-S3 设备配置</h1>
+    <span id="conn-label" style="color:var(--txt2);font-size:12px">连接中...</span>
+  </div>
+  <div class="device-sel">
+    <label>设备 IP:</label>
+    <input id="device-ip" value="192.168.100.100" placeholder="192.168.100.100">
+    <button class="btn btn-s" onclick="connectDevice()" style="padding:5px 12px">连接</button>
+  </div>
+  <div id="dev-info" style="font-size:12px;color:var(--txt2);margin-left:8px"></div>
+</div>
+
+<nav class="nav">
+  <button class="active" onclick="sw('hw',this)">硬件监控</button>
+  <button onclick="sw('sys',this)">系统配置</button>
+  <button onclick="sw('net',this)">网络配置</button>
+  <button onclick="sw('can',this)">CAN 配置</button>
+  <button onclick="sw('rules',this)">CAN-MQTT 规则</button>
+  <button onclick="sw('mon',this)">CAN 监控</button>
+</nav>
+
+<!-- ===== 硬件监控 ===== -->
+<div id="tab-hw" class="tab active">
+  <div id="hw-offline" class="offline-banner" style="display:none">
+    <div class="ico">⚠️</div>
+    <div>设备离线或 IP 错误，请检查连接</div>
+  </div>
+  <div id="hw-content">
+    <div class="row">
+      <div class="card">
+        <h3>系统</h3>
+        <div class="info-grid">
+          <span class="ik">CPU</span><span class="iv" id="hw-cpu">--</span>
+          <span class="ik">内存</span><span class="iv" id="hw-mem">--</span>
+          <span class="ik">运行时间</span><span class="iv" id="hw-uptime">--</span>
+        </div>
+      </div>
+      <div class="card">
+        <h3>网络</h3>
+        <div id="hw-net">--</div>
+      </div>
+    </div>
+    <div class="card">
+      <h3>存储</h3>
+      <div id="hw-stor">--</div>
+    </div>
+    <div class="card">
+      <h3>CAN</h3>
+      <div id="hw-can">--</div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== 系统配置 ===== -->
+<div id="tab-sys" class="tab">
+  <div class="card">
+    <h3>传输模式</h3>
+    <div class="row w1"><div>
+      <label class="lbl">模式</label>
+      <select id="t-mode"><option value="mqtt">MQTT</option><option value="websocket">WebSocket</option></select>
+    </div></div>
+  </div>
+  <div class="card">
+    <h3>MQTT 配置</h3>
+    <div class="row">
+      <div><label class="lbl">服务器地址</label><input id="m-host" placeholder="192.168.100.1"></div>
+      <div><label class="lbl">端口</label><input id="m-port" type="number" value="1883"></div>
+    </div>
+    <div class="row">
+      <div><label class="lbl">Topic 前缀</label><input id="m-prefix" placeholder="app_lvgl"></div>
+      <div><label class="lbl">QoS</label><select id="m-qos"><option>0</option><option>1</option><option>2</option></select></div>
+    </div>
+    <div class="row">
+      <div><label class="lbl">Client ID</label><input id="m-cid"></div>
+      <div><label class="lbl">Keepalive (s)</label><input id="m-ka" type="number" value="60"></div>
+    </div>
+    <div class="row">
+      <div><label class="lbl">用户名</label><input id="m-user"></div>
+      <div><label class="lbl">密码</label><input id="m-pass" type="password"></div>
+    </div>
+  </div>
+  <div class="card">
+    <h3>WebSocket 配置</h3>
+    <div class="row">
+      <div><label class="lbl">服务器地址</label><input id="w-host" placeholder="192.168.100.1"></div>
+      <div><label class="lbl">端口</label><input id="w-port" type="number" value="5052"></div>
+    </div>
+    <div class="row w1"><div><label class="lbl">路径</label><input id="w-path" value="/ws"></div></div>
+  </div>
+  <button class="btn btn-p" onclick="saveSys()">保存（重启后生效）</button>
+  <button class="btn btn-s" onclick="loadSys()" style="margin-left:8px">重新加载</button>
+  <div class="msg" id="sys-msg"></div>
+</div>
+
+<!-- ===== 网络配置 ===== -->
+<div id="tab-net" class="tab">
+  <div class="card">
+    <h3>以太网</h3>
+    <div class="row">
+      <div><label class="lbl">网卡</label><input id="n-iface" value="eth0"></div>
+      <div><label class="lbl">DHCP</label>
+        <select id="n-dhcp" onchange="tDhcp()">
+          <option value="false">静态 IP</option>
+          <option value="true">DHCP</option>
+        </select>
+      </div>
+    </div>
+    <div id="n-static">
+      <div class="row">
+        <div><label class="lbl">IP 地址</label><input id="n-ip" placeholder="192.168.100.100"></div>
+        <div><label class="lbl">子网掩码</label><input id="n-mask" placeholder="255.255.255.0"></div>
+      </div>
+      <div class="row w1"><div><label class="lbl">默认网关</label><input id="n-gw" placeholder="192.168.100.1"></div></div>
+    </div>
+  </div>
+  <button class="btn btn-p" onclick="saveNet()">保存并应用</button>
+  <button class="btn btn-s" onclick="loadNet()" style="margin-left:8px">重新加载</button>
+  <div class="msg" id="net-msg"></div>
+  <p style="color:var(--warn);font-size:12px;margin-top:8px">⚠ 修改 IP 后设备将以新地址响应，请同步修改上方"设备 IP"并重新连接。</p>
+</div>
+
+<!-- ===== CAN 配置 ===== -->
+<div id="tab-can" class="tab">
+  <div class="card">
+    <h3>波特率</h3>
+    <div class="row">
+      <div>
+        <label class="lbl">CAN0</label>
+        <select id="c0-baud">
+          <option value="1000000">1Mbps</option>
+          <option value="800000">800kbps</option>
+          <option value="500000" selected>500kbps</option>
+          <option value="250000">250kbps</option>
+          <option value="125000">125kbps</option>
+          <option value="100000">100kbps</option>
+        </select>
+      </div>
+      <div>
+        <label class="lbl">CAN1</label>
+        <select id="c1-baud">
+          <option value="1000000">1Mbps</option>
+          <option value="800000">800kbps</option>
+          <option value="500000" selected>500kbps</option>
+          <option value="250000">250kbps</option>
+          <option value="125000">125kbps</option>
+          <option value="100000">100kbps</option>
+        </select>
+      </div>
+    </div>
+    <div class="row">
+      <div>
+        <label class="lbl">CAN0 自动检测</label>
+        <select id="c0-auto"><option value="false">否（使用上方值）</option><option value="true">是</option></select>
+      </div>
+      <div>
+        <label class="lbl">CAN1 自动检测</label>
+        <select id="c1-auto"><option value="false">否</option><option value="true">是</option></select>
+      </div>
+    </div>
+  </div>
+  <div class="card">
+    <h3>CAN 录制</h3>
+    <div class="row">
+      <div><label class="lbl">录制目录</label><input id="c-rdir" value="/mnt/SDCARD/can_records"></div>
+      <div><label class="lbl">单文件最大 (MB)</label><input id="c-rmb" type="number" value="40"></div>
+    </div>
+  </div>
+  <button class="btn btn-p" onclick="saveCan()">保存</button>
+  <button class="btn btn-s" onclick="loadSys()" style="margin-left:8px">重新加载</button>
+  <div class="msg" id="can-msg"></div>
+</div>
+
+<!-- ===== CAN-MQTT 规则 ===== -->
+<div id="tab-rules" class="tab">
+  <div style="display:flex;gap:8px;margin-bottom:14px;align-items:center">
+    <button class="btn btn-p" onclick="addRule()">+ 新增规则</button>
+    <button class="btn btn-s" onclick="loadRules()">刷新</button>
+    <span style="color:var(--txt2);font-size:12px">共 <b id="rule-count">0</b> 条规则</span>
+    <span class="msg" id="rules-msg" style="margin:0;margin-left:auto"></span>
+  </div>
+  <div id="rules-list"></div>
+  <div id="rule-editor" style="display:none" class="card">
+    <h3 id="re-title">编辑规则</h3>
+    <div class="row">
+      <div><label class="lbl">规则名称</label><input id="re-name"></div>
+      <div><label class="lbl">CAN ID (十六进制，如 08C)</label><input id="re-id" placeholder="08C"></div>
+    </div>
+    <div class="row">
+      <div><label class="lbl">接口</label>
+        <select id="re-iface"><option value="can0">can0</option><option value="can1">can1</option><option value="any">any（两路）</option></select>
+      </div>
+      <div><label class="lbl">字节序</label>
+        <select id="re-bo"><option value="little_endian">小端（Intel）</option><option value="big_endian">大端（Motorola）</option></select>
+      </div>
+    </div>
+    <div class="row">
+      <div><label class="lbl">起始位</label><input id="re-sb" type="number" value="0"></div>
+      <div><label class="lbl">位长度</label><input id="re-bl" type="number" value="8"></div>
+    </div>
+    <div class="row">
+      <div><label class="lbl">系数 (factor)</label><input id="re-factor" type="number" step="any" value="1"></div>
+      <div><label class="lbl">偏移 (offset)</label><input id="re-offset" type="number" step="any" value="0"></div>
+    </div>
+    <div class="row w1">
+      <div><label class="lbl">MQTT Topic（支持 {id} {iface} 变量）</label><input id="re-topic" placeholder="can/{iface}/signal"></div>
+    </div>
+    <div class="row">
+      <div><label class="lbl">发布模式</label>
+        <select id="re-pm">
+          <option value="value">数值</option>
+          <option value="json">JSON对象</option>
+          <option value="raw_hex">原始HEX</option>
+        </select>
+      </div>
+      <div><label class="lbl">QoS</label>
+        <select id="re-qos"><option>0</option><option>1</option><option>2</option></select>
+      </div>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:12px">
+      <button class="btn btn-p" onclick="saveRule()">保存规则</button>
+      <button class="btn btn-s" onclick="cancelRule()">取消</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== CAN 监控 ===== -->
+<div id="tab-mon" class="tab">
+  <div style="display:flex;gap:8px;margin-bottom:12px;align-items:center;flex-wrap:wrap">
+    <button class="btn btn-p" id="mon-btn" onclick="toggleMon()">▶ 开始监控</button>
+    <button class="btn btn-s" onclick="clearMon()">清空</button>
+    <label style="display:flex;align-items:center;gap:6px;color:var(--txt2);font-size:13px">
+      <input type="checkbox" id="mon-scroll" checked style="width:auto"> 自动滚动
+    </label>
+    <span style="color:var(--txt2);font-size:12px">已收 <b id="mon-count">0</b> 帧</span>
+    <label style="display:flex;align-items:center;gap:6px;color:var(--txt2);font-size:13px;margin-left:auto">
+      过滤 ID:
+      <input id="mon-filter" placeholder="如 08C" style="width:80px;padding:4px 8px">
+    </label>
+  </div>
+  <div class="mon-box" id="mon-box">
+    <div class="mon-row mon-hdr">
+      <span>时间</span><span>接口</span><span>ID</span><span>DLC</span><span>数据</span>
+    </div>
+  </div>
+</div>
+
+<script>
+var gDevIp = '192.168.100.100';
+var gMonTimer = null, gMonRows = [], gMonRunning = false;
+var gr = {version:1, rules:[]}, gei = -1;
+
+function api(path, opts) {
+  return fetch('/api/device/proxy/' + path + '?device=' + gDevIp, opts || {});
+}
+
+function sm(id, ok, t) {
+  var e = document.getElementById(id);
+  e.className = 'msg ' + (ok ? 'mok' : 'merr');
+  e.textContent = (ok ? '✓ ' : '✗ ') + t;
+  setTimeout(function(){ e.textContent=''; e.className='msg'; }, 5000);
+}
+
+function fb(b) {
+  if(b<1024) return b+'B';
+  if(b<1048576) return (b/1024).toFixed(1)+'KB';
+  if(b<1073741824) return (b/1048576).toFixed(1)+'MB';
+  return (b/1073741824).toFixed(2)+'GB';
+}
+
+function fu(s) {
+  var h=Math.floor(s/3600), m=Math.floor((s%3600)/60), sc=s%60;
+  return h+'h '+m+'m '+sc+'s';
+}
+
+function sw(n, b) {
+  document.querySelectorAll('.tab').forEach(function(t){ t.classList.remove('active'); });
+  document.querySelectorAll('.nav button').forEach(function(x){ x.classList.remove('active'); });
+  document.getElementById('tab-'+n).classList.add('active');
+  b.classList.add('active');
+  if(n==='hw') loadHw();
+  if(n==='sys'||n==='can') loadSys();
+  if(n==='net') loadNet();
+  if(n==='rules') loadRules();
+  if(n==='mon') startMon();
+}
+
+function tDhcp() {
+  var dh = document.getElementById('n-dhcp').value === 'true';
+  document.getElementById('n-static').style.display = dh ? 'none' : 'block';
+}
+
+async function connectDevice() {
+  gDevIp = document.getElementById('device-ip').value.trim() || '192.168.100.100';
+  document.getElementById('conn-dot').style.background = 'var(--warn)';
+  document.getElementById('conn-label').textContent = '连接中...';
+  try {
+    var r = await api('status');
+    if (r.ok) {
+      var d = await r.json();
+      document.getElementById('conn-dot').style.background = 'var(--ok)';
+      document.getElementById('conn-label').textContent = '已连接';
+      document.getElementById('dev-info').innerHTML =
+        '<b>ID:</b> '+(d.device_id||'--')+
+        ' &nbsp; <b>运行:</b> '+fu(d.uptime_seconds||0)+
+        ' &nbsp; <b>规则:</b> '+(d.rule_count||0)+
+        ' &nbsp; <b>MQTT:</b> '+(d.mqtt_connected?'<span class="badge bok">在线</span>':'<span class="badge berr">离线</span>');
+      document.getElementById('hw-offline').style.display = 'none';
+      loadHw();
+    } else { throw new Error('HTTP '+r.status); }
+  } catch(e) {
+    document.getElementById('conn-dot').style.background = 'var(--err)';
+    document.getElementById('conn-label').textContent = '连接失败: '+e.message;
+    document.getElementById('hw-offline').style.display = 'block';
+  }
+}
+
+async function loadHw() {
+  try {
+    var [sr, hr] = await Promise.all([api('status'), api('hardware')]);
+    var s = await sr.json(), hw = await hr.json();
+    var sys = hw.system || {};
+    document.getElementById('hw-cpu').textContent = sys.cpu_usage!=null ? sys.cpu_usage.toFixed(1)+'%' : '--';
+    var memFreeStr = sys.memory_free != null ? ' (可用:'+fb(sys.memory_free*1024)+')' : '';
+    document.getElementById('hw-mem').textContent = fb((sys.memory_used||0)*1024)+' / '+fb((sys.memory_total||1)*1024)+memFreeStr;
+    document.getElementById('hw-uptime').textContent = fu(s.uptime_seconds||0);
+
+    var sh = '';
+    (hw.storage||[]).forEach(function(s2){
+      var lbl = s2.label || s2.mount_point;
+      if(!s2.is_mounted){
+        sh += '<div style="margin-bottom:8px;display:flex;justify-content:space-between;align-items:center"><span>'+lbl+'</span><span class="badge" style="background:#475569">未插入</span></div>';
+      } else {
+        var p = s2.total_bytes>0 ? ((s2.used_bytes/s2.total_bytes)*100).toFixed(1) : 0;
+        var bc = p>90?'#ef4444':p>70?'#f59e0b':'#0284c7';
+        sh += '<div style="margin-bottom:10px">';
+        sh += '<div style="display:flex;justify-content:space-between"><span>'+lbl+'</span>';
+        sh += '<span>'+fb(s2.used_bytes)+' / '+fb(s2.total_bytes)+' ('+p+'%)</span></div>';
+        sh += '<div class="prog-wrap"><div class="prog-bar" style="background:'+bc+';width:'+p+'%"></div></div>';
+        sh += '<div style="color:var(--txt2);font-size:11px;margin-top:2px">可用: '+fb(s2.free_bytes)+'</div></div>';
+      }
+    });
+    document.getElementById('hw-stor').innerHTML = sh || '无信息';
+
+    var nh = '';
+    (hw.network||[]).forEach(function(n){
+      nh += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">';
+      nh += '<span class="status-dot '+(n.is_connected?'dok':'derr')+'"></span>';
+      nh += '<b>'+n.interface+'</b> '+(n.ip_address||'无IP');
+      nh += ' <span style="color:var(--txt2)">'+(n.is_connected?'已连接':'未连接')+'</span></div>';
+    });
+    document.getElementById('hw-net').innerHTML = nh || '无信息';
+
+    var ch = '';
+    (hw.can||[]).forEach(function(c){
+      var br = c.bitrate>=1000 ? (c.bitrate/1000).toFixed(0)+'kbps' : (c.bitrate||0)+' bps';
+      ch += '<div style="margin-bottom:5px"><b>'+c.interface+'</b> '+br;
+      ch += ' &nbsp; Rx:<span style="color:var(--ok)">'+(c.rx_count||0)+'</span>';
+      ch += ' Tx:<span style="color:#60a5fa">'+(c.tx_count||0)+'</span></div>';
+    });
+    document.getElementById('hw-can').innerHTML = ch || '无信息';
+  } catch(e) {
+    document.getElementById('hw-offline').style.display = 'block';
+  }
+}
+
+async function loadSys() {
+  try {
+    var r = await api('config'), d = await r.json();
+    document.getElementById('t-mode').value = d.transport_mode||'mqtt';
+    document.getElementById('m-host').value = d.mqtt_host||'';
+    document.getElementById('m-port').value = d.mqtt_port||1883;
+    document.getElementById('m-prefix').value = d.mqtt_topic_prefix||'';
+    document.getElementById('m-qos').value = d.mqtt_qos||0;
+    document.getElementById('m-cid').value = d.mqtt_client_id||'';
+    document.getElementById('m-ka').value = d.mqtt_keepalive||60;
+    document.getElementById('m-user').value = d.mqtt_username||'';
+    document.getElementById('w-host').value = d.ws_host||'';
+    document.getElementById('w-port').value = d.ws_port||5052;
+    document.getElementById('w-path').value = d.ws_path||'/ws';
+    document.getElementById('c0-baud').value = String(d.can0_bitrate||500000);
+    document.getElementById('c1-baud').value = String(d.can1_bitrate||500000);
+    document.getElementById('c0-auto').value = d.can0_bitrate===0?'true':'false';
+    document.getElementById('c1-auto').value = d.can1_bitrate===0?'true':'false';
+    document.getElementById('c-rdir').value = d.can_record_dir||'';
+    document.getElementById('c-rmb').value = d.can_record_max_mb||40;
+    /* 每次打开配置页，自动将设备 CAN 配置同步到服务端缓存 */
+    fetch('/api/device/can_config?device='+gDevIp).catch(()=>{});
+  } catch(e) {}
+}
+
+async function saveSys() {
+  var body = {
+    transport_mode: document.getElementById('t-mode').value,
+    mqtt_host: document.getElementById('m-host').value,
+    mqtt_port: parseInt(document.getElementById('m-port').value)||1883,
+    mqtt_topic_prefix: document.getElementById('m-prefix').value,
+    mqtt_qos: parseInt(document.getElementById('m-qos').value),
+    mqtt_client_id: document.getElementById('m-cid').value,
+    mqtt_keepalive: parseInt(document.getElementById('m-ka').value)||60,
+    mqtt_username: document.getElementById('m-user').value,
+    mqtt_password: document.getElementById('m-pass').value,
+    ws_host: document.getElementById('w-host').value,
+    ws_port: parseInt(document.getElementById('w-port').value)||5052,
+    ws_path: document.getElementById('w-path').value
+  };
+  try {
+    var r = await api('config', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    var d = await r.json();
+    sm('sys-msg', d.ok, d.ok ? '已保存，重启后完全生效' : (d.error||'保存失败'));
+  } catch(e) { sm('sys-msg', false, '请求失败'); }
+}
+
+async function saveCan() {
+  var a0 = document.getElementById('c0-auto').value==='true';
+  var a1 = document.getElementById('c1-auto').value==='true';
+  var body = {
+    can0_bitrate: a0?0:parseInt(document.getElementById('c0-baud').value),
+    can1_bitrate: a1?0:parseInt(document.getElementById('c1-baud').value),
+    can_record_dir: document.getElementById('c-rdir').value,
+    can_record_max_mb: parseInt(document.getElementById('c-rmb').value)||40
+  };
+  try {
+    var r = await api('config', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    var d = await r.json();
+    if(d.ok) {
+      sm('can-msg', true, d.can_restarted ? '已保存，CAN接口已立即重启' : '已保存（波特率未变）');
+      if(d.can_restarted) setTimeout(loadHw, 1500);
+      /* 同步到服务端缓存，供 UDS 页面等自动读取 */
+      fetch('/api/device/can_config?device='+gDevIp, {
+        method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)
+      }).catch(()=>{});
+    } else { sm('can-msg', false, d.error||'保存失败'); }
+  } catch(e) { sm('can-msg', false, '请求失败'); }
+}
+
+async function loadNet() {
+  try {
+    var r = await api('network'), d = await r.json();
+    document.getElementById('n-iface').value = d.net_iface||'eth0';
+    document.getElementById('n-dhcp').value = d.net_use_dhcp?'true':'false';
+    document.getElementById('n-ip').value = d.net_ip||'';
+    document.getElementById('n-mask').value = d.net_netmask||'';
+    document.getElementById('n-gw').value = d.net_gateway||'';
+    tDhcp();
+  } catch(e) {}
+}
+
+async function saveNet() {
+  var dh = document.getElementById('n-dhcp').value==='true';
+  var body = {
+    net_iface: document.getElementById('n-iface').value,
+    net_use_dhcp: dh,
+    net_ip: document.getElementById('n-ip').value,
+    net_netmask: document.getElementById('n-mask').value,
+    net_gateway: document.getElementById('n-gw').value,
+    apply: true
+  };
+  try {
+    var r = await api('network', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    var d = await r.json();
+    sm('net-msg', d.ok, d.ok ? '网络配置已保存并应用' : (d.error||'保存失败'));
+  } catch(e) { sm('net-msg', false, '请求失败'); }
+}
+
+/* ===== CAN-MQTT 规则 ===== */
+async function loadRules() {
+  try {
+    var r = await api('rules'), d = await r.json();
+    gr = d;
+    document.getElementById('rule-count').textContent = (gr.rules||[]).length;
+    renderRules();
+  } catch(e) {}
+}
+
+function renderRules() {
+  var rules = gr.rules || [];
+  var h = '';
+  if(rules.length === 0) {
+    h = '<div style="color:var(--txt2);text-align:center;padding:30px">暂无规则，点击"新增规则"添加</div>';
+  } else {
+    h = '<table><tr><th>名称</th><th>CAN ID</th><th>接口</th><th>Topic</th><th>信号</th><th>操作</th></tr>';
+    rules.forEach(function(rule, i) {
+      var sig = rule.decode||{};
+      var sigStr = 'bit'+sig.start_bit+' len'+sig.length+(sig.factor&&sig.factor!==1?' ×'+sig.factor:'');
+      h += '<tr>';
+      h += '<td>'+escH(rule.name||'规则'+(i+1))+'</td>';
+      h += '<td><span class="tag tag-ok">0x'+((rule.can_id||0).toString(16).toUpperCase())+'</span></td>';
+      h += '<td>'+escH(rule.interface||'any')+'</td>';
+      h += '<td style="font-family:monospace;font-size:12px">'+escH((rule.publish||{}).topic||'--')+'</td>';
+      h += '<td style="color:var(--txt2);font-size:12px">'+sigStr+'</td>';
+      h += '<td><button class="btn btn-s" onclick="editRule('+i+')" style="padding:3px 10px;margin-right:4px">编辑</button>';
+      h += '<button class="btn btn-d" onclick="delRule('+i+')" style="padding:3px 10px">删</button></td>';
+      h += '</tr>';
+    });
+    h += '</table>';
+  }
+  document.getElementById('rules-list').innerHTML = h;
+  document.getElementById('rule-editor').style.display = 'none';
+}
+
+function escH(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+function addRule() {
+  gei = -1;
+  document.getElementById('re-title').textContent = '新增规则';
+  ['re-name','re-id','re-topic'].forEach(function(id){ document.getElementById(id).value=''; });
+  document.getElementById('re-sb').value=0;
+  document.getElementById('re-bl').value=8;
+  document.getElementById('re-factor').value=1;
+  document.getElementById('re-offset').value=0;
+  document.getElementById('re-iface').value='any';
+  document.getElementById('re-bo').value='little_endian';
+  document.getElementById('re-pm').value='value';
+  document.getElementById('re-qos').value=0;
+  document.getElementById('rule-editor').style.display='block';
+  document.getElementById('rule-editor').scrollIntoView({behavior:'smooth'});
+}
+
+function editRule(i) {
+  gei = i;
+  var rule = gr.rules[i];
+  var sig = rule.decode||{};
+  var pub = rule.publish||{};
+  document.getElementById('re-title').textContent = '编辑规则';
+  document.getElementById('re-name').value = rule.name||'';
+  document.getElementById('re-id').value = (rule.can_id||0).toString(16).toUpperCase();
+  document.getElementById('re-iface').value = rule.interface||'any';
+  document.getElementById('re-bo').value = sig.byte_order||'little_endian';
+  document.getElementById('re-sb').value = sig.start_bit||0;
+  document.getElementById('re-bl').value = sig.length||8;
+  document.getElementById('re-factor').value = sig.factor||1;
+  document.getElementById('re-offset').value = sig.offset||0;
+  document.getElementById('re-topic').value = pub.topic||'';
+  document.getElementById('re-pm').value = pub.payload_mode||'value';
+  document.getElementById('re-qos').value = pub.qos||0;
+  document.getElementById('rule-editor').style.display='block';
+  document.getElementById('rule-editor').scrollIntoView({behavior:'smooth'});
+}
+
+function cancelRule() { document.getElementById('rule-editor').style.display='none'; }
+
+async function saveRule() {
+  var rule = {
+    name: document.getElementById('re-name').value||'规则',
+    can_id: parseInt(document.getElementById('re-id').value,16)||0,
+    interface: document.getElementById('re-iface').value,
+    decode: {
+      byte_order: document.getElementById('re-bo').value,
+      start_bit: parseInt(document.getElementById('re-sb').value)||0,
+      length: parseInt(document.getElementById('re-bl').value)||8,
+      factor: parseFloat(document.getElementById('re-factor').value)||1,
+      offset: parseFloat(document.getElementById('re-offset').value)||0
+    },
+    publish: {
+      topic: document.getElementById('re-topic').value,
+      payload_mode: document.getElementById('re-pm').value,
+      qos: parseInt(document.getElementById('re-qos').value)||0
+    }
+  };
+  if(gei >= 0) gr.rules[gei] = rule;
+  else gr.rules.push(rule);
+  try {
+    var r = await api('rules', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(gr)});
+    var d = await r.json();
+    sm('rules-msg', d.ok||d.rule_count!=null, d.ok||d.rule_count!=null ? '规则已保存' : (d.error||'保存失败'));
+    renderRules();
+    document.getElementById('rule-count').textContent = gr.rules.length;
+  } catch(e) { sm('rules-msg', false, '请求失败'); }
+}
+
+async function delRule(i) {
+  if(!confirm('确认删除规则"'+(gr.rules[i].name||'#'+i)+'"？')) return;
+  gr.rules.splice(i,1);
+  try {
+    var r = await api('rules', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(gr)});
+    var d = await r.json();
+    sm('rules-msg', true, '已删除');
+    renderRules();
+    document.getElementById('rule-count').textContent = gr.rules.length;
+  } catch(e) { sm('rules-msg', false, '请求失败'); }
+}
+
+/* ===== CAN 监控 ===== */
+var gMonSeen = 0;
+function toggleMon() {
+  if(gMonRunning) {
+    clearInterval(gMonTimer); gMonTimer=null; gMonRunning=false;
+    document.getElementById('mon-btn').textContent='▶ 开始监控';
+  } else {
+    gMonRunning=true;
+    document.getElementById('mon-btn').textContent='⏹ 停止监控';
+    pollMon();
+    gMonTimer=setInterval(pollMon,1000);
+  }
+}
+function startMon() { if(!gMonRunning) toggleMon(); }
+function clearMon() { document.getElementById('mon-box').innerHTML='<div class="mon-row mon-hdr"><span>时间</span><span>接口</span><span>ID</span><span>DLC</span><span>数据</span></div>'; gMonSeen=0; document.getElementById('mon-count').textContent=0; }
+
+async function pollMon() {
+  var filter = document.getElementById('mon-filter').value.trim().toUpperCase();
+  try {
+    var r = await api('can_frames'), frames = await r.json();
+    if(!Array.isArray(frames)) frames = frames.frames||frames.data||[];
+    var box = document.getElementById('mon-box');
+    var newCount = 0;
+    frames.forEach(function(f){
+      var idStr = (f.id||0).toString(16).toUpperCase().padStart(3,'0');
+      if(filter && idStr.indexOf(filter)<0) return;
+      var ts = f.timestamp ? new Date(Math.round(f.timestamp)*1000).toLocaleTimeString() : '--';
+      var data = (f.data||[]);
+      var dlc = data.length;
+      var hx = data.map(function(b){ return ('0'+b.toString(16).toUpperCase()).slice(-2); }).join(' ');
+      var row = document.createElement('div');
+      row.className='mon-row';
+      row.innerHTML='<span>'+ts+'</span><span style="color:#60a5fa">'+(f.iface||'--')+'</span><span style="color:#4ade80">0x'+idStr+'</span><span>'+dlc+'</span><span style="color:var(--txt2)">'+hx+'</span>';
+      box.appendChild(row);
+      newCount++;
+    });
+    if(newCount>0){
+      gMonSeen+=newCount;
+      document.getElementById('mon-count').textContent=gMonSeen;
+      if(document.getElementById('mon-scroll').checked) box.scrollTop=box.scrollHeight;
+      /* 限制行数，避免 DOM 过大 */
+      var rows=box.querySelectorAll('.mon-row:not(.mon-hdr)');
+      if(rows.length>500) for(var i=0;i<rows.length-500;i++) rows[i].remove();
+    }
+  } catch(e) {}
+}
+
+/* 初始化 */
+window.onload = function(){
+  connectDevice();
+};
+</script>
+</body>
+</html>

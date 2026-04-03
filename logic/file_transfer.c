@@ -14,6 +14,7 @@
 #include <unistd.h>
 #include <errno.h>
 #include <libgen.h>
+#include <limits.h>
 
 /* Base64编码表 */
 static const char base64_table[] = 
@@ -528,6 +529,81 @@ char* file_list_directory_json(const char *path)
 /**
  * @brief 列出S19文件（返回JSON格式）
  */
+static int append_s19_files_recursive(const char *base_dir,
+                                      const char *cur_dir,
+                                      char **json,
+                                      size_t *buffer_size,
+                                      size_t *pos,
+                                      bool *first)
+{
+    DIR *d = NULL;
+    struct dirent *entry = NULL;
+
+    if (!base_dir || !cur_dir || !json || !*json || !buffer_size || !pos || !first) {
+        return -1;
+    }
+
+    d = opendir(cur_dir);
+    if (!d) {
+        return -1;
+    }
+
+    while ((entry = readdir(d)) != NULL) {
+        char full_path[PATH_MAX];
+        struct stat st;
+        const char *name = entry->d_name;
+        size_t name_len = 0;
+
+        if (strcmp(name, ".") == 0 || strcmp(name, "..") == 0) {
+            continue;
+        }
+
+        snprintf(full_path, sizeof(full_path), "%s/%s", cur_dir, name);
+        if (stat(full_path, &st) != 0) {
+            continue;
+        }
+
+        if (S_ISDIR(st.st_mode)) {
+            append_s19_files_recursive(base_dir, full_path, json, buffer_size, pos, first);
+            continue;
+        }
+
+        name_len = strlen(name);
+        if (!(name_len > 4 &&
+              (strcasecmp(name + name_len - 4, ".s19") == 0 ||
+               strcasecmp(name + name_len - 4, ".mot") == 0))) {
+            continue;
+        }
+
+        if (*pos + strlen(full_path) + 16 > *buffer_size) {
+            char *new_json = NULL;
+            *buffer_size *= 2;
+            new_json = (char*)realloc(*json, *buffer_size);
+            if (!new_json) {
+                closedir(d);
+                return -1;
+            }
+            *json = new_json;
+        }
+
+        if (!*first) {
+            *pos += snprintf(*json + *pos, *buffer_size - *pos, ",");
+        }
+        *first = false;
+
+        if (strncmp(full_path, base_dir, strlen(base_dir)) == 0) {
+            const char *rel = full_path + strlen(base_dir);
+            while (*rel == '/') rel++;
+            *pos += snprintf(*json + *pos, *buffer_size - *pos, "\"%s\"", rel);
+        } else {
+            *pos += snprintf(*json + *pos, *buffer_size - *pos, "\"%s\"", full_path);
+        }
+    }
+
+    closedir(d);
+    return 0;
+}
+
 char* list_s19_files_json(const char *dir)
 {
     if (!dir) {
@@ -546,43 +622,11 @@ char* list_s19_files_json(const char *dir)
     
     /* 递归搜索S19文件 */
     bool first = true;
-    
-    /* 简单实现：只搜索当前目录 */
-    DIR *d = opendir(dir);
-    if (d) {
-        struct dirent *entry;
-        while ((entry = readdir(d)) != NULL) {
-            const char *name = entry->d_name;
-            size_t name_len = strlen(name);
-            
-            /* 检查扩展名 */
-            if (name_len > 4 &&
-                (strcasecmp(name + name_len - 4, ".s19") == 0 ||
-                 strcasecmp(name + name_len - 4, ".mot") == 0)) {
-                
-                /* 检查是否需要扩展缓冲区 */
-                if (pos + 512 > buffer_size) {
-                    buffer_size *= 2;
-                    char *new_json = (char*)realloc(json, buffer_size);
-                    if (!new_json) {
-                        free(json);
-                        closedir(d);
-                        return NULL;
-                    }
-                    json = new_json;
-                }
-                
-                if (!first) {
-                    pos += snprintf(json + pos, buffer_size - pos, ",");
-                }
-                first = false;
-                
-                pos += snprintf(json + pos, buffer_size - pos, "\"%s\"", name);
-            }
-        }
-        closedir(d);
+    if (append_s19_files_recursive(dir, dir, &json, &buffer_size, &pos, &first) != 0) {
+        free(json);
+        return NULL;
     }
-    
+
     pos += snprintf(json + pos, buffer_size - pos, "]}");
     
     return json;

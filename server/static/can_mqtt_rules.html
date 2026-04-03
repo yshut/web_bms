@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CAN-MQTT 规则管理</title>
+<style>
+:root{--bg:#1a1a2e;--panel:#16213e;--card:#0f3460;--accent:#e94560;--accent2:#0fbbad;--text:#e0e0e0;--text2:#a0a0b0;--border:#2a3550;--success:#27ae60;--warning:#f39c12;--danger:#e74c3c}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font-family:'Segoe UI',sans-serif;font-size:14px}
+.nav{background:var(--panel);border-bottom:1px solid var(--border);padding:0 24px;display:flex;align-items:center;gap:24px;height:48px}
+.nav-brand{font-size:18px;font-weight:700;color:var(--accent2)}
+.nav a{color:var(--text2);text-decoration:none;font-size:13px;padding:4px 10px;border-radius:4px;transition:.2s}
+.nav a:hover,.nav a.active{background:var(--card);color:var(--text)}
+.nav-right{margin-left:auto;display:flex;align-items:center;gap:10px}
+.page{padding:24px}
+.card{background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:20px;margin-bottom:20px}
+.card-title{font-size:14px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:16px;display:flex;align-items:center;gap:8px}
+.card-title .dot{width:8px;height:8px;border-radius:50%;background:var(--accent2)}
+.btn{border:none;cursor:pointer;border-radius:5px;padding:8px 16px;font-size:13px;font-weight:500;transition:opacity .15s}
+.btn:hover{opacity:.85}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+.btn-primary{background:var(--accent2);color:#000}
+.btn-secondary{background:var(--card);color:var(--text);border:1px solid var(--border)}
+.btn-danger{background:var(--danger);color:#fff}
+.btn-warn{background:var(--warning);color:#000}
+.btn-sm{padding:5px 11px;font-size:12px}
+
+/* Upload zone */
+.drop-zone{border:2px dashed var(--border);border-radius:8px;padding:40px;text-align:center;cursor:pointer;transition:border-color .2s,background .2s;position:relative}
+.drop-zone:hover,.drop-zone.drag-over{border-color:var(--accent2);background:rgba(15,187,173,.06)}
+.drop-zone input[type=file]{position:absolute;inset:0;opacity:0;cursor:pointer}
+.drop-icon{font-size:40px;margin-bottom:12px}
+.drop-text{color:var(--text2);font-size:13px}
+.drop-text b{color:var(--accent2)}
+.file-info{margin-top:10px;font-size:13px;color:var(--accent2);display:none}
+
+/* Progress */
+.progress-wrap{background:var(--card);border-radius:4px;height:6px;overflow:hidden;margin-top:10px;display:none}
+.progress-bar{height:100%;background:var(--accent2);width:0%;transition:width .3s}
+
+/* Steps */
+.steps{display:flex;gap:0;margin-bottom:24px}
+.step{flex:1;text-align:center;padding:12px 8px;border-bottom:2px solid var(--border);font-size:12px;color:var(--text2);position:relative}
+.step.active{border-bottom-color:var(--accent2);color:var(--accent2);font-weight:600}
+.step.done{border-bottom-color:var(--success);color:var(--success)}
+.step-num{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;background:var(--card);border:1px solid var(--border);font-size:11px;margin-bottom:4px;font-weight:700}
+.step.active .step-num{background:var(--accent2);color:#000;border-color:var(--accent2)}
+.step.done .step-num{background:var(--success);color:#fff;border-color:var(--success)}
+
+/* Preview table */
+.preview-table{width:100%;border-collapse:collapse;font-size:12px}
+.preview-table th{background:var(--card);padding:7px 10px;text-align:left;color:var(--text2);font-size:11px;text-transform:uppercase;border-bottom:1px solid var(--border);white-space:nowrap}
+.preview-table td{padding:6px 10px;border-bottom:1px solid #1e2a3a;font-family:monospace}
+.preview-table tr:last-child td{border-bottom:none}
+.badge{padding:2px 6px;border-radius:3px;font-size:10px;font-weight:600}
+.badge-on{background:#1a4a2e;color:var(--success)}
+.badge-off{background:#3a1a1a;color:var(--danger)}
+
+/* Result */
+.result-box{border-radius:6px;padding:16px;font-size:13px;line-height:1.7}
+.result-ok{background:#1a4a2e;border:1px solid var(--success);color:#adf5c4}
+.result-err{background:#4a1a1a;border:1px solid var(--danger);color:#f5adad}
+.result-warn{background:#4a3a1a;border:1px solid var(--warning);color:#f5ddad}
+
+/* Info cards */
+.info-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px;margin-bottom:16px}
+.info-card{background:var(--card);border-radius:6px;padding:14px}
+.info-label{font-size:11px;color:var(--text2);margin-bottom:4px}
+.info-val{font-size:18px;font-weight:700;color:var(--text)}
+
+.toast{position:fixed;bottom:24px;right:24px;background:var(--card);border:1px solid var(--border);border-radius:6px;padding:10px 18px;font-size:13px;z-index:9999;opacity:0;transition:opacity .3s;pointer-events:none}
+.toast.show{opacity:1}
+.toast.ok{border-left:3px solid var(--success)}
+.toast.err{border-left:3px solid var(--danger)}
+
+pre{background:var(--card);border-radius:4px;padding:10px;font-size:11px;overflow:auto;max-height:200px;color:var(--accent2)}
+</style>
+</head>
+<body>
+<nav class="nav">
+  <span class="nav-brand">CAN-MQTT 规则管理</span>
+  <a href="/">主页</a>
+  <a href="/can">CAN 监控</a>
+  <a href="/rules" class="active">规则管理</a>
+  <a href="/bms">BMS 数据库</a>
+  <a href="/device_config">设备配置</a>
+  <div class="nav-right">
+    <button class="btn btn-sm btn-secondary" onclick="loadCurrentRules()">刷新规则</button>
+    <button class="btn btn-sm btn-secondary" onclick="exportExcel()">导出 Excel</button>
+    <a href="/api/rules/template" class="btn btn-sm btn-primary">下载模板</a>
+  </div>
+</nav>
+
+<div class="page">
+  <!-- 步骤指示 -->
+  <div class="steps">
+    <div class="step active" id="step1"><div class="step-num">1</div><br>下载模板</div>
+    <div class="step" id="step2"><div class="step-num">2</div><br>填写规则</div>
+    <div class="step" id="step3"><div class="step-num">3</div><br>上传导入</div>
+    <div class="step" id="step4"><div class="step-num">4</div><br>验证推送</div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">
+    <!-- 左列：导入 -->
+    <div>
+      <!-- 模板下载 -->
+      <div class="card">
+        <div class="card-title"><span class="dot"></span>第1步 — 下载 Excel 模板</div>
+        <p style="color:var(--text2);font-size:13px;margin-bottom:14px">
+          Excel 模板包含完整的字段说明和 5 条 BMS 示例规则，按照格式填写后上传即可导入到设备。
+        </p>
+        <div style="display:flex;gap:10px;flex-wrap:wrap">
+          <a href="/api/rules/template" class="btn btn-primary">⬇ 下载模板 (.xlsx)</a>
+          <button class="btn btn-secondary" onclick="showFieldHelp()">字段说明</button>
+        </div>
+      </div>
+
+      <!-- 上传 -->
+      <div class="card">
+        <div class="card-title"><span class="dot"></span>第3步 — 上传并导入</div>
+        <div class="drop-zone" id="dropZone">
+          <input type="file" id="fileInput" accept=".xlsx" onchange="onFileSelected(this.files)">
+          <div class="drop-icon">📂</div>
+          <div class="drop-text">拖拽 Excel 文件到此处，或 <b>点击选择文件</b></div>
+          <div class="drop-text" style="font-size:11px;margin-top:6px">仅支持 .xlsx 格式</div>
+          <div id="fileInfo" class="file-info"></div>
+        </div>
+        <div class="progress-wrap" id="progressWrap">
+          <div class="progress-bar" id="progressBar"></div>
+        </div>
+        <div style="display:flex;gap:10px;margin-top:14px;flex-wrap:wrap">
+          <button class="btn btn-primary" id="btnPreview" onclick="previewExcel()" disabled>预览规则</button>
+          <button class="btn btn-secondary" id="btnImport" onclick="importExcel(false)" disabled>仅转换（不推送）</button>
+          <button class="btn btn-warn" id="btnPush" onclick="importExcel(true)" disabled>转换并推送到设备</button>
+        </div>
+      </div>
+
+      <!-- 操作结果 -->
+      <div id="resultBox" style="display:none" class="card">
+        <div class="card-title"><span class="dot"></span>操作结果</div>
+        <div id="resultContent"></div>
+      </div>
+    </div>
+
+    <!-- 右列：当前规则 -->
+    <div>
+      <div class="card">
+        <div class="card-title"><span class="dot"></span>当前设备规则
+          <div style="margin-left:auto;display:flex;gap:8px">
+            <button class="btn btn-sm btn-secondary" onclick="loadCurrentRules()">刷新</button>
+            <button class="btn btn-sm btn-danger" id="btnPushLocal" onclick="pushLocal()" style="display:none">重新推送到设备</button>
+          </div>
+        </div>
+        <div class="info-grid" id="rulesInfo">
+          <div class="info-card"><div class="info-label">规则总数</div><div class="info-val" id="infoTotal">-</div></div>
+          <div class="info-card"><div class="info-label">已启用</div><div class="info-val" id="infoEnabled" style="color:var(--success)">-</div></div>
+          <div class="info-card"><div class="info-label">已禁用</div><div class="info-val" id="infoDisabled" style="color:var(--text2)">-</div></div>
+          <div class="info-card"><div class="info-label">版本</div><div class="info-val" id="infoVersion">-</div></div>
+        </div>
+        <div id="rulesTableWrap" style="overflow:auto;max-height:420px">
+          <div style="text-align:center;color:var(--text2);padding:30px">加载中...</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 字段说明模态 -->
+  <div id="fieldHelpModal" style="display:none;position:fixed;inset:0;background:#000a;z-index:1000;overflow:auto">
+    <div style="max-width:700px;margin:40px auto;background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:24px">
+      <div style="display:flex;justify-content:space-between;margin-bottom:16px">
+        <span style="font-size:16px;font-weight:600">Excel 字段说明</span>
+        <button class="btn btn-sm btn-secondary" onclick="document.getElementById('fieldHelpModal').style.display='none'">关闭</button>
+      </div>
+      <table class="preview-table" style="font-size:12px">
+        <thead><tr><th>列</th><th>字段名</th><th>类型</th><th>说明</th></tr></thead>
+        <tbody id="fieldHelpBody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<div id="toast" class="toast"></div>
+
+<script>
+const API = '';
+let selectedFile = null;
+let previewData = null;
+
+const FIELDS = [
+  ["A","规则ID","字符串","唯一ID，如 bms_soc_001，不可重复"],
+  ["B","规则名称","字符串","可选，中文描述"],
+  ["C","启用","TRUE/FALSE","FALSE=该规则暂时不生效"],
+  ["D","优先级","整数","越大越先匹配"],
+  ["E","CAN通道","枚举","can0 / can1 / any"],
+  ["F","CAN ID","十六进制","如 0x1A5；填 ANY=匹配所有帧"],
+  ["G","扩展帧","TRUE/FALSE","TRUE=29位ID  FALSE=11位ID"],
+  ["H","报文名称","字符串","可选，用于topic模板 {message_name}"],
+  ["I","信号名称","字符串","用于topic模板 {signal_name}"],
+  ["J","起始位","整数","Intel=LSB位号; Motorola=MSB位号(0起)"],
+  ["K","位长度","整数","1~64"],
+  ["L","字节序","枚举","Intel(小端) 或 Motorola(大端)"],
+  ["M","有符号","TRUE/FALSE","TRUE=有符号整数(补码)"],
+  ["N","系数 factor","浮点","物理值 = 原始值 × factor + offset"],
+  ["O","偏移 offset","浮点","物理值 = 原始值 × factor + offset"],
+  ["P","单位","字符串","可选，如 V A % °C rpm"],
+  ["Q","MQTT主题模板","字符串","支持 {topic_prefix} {device_id} {message_name} {signal_name} {channel}"],
+  ["R","载荷模式","枚举","json=完整JSON  raw=纯数值字符串"],
+  ["S","QoS","整数","0/1/2"],
+  ["T","保留消息","TRUE/FALSE","TRUE=Broker保留最后一条"],
+];
+
+function toast(msg,ok=true){const e=document.getElementById('toast');e.textContent=msg;e.className='toast show '+(ok?'ok':'err');setTimeout(()=>e.classList.remove('show'),3000)}
+
+function showFieldHelp(){
+  const tb=document.getElementById('fieldHelpBody');
+  tb.innerHTML=FIELDS.map(([col,name,type,desc])=>`<tr><td><b>${col}</b></td><td style="color:var(--accent2)">${name}</td><td style="color:var(--text2)">${type}</td><td>${desc}</td></tr>`).join('');
+  document.getElementById('fieldHelpModal').style.display='block';
+}
+
+// ── 文件选择 ──────────────────────────────────────────────────────────
+const dz=document.getElementById('dropZone');
+dz.addEventListener('dragover',e=>{e.preventDefault();dz.classList.add('drag-over')});
+dz.addEventListener('dragleave',()=>dz.classList.remove('drag-over'));
+dz.addEventListener('drop',e=>{e.preventDefault();dz.classList.remove('drag-over');onFileSelected(e.dataTransfer.files)});
+
+function onFileSelected(files){
+  if(!files||!files[0])return;
+  const f=files[0];
+  if(!f.name.toLowerCase().endsWith('.xlsx')){toast('请选择 .xlsx 格式文件',false);return}
+  selectedFile=f;
+  document.getElementById('fileInfo').textContent=`已选择: ${f.name}  (${(f.size/1024).toFixed(1)} KB)`;
+  document.getElementById('fileInfo').style.display='block';
+  document.getElementById('btnPreview').disabled=false;
+  document.getElementById('btnImport').disabled=false;
+  document.getElementById('btnPush').disabled=false;
+  setStep(3);
+  toast('文件已选择: '+f.name);
+}
+
+function setStep(n){
+  for(let i=1;i<=4;i++){
+    const el=document.getElementById('step'+i);
+    el.classList.remove('active','done');
+    if(i<n)el.classList.add('done');
+    else if(i===n)el.classList.add('active');
+  }
+}
+
+// ── 预览 ──────────────────────────────────────────────────────────────
+async function previewExcel(){
+  if(!selectedFile)return;
+  const fd=new FormData();fd.append('file',selectedFile);
+  try{
+    const r=await fetch(API+'/api/rules/import_excel?push=0',{method:'POST',body:fd});
+    const j=await r.json();
+    if(!j.ok){showResult(false,'解析失败: '+(j.error||''));return}
+    previewData=j.rules;
+    renderPreview(j.rules);
+    toast(`预览成功，共 ${j.rule_count} 条规则`);
+  }catch(e){showResult(false,'请求失败: '+e.message)}
+}
+
+function renderPreview(obj){
+  const rules=obj.rules||[];
+  if(!rules.length){showResult(false,'无有效规则行');return}
+  const res=document.getElementById('resultBox');
+  const content=document.getElementById('resultContent');
+  res.style.display='block';
+  let h=`<p style="margin-bottom:10px;color:var(--text2)">解析到 <b style="color:var(--accent2)">${rules.length}</b> 条规则（预览，未推送）</p>`;
+  h+=`<div style="overflow:auto;max-height:260px"><table class="preview-table"><thead>
+    <tr><th>规则ID</th><th>名称</th><th>状态</th><th>通道</th><th>CAN ID</th><th>信号</th><th>MQTT主题</th></tr>
+  </thead><tbody>`;
+  rules.forEach(r=>{
+    const id_hex=r.match_any_id?'ANY':`0x${r.can_id.toString(16).toUpperCase()}`;
+    h+=`<tr>
+      <td>${r.id}</td><td>${r.name}</td>
+      <td><span class="badge ${r.enabled?'badge-on':'badge-off'}">${r.enabled?'启用':'禁用'}</span></td>
+      <td>${r.channel}</td><td>${id_hex}</td>
+      <td>${r.signal_name}</td>
+      <td style="font-size:11px;color:var(--text2)">${r.mqtt?.topic_template||''}</td>
+    </tr>`;
+  });
+  h+='</tbody></table></div>';
+  content.innerHTML=h;
+}
+
+// ── 导入 ──────────────────────────────────────────────────────────────
+async function importExcel(push){
+  if(!selectedFile)return;
+  const pw=document.getElementById('progressWrap');
+  const pb=document.getElementById('progressBar');
+  pw.style.display='block';pb.style.width='30%';
+  const fd=new FormData();fd.append('file',selectedFile);
+  try{
+    pb.style.width='60%';
+    const r=await fetch(API+`/api/rules/import_excel?push=${push?1:0}`,{method:'POST',body:fd});
+    pb.style.width='90%';
+    const j=await r.json();
+    pb.style.width='100%';
+    setTimeout(()=>{pw.style.display='none';pb.style.width='0%'},800);
+    if(!j.ok){showResult(false,'失败: '+(j.error||''));return}
+    if(push){
+      if(j.push_failed){
+        showResult('warn',
+          `✔ 已解析 ${j.rule_count} 条规则<br>`+
+          `⚠ 设备不可达，规则已保存到服务端<br>`+
+          `设备上线后可点击"重新推送到设备"按钮`
+        );
+        document.getElementById('btnPushLocal').style.display='inline-flex';
+      }else{
+        showResult(true,`✔ 已成功导入并推送 ${j.rule_count} 条规则到设备`);
+        setStep(4);
+        setTimeout(loadCurrentRules,500);
+      }
+    }else{
+      if(j.rules)renderPreview(j.rules);
+      showResult(true,`✔ 已解析 ${j.rule_count} 条规则（未推送）`);
+    }
+    toast(j.message||(push?'导入成功':'解析成功'));
+  }catch(e){
+    pw.style.display='none';
+    showResult(false,'请求失败: '+e.message);
+  }
+}
+
+function showResult(ok,msg){
+  const box=document.getElementById('resultBox');
+  const cont=document.getElementById('resultContent');
+  box.style.display='block';
+  const cls=ok===true?'result-ok':ok==='warn'?'result-warn':'result-err';
+  cont.innerHTML=`<div class="${cls} result-box">${msg}</div>`;
+}
+
+// ── 当前规则 ──────────────────────────────────────────────────────────
+async function loadCurrentRules(){
+  try{
+    const r=await fetch(API+'/api/device/proxy/rules',{headers:{'Accept':'application/json'}});
+    if(!r.ok)throw new Error('HTTP '+r.status);
+    const j=await r.json();
+    renderCurrentRules(j);
+  }catch(e){
+    document.getElementById('rulesTableWrap').innerHTML=
+      `<div style="text-align:center;color:var(--text2);padding:30px">无法获取设备规则<br><small>${e.message}</small></div>`;
+  }
+}
+
+function renderCurrentRules(obj){
+  const rules=obj.rules||[];
+  document.getElementById('infoTotal').textContent=rules.length;
+  document.getElementById('infoEnabled').textContent=rules.filter(r=>r.enabled).length;
+  document.getElementById('infoDisabled').textContent=rules.filter(r=>!r.enabled).length;
+  document.getElementById('infoVersion').textContent=obj.version||1;
+  if(!rules.length){
+    document.getElementById('rulesTableWrap').innerHTML='<div style="text-align:center;color:var(--text2);padding:30px">设备上暂无规则</div>';
+    return;
+  }
+  let h=`<table class="preview-table"><thead>
+    <tr><th>规则ID</th><th>名称</th><th>状态</th><th>优先级</th><th>通道</th><th>CAN ID</th><th>信号</th><th>factor</th><th>offset</th><th>单位</th><th>QoS</th></tr>
+  </thead><tbody>`;
+  rules.forEach(r=>{
+    const dec=r.decode||{};
+    const id_hex=r.match_any_id?'ANY':`0x${(r.can_id||0).toString(16).toUpperCase()}`;
+    h+=`<tr>
+      <td>${r.id}</td><td>${r.name||''}</td>
+      <td><span class="badge ${r.enabled?'badge-on':'badge-off'}">${r.enabled?'启用':'禁用'}</span></td>
+      <td>${r.priority||0}</td><td>${r.channel||''}</td><td>${id_hex}</td>
+      <td>${r.signal_name||''}</td>
+      <td>${dec.factor!=null?dec.factor:''}</td><td>${dec.offset!=null?dec.offset:''}</td>
+      <td>${dec.unit||''}</td><td>${r.mqtt?.qos??''}</td>
+    </tr>`;
+  });
+  document.getElementById('rulesTableWrap').innerHTML=h+'</tbody></table>';
+}
+
+async function exportExcel(){
+  window.open(API+'/api/rules/export_excel','_blank');
+}
+
+async function pushLocal(){
+  const j=await(await fetch(API+'/api/rules/push_local',{method:'POST'})).json();
+  if(j.ok){
+    toast(`已推送 ${j.rule_count} 条规则到设备`);
+    document.getElementById('btnPushLocal').style.display='none';
+    setTimeout(loadCurrentRules,500);
+  }else{
+    toast('推送失败: '+(j.device_response?.error||'设备不可达'),false);
+  }
+}
+
+document.addEventListener('DOMContentLoaded',()=>{
+  loadCurrentRules();
+  setStep(1);
+  document.getElementById('fieldHelpModal').addEventListener('click',e=>{
+    if(e.target===document.getElementById('fieldHelpModal'))
+      document.getElementById('fieldHelpModal').style.display='none';
+  });
+});
+</script>
+</body>
+</html>

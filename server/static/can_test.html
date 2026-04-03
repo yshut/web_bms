@@ -173,7 +173,7 @@
     <div class="card">
       <h3>📊 连接状态</h3>
       <div class="status-panel">
-        <div id="wsStatus" class="status-item status-error">WebSocket: 未连接</div>
+        <div id="wsStatus" class="status-item status-error">实时链路: 未连接</div>
         <div id="qtStatus" class="status-item status-warning">Qt设备: 检查中</div>
         <div id="dataStatus" class="status-item status-warning">数据流: 等待中</div>
         <div id="hubStatus" class="status-item status-warning">服务端: 检查中</div>
@@ -216,7 +216,7 @@
       <h3>🎛️ 控制面板</h3>
       <div class="controls">
         <button class="primary" onclick="startTest()">开始测试</button>
-        <button class="success" onclick="reconnectWS()">重连WebSocket</button>
+        <button class="success" onclick="reconnectWS()">重连实时链路</button>
         <button class="danger" onclick="clearLog()">清空日志</button>
         <button onclick="saveLog()">保存日志</button>
         <button onclick="toggleAutoScroll()" id="btnAutoScroll">自动滚动: 开</button>
@@ -243,6 +243,7 @@
     </div>
   </div>
 
+  <script src="/static/mqtt_client.js"></script>
   <script>
     // 全局状态
     let wsConnection = null;
@@ -356,55 +357,44 @@
       }
     }
 
-    // WebSocket 连接
+    // 实时链路连接（优先 MQTT，失败回退 WebSocket）
     function connectWebSocket() {
-      // 避免重复连接
-      try { if (wsConnection && (wsConnection.readyState === WebSocket.OPEN || wsConnection.readyState === WebSocket.CONNECTING)) return; } catch(e){}
+      if (wsConnection) return;
       try {
-        // ⭐ 配置后端服务器地址 ⭐
-        // 后端服务器地址：默认从浏览器 URL 自动获取（避免写死 IP）
-        const BACKEND_HOST = location.hostname;
-        
-        const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-        const wsUrl = `${protocol}//${BACKEND_HOST}:5052/ui`;
-        
-        log(`正在连接 WebSocket: ${wsUrl}`, 'info');
-        
-        wsConnection = new WebSocket(wsUrl);
-        
-        wsConnection.onopen = () => {
-          log('WebSocket 连接建立成功', 'success');
-          updateStatus('wsStatus', 'WebSocket: 已连接', true);
-        };
-        
-        wsConnection.onmessage = (event) => {
-          handleWebSocketMessage(event.data);
-        };
-        
-        wsConnection.onerror = (error) => {
-          log('WebSocket 连接错误: ' + error, 'error');
-          updateStatus('wsStatus', 'WebSocket: 连接错误', false);
-        };
-        
-        wsConnection.onclose = (event) => {
-          log(`WebSocket 连接关闭 (代码: ${event.code})`, 'warning');
-          updateStatus('wsStatus', 'WebSocket: 已断开', false);
-          updateStatus('dataStatus', '数据流: 已中断', false);
-          
-          // 2秒后自动重连（仅当页面可见且允许重连时）
-          if (shouldReconnect && document.visibilityState === 'visible') {
-            setTimeout(() => {
-              if (shouldReconnect && document.visibilityState === 'visible') {
-                log('尝试自动重连...', 'info');
-                connectWebSocket();
-              }
-            }, 2000);
+        log('正在建立实时链路...', 'info');
+
+        wsConnection = new AppRealtimeClient({
+          reconnectDelayMs: 2000,
+          onOpen: (info) => {
+            log(`实时链路连接建立成功: ${info.transport}`, 'success');
+            updateStatus('wsStatus', `实时链路: 已连接 (${info.transport})`, true);
+          },
+          onMessage: (packet) => {
+            handleWebSocketMessage(packet && typeof packet.raw === 'string' ? packet.raw : JSON.stringify(packet.parsed || {}));
+          },
+          onError: (info) => {
+            log('实时链路错误: ' + (info && info.error ? info.error : 'unknown'), 'error');
+            updateStatus('wsStatus', '实时链路: 连接错误', false);
+          },
+          onClose: () => {
+            log('实时链路已断开', 'warning');
+            updateStatus('wsStatus', '实时链路: 已断开', false);
+            updateStatus('dataStatus', '数据流: 已中断', false);
+            if (!shouldReconnect) {
+              wsConnection = null;
+            }
           }
-        };
-        
+        });
+
+        wsConnection.connect().catch((error) => {
+          log('实时链路初始化失败: ' + error, 'error');
+          updateStatus('wsStatus', '实时链路: 初始化失败', false);
+          wsConnection = null;
+        });
       } catch (error) {
-        log('WebSocket 初始化失败: ' + error, 'error');
-        updateStatus('wsStatus', 'WebSocket: 初始化失败', false);
+        log('实时链路初始化失败: ' + error, 'error');
+        updateStatus('wsStatus', '实时链路: 初始化失败', false);
+        wsConnection = null;
       }
     }
 
@@ -1141,7 +1131,7 @@
 
     // 控制函数
     function startTest() {
-      log('开始 WebSocket CAN 数据传输测试', 'info');
+      log('开始实时 CAN 数据传输测试', 'info');
       frameCount = 0;
       standardCount = 0;
       extendedCount = 0;
@@ -1151,9 +1141,10 @@
     }
 
     function reconnectWS() {
-      log('手动重连 WebSocket', 'info');
+      log('手动重连实时链路', 'info');
       if (wsConnection) {
         wsConnection.close();
+        wsConnection = null;
       }
       setTimeout(connectWebSocket, 500);
     }
@@ -1226,7 +1217,7 @@
 
     // 页面加载完成后自动启动
     document.addEventListener('DOMContentLoaded', () => {
-      log('CAN WebSocket 测试页面已加载', 'success');
+      log('CAN 实时链路测试页面已加载', 'success');
       updateStatistics();
       
       // 定时更新统计
@@ -1272,6 +1263,7 @@
       window.addEventListener('beforeunload', () => {
         shouldReconnect = false;
         try { if (wsConnection) wsConnection.close(); } catch(e){}
+        wsConnection = null;
       });
     });
 

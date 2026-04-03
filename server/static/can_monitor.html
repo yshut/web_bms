@@ -4,7 +4,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>CAN总线监控</title>
-    <link rel="icon" href="/static/dashboard/favicon.ico">
     <link rel="stylesheet" href="/static/shared.css">
     <style>
         * {
@@ -148,8 +147,57 @@
         }
 
         .btn:disabled {
-            opacity: 0.5;
+            opacity: 0.4;
             cursor: not-allowed;
+            transform: none !important;
+        }
+
+        /* 加载中按钮样式 */
+        .btn.loading {
+            opacity: 0.75;
+            cursor: wait;
+            position: relative;
+        }
+        .btn.loading::before {
+            content: '';
+            display: inline-block;
+            width: 13px;
+            height: 13px;
+            margin-right: 7px;
+            border: 2px solid rgba(255,255,255,0.4);
+            border-top-color: #fff;
+            border-radius: 50%;
+            animation: btn-spin 0.7s linear infinite;
+            vertical-align: middle;
+        }
+        @keyframes btn-spin {
+            to { transform: rotate(360deg); }
+        }
+
+        /* 录制状态指示条 */
+        .record-status-bar {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-top: 8px;
+            padding: 7px 10px;
+            background: #1e1e1e;
+            border-radius: 5px;
+            font-size: 12px;
+            color: #9ca3af;
+        }
+        .record-status-bar .rec-dot {
+            width: 8px; height: 8px;
+            border-radius: 50%;
+            background: #555;
+            flex-shrink: 0;
+        }
+        .record-status-bar.active .rec-dot {
+            background: #ef4444;
+            animation: pulse 1s infinite;
+        }
+        .record-status-bar.active {
+            color: #f87171;
         }
 
         .input-group {
@@ -778,17 +826,20 @@
                 <!-- CAN控制 -->
                 <div class="control-section">
                     <h3>CAN控制</h3>
-                    <button class="btn btn-success" id="btnStart" onclick="startCAN()">启动监控</button>
-                    <button class="btn btn-danger" id="btnStop" onclick="stopCAN()" disabled>停止监控</button>
-                    <button class="btn btn-warning" onclick="clearFrames()">清除数据</button>
+                    <button class="btn btn-success" id="btnStart" onclick="startCAN()">▶ 启动监控</button>
+                    <button class="btn btn-danger"  id="btnStop"  onclick="stopCAN()"  style="display:none">■ 停止监控</button>
+                    <button class="btn btn-warning" id="btnClear" onclick="clearFrames()">清除数据</button>
                 </div>
 
                 <!-- 录制控制 -->
                 <div class="control-section">
                     <h3>报文录制</h3>
-                    <button class="btn btn-success" id="btnStartRecord" onclick="startRecord()">开始录制</button>
-                    <button class="btn btn-danger" id="btnStopRecord" onclick="stopRecord()" disabled>停止录制</button>
-                    <div style="margin-top:10px; font-size:12px; color:#10b981;" id="recordStatus">未录制</div>
+                    <button class="btn btn-success" id="btnStartRecord" onclick="startRecord()">⏺ 开始录制</button>
+                    <button class="btn btn-danger"  id="btnStopRecord"  onclick="stopRecord()" style="display:none">■ 停止录制</button>
+                    <div class="record-status-bar" id="recordStatusBar">
+                        <span class="rec-dot"></span>
+                        <span id="recordStatusText">未录制</span>
+                    </div>
                 </div>
 
                 <!-- 波特率配置 -->
@@ -841,11 +892,11 @@
             <div class="monitor-panel">
                 <!-- 选项卡栏 -->
                 <div class="tab-bar">
-                    <div class="tab active" onclick="switchTab('frames')">实时帧</div>
-                    <div class="tab" onclick="switchTab('signals')">信号解析</div>
-                    <div class="tab" onclick="switchTab('dbc')">DBC管理</div>
-                    <div class="tab" onclick="switchTab('filter')">过滤器</div>
-                    <div class="tab" onclick="switchTab('stats')">统计</div>
+                    <div class="tab active" onclick="switchTab('frames',this)">实时帧</div>
+                    <div class="tab" onclick="switchTab('signals',this)">信号解析</div>
+                    <div class="tab" onclick="switchTab('dbc',this)">DBC管理</div>
+                    <div class="tab" onclick="switchTab('filter',this)">过滤器</div>
+                    <div class="tab" onclick="switchTab('stats',this)">统计</div>
                 </div>
 
                 <!-- 实时帧 -->
@@ -853,7 +904,7 @@
                     <div class="toolbar">
                         <button onclick="refreshFrames()">刷新</button>
                         <button onclick="exportFrames()">导出</button>
-                        <button onclick="pauseMonitor()">暂停/继续</button>
+                        <button onclick="pauseMonitor(this)" id="pauseBtn">暂停</button>
                     </div>
                     <div class="frames-container" id="framesContainer">
                         <div style="text-align: center; color: #666; padding: 50px;">
@@ -961,11 +1012,20 @@
                 <!-- 过滤器 -->
                 <div class="tab-content" id="tab-filter">
                     <div class="filter-panel">
-                        <h3 style="color: #667eea; margin-bottom: 15px;">CAN ID 过滤</h3>
-                        <button class="btn btn-primary" onclick="addFilter()">添加过滤器</button>
+                        <h3 style="color: #667eea; margin-bottom: 15px;">CAN ID 白名单过滤</h3>
+                        <p style="color:#888;font-size:13px;margin-bottom:12px">
+                          添加后只显示列表中的 ID（留空=显示全部）
+                        </p>
+                        <div style="display:flex;gap:8px;margin-bottom:12px">
+                            <input id="filterInput" type="text" placeholder="输入 CAN ID (hex, 如 08C)"
+                                   style="flex:1;padding:6px 10px;background:#1e293b;border:1px solid #334155;color:#e2e8f0;border-radius:4px"
+                                   onkeydown="if(event.key==='Enter')addFilter()">
+                            <button class="btn btn-primary" onclick="addFilter()">添加</button>
+                            <button class="btn" onclick="clearFilters()" style="background:#334155;color:#94a3b8">清空</button>
+                        </div>
                         <div id="filterList">
                             <div style="text-align: center; color: #666; padding: 30px;">
-                                暂无过滤规则
+                                暂无过滤规则（当前显示全部帧）
                             </div>
                         </div>
                     </div>
@@ -999,6 +1059,8 @@
         </div>
     </div>
 
+    <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+    <script src="/static/mqtt_client.js"></script>
     <script>
         const API_BASE = window.location.origin;
         let monitorPaused = false;
@@ -1008,12 +1070,15 @@
         let can0Count = 0;
         let can1Count = 0;
         let lastUpdateTime = Date.now();
-        let filters = [];
+        let filters = [];         // 过滤器白名单 (hex strings)，空=不过滤
+        let allFrames = [];       // 所有帧历史，供导出/统计使用
+        let rateHistory = [];     // 每秒帧率历史，用于折线图
+        let lastRateTs = Date.now();
+        let rateWindow = 0;       // 本窗口内帧数
         let autoRefreshTimer = null;
         let statusSyncTimer = null;
-        let ws = null;
-        let wsReconnectTimer = null;
-        let wsOnline = false;      // UI WebSocket（/ui）是否连通
+        let realtimeClient = null;
+        let wsOnline = false;      // 实时链路是否连通（纯 MQTT）
         let deviceOnline = false;  // 设备（/ws）是否连通（来自 /api/status）
         let lastSeq = 0;          // 后端全局序列号，用于时序去重
         let lastTimestamp = 0;    // 设备时间戳去重（秒）
@@ -1029,7 +1094,7 @@
         let lastSignalUpdateTime = Date.now();
         let signalUpdateRateTimer = null;
 
-        // WebSocket连接管理
+        // 实时连接管理
         function renderConnectionStatus(serverReachable = true) {
             const dot = document.getElementById('serverStatus');
             const text = document.getElementById('serverText');
@@ -1041,68 +1106,52 @@
             }
 
             dot.classList.add('active');
-            const wsPart = wsOnline ? 'WS在线' : 'WS断开';
+            const wsPart = wsOnline ? 'MQTT在线' : 'MQTT断开';
             const devPart = deviceOnline ? '设备已连接' : '设备未连接';
             text.textContent = `服务器: 运行中 (${wsPart}, ${devPart})`;
-
-            // 未连设备时禁用控制按钮，避免“服务器运行中但无法启动监控”的误导
+            // 设备离线时禁用启动类按钮（停止类按钮不受影响，便于恢复）
             const btnStart = document.getElementById('btnStart');
             const btnStartRecord = document.getElementById('btnStartRecord');
             if (!deviceOnline) {
                 if (btnStart) btnStart.disabled = true;
                 if (btnStartRecord) btnStartRecord.disabled = true;
-                const container = document.getElementById('framesContainer');
-                if (container && container.children.length === 0) {
-                    container.innerHTML = '<div style="text-align:center;color:#9ca3af;padding:50px;">设备未连接，无法启动监控。<br><small>请检查开发板 ws_config.txt 的 ws_host 是否为 Windows 局域网 IP（不要用 172.17.*）。</small></div>';
-                }
             } else {
-                // 仅在未启动监控时允许启动按钮
-                if (btnStart && !monitorActive) btnStart.disabled = false;
-                if (btnStartRecord && !recordActive) btnStartRecord.disabled = false;
+                // 设备上线：仅恢复当前应显示的按钮（不在 loading 状态时）
+                if (btnStart && btnStart.style.display !== 'none' && !btnStart.classList.contains('loading')) btnStart.disabled = false;
+                if (btnStartRecord && btnStartRecord.style.display !== 'none' && !btnStartRecord.classList.contains('loading')) btnStartRecord.disabled = false;
             }
         }
 
-        function connectWebSocket() {
-            const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            const wsUrl = `${wsProtocol}//${window.location.host.split(':')[0]}:5052/ui`;
-            
-            console.log('连接WebSocket:', wsUrl);
-            
-            try {
-                ws = new WebSocket(wsUrl);
-                
-                ws.onopen = () => {
-                    console.log('✓ WebSocket已连接');
+        function connectRealtime() {
+            if (realtimeClient) {
+                realtimeClient.close();
+            }
+
+            realtimeClient = new AppRealtimeClient({
+                reconnectDelayMs: 5000,
+                onOpen: (info) => {
+                    console.log('✓ 实时链路已连接:', info.transport, info.url || '');
                     wsOnline = true;
                     renderConnectionStatus(true);
-                };
-                
-                ws.onmessage = (event) => {
-                    try {
-                        const msg = JSON.parse(event.data);
-                        handleWebSocketMessage(msg);
-                    } catch (e) {
-                        console.error('解析WebSocket消息失败:', e, event.data);
+                },
+                onMessage: (packet) => {
+                    if (packet && packet.parsed) {
+                        handleWebSocketMessage(packet.parsed);
                     }
-                };
-                
-                ws.onerror = (error) => {
-                    console.error('WebSocket错误:', error);
-                };
-                
-                ws.onclose = () => {
-                    console.log('WebSocket已断开');
+                },
+                onError: (info) => {
+                    console.error('实时链路错误:', info);
+                },
+                onClose: () => {
+                    console.log('实时链路已断开');
                     wsOnline = false;
                     renderConnectionStatus(true);
-                    ws = null;
-                    
-                    // 5秒后重连
-                    if (wsReconnectTimer) clearTimeout(wsReconnectTimer);
-                    wsReconnectTimer = setTimeout(connectWebSocket, 5000);
-                };
-            } catch (e) {
-                console.error('创建WebSocket失败:', e);
-            }
+                }
+            });
+
+            realtimeClient.connect().catch((e) => {
+                console.error('创建实时链路失败:', e);
+            });
         }
         
         // 刷新显示（从messageBuffer排序后显示）
@@ -1344,85 +1393,178 @@
         }
         
         // 解析CAN line字符串为结构化数据
-        // 格式: "13:43:44 ID:0x0000 [10 27 00 00] can1"
+        // 支持两种格式:
+        //   设备格式: "[09:42:17.615] CAN1 ID:0x1888EFF3 DLC:8 数据:03 24 00 00 00 A0 00 00"
+        //   旧格式:   "13:43:44 ID:0x0000 [10 27 00 00] can1"
         function parseCANLine(line) {
             if (!line || typeof line !== 'string') return null;
-            
             line = line.trim();
             if (!line) return null;
-            
-            // 移除emoji前缀（如果有）
-            line = line.replace(/^[🟢🔵📋❌]\s*/, '');
-            
+            line = line.replace(/^[\u{1F7E2}\u{1F535}\u{1F4CB}\u274C]\s*/u, '');
             try {
-                // 提取时间（可选）
-                const timeMatch = line.match(/^(\d{2}:\d{2}:\d{2})/);
                 let lineRest = line;
-                if (timeMatch) {
-                    lineRest = line.substring(timeMatch[0].length).trim();
+                let timestamp = null;
+
+                // 设备格式时间戳: "[HH:MM:SS.mmm]"
+                const devTsMatch = line.match(/^\[(\d{2}:\d{2}:\d{2}\.\d+)\]/);
+                if (devTsMatch) {
+                    lineRest = line.substring(devTsMatch[0].length).trim();
+                } else {
+                    // 旧格式时间戳: "HH:MM:SS"
+                    const oldTsMatch = line.match(/^(\d{2}:\d{2}:\d{2})/);
+                    if (oldTsMatch) lineRest = line.substring(oldTsMatch[0].length).trim();
                 }
-                
-                // 提取ID: "ID:0x0000" 或 "ID:0000"
+
+                // 提取 CAN ID: "ID:0xXXXX" 或 "ID:XXXX"
                 const idMatch = lineRest.match(/ID:(?:0x)?([0-9A-Fa-f]+)/);
                 if (!idMatch) return null;
                 const id = parseInt(idMatch[1], 16);
-                
-                // 提取数据: "[10 27 00 00]" 或 "[]"
-                const dataMatch = lineRest.match(/\[([^\]]*)\]/);
+
+                // 提取接口: "CAN1", "CAN2", "can0", "can1"...
+                const ifaceMatch = lineRest.match(/\bCAN(\d+)\b/i);
+                const iface = ifaceMatch ? 'can' + ifaceMatch[1] : 'can1';
+
+                // 提取数据 —— 优先 "数据:HH HH ..." 格式，备选 "[HH HH ...]" 格式
                 const data = [];
-                if (dataMatch && dataMatch[1].trim()) {
-                    const bytes = dataMatch[1].trim().split(/\s+/);
-                    bytes.forEach(b => {
+                const devDataMatch = lineRest.match(/\u6570\u636e:((?:[0-9A-Fa-f]{2}\s*)+)/);
+                if (devDataMatch) {
+                    devDataMatch[1].trim().split(/\s+/).forEach(b => {
                         const byte = parseInt(b, 16);
-                        if (!isNaN(byte)) {
-                            data.push(byte);
-                        }
+                        if (!isNaN(byte) && b.length <= 2) data.push(byte);
                     });
+                } else {
+                    // 旧格式: "[HH HH ...]"
+                    const bracketMatch = lineRest.match(/\[([^\]]*)\]/);
+                    if (bracketMatch && bracketMatch[1].trim()) {
+                        bracketMatch[1].trim().split(/\s+/).forEach(b => {
+                            const byte = parseInt(b, 16);
+                            if (!isNaN(byte) && b.length <= 2) data.push(byte);
+                        });
+                    }
                 }
-                
-                // 提取接口: "can1" 或 "can2"
-                const ifaceMatch = lineRest.match(/can(\d+)/i);
-                let iface = 'can1'; // 默认
-                if (ifaceMatch) {
-                    iface = `can${ifaceMatch[1]}`;
-                }
-                
-                return {
-                    id: id,
-                    data: data,
-                    iface: iface,
-                    interface: iface
-                };
+
+                return { id, data, iface, interface: iface };
             } catch (e) {
                 console.warn('解析CAN line失败:', line, e);
                 return null;
             }
         }
+
+        /* parseCanLineToFrame 是 parseCANLine 的别名，历史代码两种名字都有使用 */
+        const parseCanLineToFrame = parseCANLine;
         
         // 检查服务器状态
         async function checkStatus() {
             try {
-                // fast 状态：不 ping 设备，避免页面卡顿/误判
-                const response = await fetch(API_BASE + '/api/status_fast');
-                const result = await response.json();
-                
-                deviceOnline = !!(result && result.hub && result.hub.connected);
-                renderConnectionStatus(true);
-                
-                // 检查设备连接状态
-                if (deviceOnline) {
-                    // 更新CAN状态
-                    updateCANStatus();
+                // 1. 查服务器 MQTT hub 状态（快速，无需 ping 设备）
+                const r = await fetch(API_BASE + '/api/status_fast');
+                const j = await r.json();
+                const hubOk = !!(j && j.hub && j.hub.connected);
+
+                // 2. 通过 MQTT 查询设备状态（can_get_status 命令）
+                try {
+                    const dr = await fetch(API_BASE + '/api/can/status');
+                    const dj = await dr.json();
+                    if (dj && dj.ok && dj.data) {
+                        deviceOnline = true;
+                        // 同步 CAN 监控状态
+                        const isMonitoring = !!(dj.data.is_running || dj.data.running);
+                        if (isMonitoring !== monitorActive) {
+                            monitorActive = isMonitoring;
+                            setMonitorUI(monitorActive);
+                        }
+                        // 同步录制状态
+                        const isRec = !!(dj.data.is_recording || dj.data.recording);
+                        if (isRec !== recordActive) {
+                            recordActive = isRec;
+                            setRecordUI(recordActive);
+                        }
+                        // 同步波特率
+                        _syncBitratesFromData(dj.data);
+                    } else {
+                        // MQTT 未响应时以 hub 连接状态为准
+                        deviceOnline = hubOk;
+                    }
+                } catch(_) {
+                    deviceOnline = hubOk;
                 }
+                renderConnectionStatus(true);
             } catch (error) {
                 renderConnectionStatus(false);
             }
         }
         
-        // 更新CAN状态
+        /* ── 按钮状态辅助函数 ──────────────────────────────── */
+
+        function setMonitorUI(active, loading = false) {
+            const btnStart = document.getElementById('btnStart');
+            const btnStop  = document.getElementById('btnStop');
+            if (loading) {
+                // 正在切换：显示当前操作按钮并标记 loading
+                const activeBtn = active ? btnStop : btnStart;
+                activeBtn.classList.add('loading');
+                activeBtn.disabled = true;
+                activeBtn.style.display = 'block';
+                const otherBtn = active ? btnStart : btnStop;
+                otherBtn.style.display = 'none';
+            } else {
+                // 清除 loading 状态
+                btnStart.classList.remove('loading');
+                btnStop.classList.remove('loading');
+                btnStart.disabled = false;
+                btnStop.disabled  = false;
+                if (active) {
+                    btnStart.style.display = 'none';
+                    btnStop.style.display  = 'block';
+                    btnStop.textContent    = '■ 停止监控';
+                    document.getElementById('canStatus').classList.add('active');
+                    document.getElementById('canText').textContent = 'CAN: 监控中';
+                } else {
+                    btnStart.style.display = 'block';
+                    btnStart.textContent   = '▶ 启动监控';
+                    btnStop.style.display  = 'none';
+                    document.getElementById('canStatus').classList.remove('active');
+                    document.getElementById('canText').textContent = 'CAN: 已停止';
+                }
+            }
+        }
+
+        function setRecordUI(active, loading = false) {
+            const btnStart = document.getElementById('btnStartRecord');
+            const btnStop  = document.getElementById('btnStopRecord');
+            const bar      = document.getElementById('recordStatusBar');
+            const txt      = document.getElementById('recordStatusText');
+            if (loading) {
+                const activeBtn = active ? btnStop : btnStart;
+                activeBtn.classList.add('loading');
+                activeBtn.disabled = true;
+                activeBtn.style.display = 'block';
+                const otherBtn = active ? btnStart : btnStop;
+                otherBtn.style.display = 'none';
+            } else {
+                btnStart.classList.remove('loading');
+                btnStop.classList.remove('loading');
+                btnStart.disabled = false;
+                btnStop.disabled  = false;
+                if (active) {
+                    btnStart.style.display = 'none';
+                    btnStop.style.display  = 'block';
+                    btnStop.textContent    = '■ 停止录制';
+                    bar.classList.add('active');
+                    txt.textContent = '录制中';
+                } else {
+                    btnStart.style.display = 'block';
+                    btnStart.textContent   = '⏺ 开始录制';
+                    btnStop.style.display  = 'none';
+                    bar.classList.remove('active');
+                    txt.textContent = '未录制';
+                }
+            }
+        }
+
+        /* ── 更新CAN状态（从设备拉取） ─────────────────────── */
         async function updateCANStatus() {
             try {
-                // 使用设备端状态接口（稳定，不依赖“最近帧命令”是否实现）
                 const response = await fetch(API_BASE + '/api/can/status');
                 if (!response.ok) return;
                 const result = await response.json();
@@ -1431,21 +1573,11 @@
                     const isMonitoring = !!(d.is_running || d.running);
                     if (isMonitoring !== monitorActive) {
                         monitorActive = isMonitoring;
-                        if (isMonitoring) {
-                            document.getElementById('canStatus').classList.add('active');
-                            document.getElementById('canText').textContent = 'CAN: 监控中';
-                            document.getElementById('btnStart').disabled = true;
-                            document.getElementById('btnStop').disabled = false;
-                        } else {
-                            document.getElementById('canStatus').classList.remove('active');
-                            document.getElementById('canText').textContent = 'CAN: 已停止';
-                            document.getElementById('btnStart').disabled = false;
-                            document.getElementById('btnStop').disabled = true;
-                        }
+                        setMonitorUI(monitorActive);
                     }
                 } else if (!deviceOnline) {
                     monitorActive = false;
-                    document.getElementById('canStatus').classList.remove('active');
+                    setMonitorUI(false);
                     document.getElementById('canText').textContent = 'CAN: 需要设备连接';
                 }
             } catch (error) {
@@ -1453,176 +1585,88 @@
             }
         }
 
-        // 启动CAN监控
+        /* ── 启动CAN监控 ─────────────────────────────────── */
         async function startCAN() {
-            console.log('startCAN 被调用');
-            
-            // 防止重复点击
-            const btnStart = document.getElementById('btnStart');
-            if (btnStart.disabled) {
-                console.log('按钮已禁用，忽略点击');
-                return;
-            }
-
             if (!deviceOnline) {
-                alert('设备未连接，无法启动监控。\n请检查开发板 ws_config.txt 的 ws_host 是否为 Windows 局域网 IP（不要用 172.17.*），并重启 lvgl_app。');
+                alert('设备未连接，无法启动监控。');
                 return;
             }
-            
-            // 立即禁用按钮，防止重复提交
-            btnStart.disabled = true;
-            
+            monitorActive = false;
+            setMonitorUI(false, true);   // 显示 loading
             try {
-                const response = await fetch(API_BASE + '/api/can/start', {
-                    method: 'POST'
-                });
+                const response = await fetch(API_BASE + '/api/can/start', { method: 'POST' });
                 const result = await response.json();
-                
-                console.log('CAN启动响应:', result);
-                
                 if (result.ok !== false) {
                     monitorActive = true;
-                    document.getElementById('canStatus').classList.add('active');
-                    document.getElementById('canText').textContent = 'CAN: 监控中';
-                    document.getElementById('btnStop').disabled = false;
-                    
-                    console.log('CAN监控已启动，按钮状态已更新');
-                    
-                    // 启动后立即刷新一次
+                    setMonitorUI(true);
                     setTimeout(refreshFrames, 500);
                 } else {
-                    // 启动失败，重新启用按钮
-                    btnStart.disabled = false;
+                    setMonitorUI(false);
                     alert('启动失败: ' + (result.error || '未知错误'));
                 }
             } catch (error) {
-                // 发生异常，重新启用按钮
-                btnStart.disabled = false;
+                setMonitorUI(false);
                 alert('启动失败: ' + error.message);
-                console.error('CAN启动错误:', error);
             }
         }
 
-        // 停止CAN监控
+        /* ── 停止CAN监控 ─────────────────────────────────── */
         async function stopCAN() {
-            console.log('stopCAN 被调用');
-            
-            // 防止重复点击
-            const btnStop = document.getElementById('btnStop');
-            if (btnStop.disabled) {
-                console.log('停止按钮已禁用，忽略点击');
-                return;
-            }
-            
-            // 立即禁用按钮
-            btnStop.disabled = true;
-            
+            monitorActive = true;
+            setMonitorUI(true, true);   // 显示 loading（停止中）
             try {
-                const response = await fetch(API_BASE + '/api/can/stop', {
-                    method: 'POST'
-                });
-                const result = await response.json();
-                
-                console.log('CAN停止响应:', result);
-                
-                // 无论成功失败，都更新状态
+                const response = await fetch(API_BASE + '/api/can/stop', { method: 'POST' });
+                await response.json();
                 monitorActive = false;
-                document.getElementById('canStatus').classList.remove('active');
-                document.getElementById('canText').textContent = 'CAN: 已停止';
-                
-                // 重新启用启动按钮
-                const btnStart = document.getElementById('btnStart');
-                btnStart.disabled = false;
-                
-                console.log('CAN监控已停止，启动按钮已启用:', !btnStart.disabled);
+                setMonitorUI(false);
             } catch (error) {
-                // 即使出错也要恢复按钮状态
+                // 出错也切换到停止态
                 monitorActive = false;
-                document.getElementById('btnStart').disabled = false;
-                btnStop.disabled = true;
-                
+                setMonitorUI(false);
                 alert('停止失败: ' + error.message);
-                console.error('CAN停止错误:', error);
             }
         }
 
-        // 开始录制
+        /* ── 开始录制 ────────────────────────────────────── */
         async function startRecord() {
-            console.log('startRecord 被调用');
-            
-            const btnStart = document.getElementById('btnStartRecord');
-            if (btnStart.disabled) {
-                return;
-            }
-
             if (!deviceOnline) {
-                alert('设备未连接，无法开始录制。\n请先确保设备已通过 WebSocket 连接到服务器。');
+                alert('设备未连接，无法开始录制。');
                 return;
             }
-            
-            btnStart.disabled = true;
-            
+            recordActive = false;
+            setRecordUI(false, true);
             try {
-                const response = await fetch(API_BASE + '/api/can/record/start', {
-                    method: 'POST'
-                });
+                const response = await fetch(API_BASE + '/api/can/record/start', { method: 'POST' });
                 const result = await response.json();
-                
-                console.log('录制启动响应:', result);
-                
                 if (result.ok !== false) {
                     recordActive = true;
-                    document.getElementById('btnStopRecord').disabled = false;
-                    document.getElementById('recordStatus').textContent = '录制中...';
-                    document.getElementById('recordStatus').style.color = '#ef4444';
-                    console.log('录制已启动');
+                    setRecordUI(true);
                 } else {
-                    btnStart.disabled = false;
+                    setRecordUI(false);
                     alert('启动录制失败: ' + (result.error || '未知错误'));
                 }
             } catch (error) {
-                btnStart.disabled = false;
+                setRecordUI(false);
                 alert('启动录制失败: ' + error.message);
-                console.error('录制启动错误:', error);
             }
         }
 
-        // 停止录制
+        /* ── 停止录制 ────────────────────────────────────── */
         async function stopRecord() {
-            console.log('stopRecord 被调用');
-            
-            const btnStop = document.getElementById('btnStopRecord');
-            if (btnStop.disabled) {
-                return;
-            }
-            
-            btnStop.disabled = true;
-            
+            recordActive = true;
+            setRecordUI(true, true);
             try {
-                const response = await fetch(API_BASE + '/api/can/record/stop', {
-                    method: 'POST'
-                });
+                const response = await fetch(API_BASE + '/api/can/record/stop', { method: 'POST' });
                 const result = await response.json();
-                
-                console.log('录制停止响应:', result);
-                
                 recordActive = false;
-                document.getElementById('btnStartRecord').disabled = false;
-                document.getElementById('recordStatus').textContent = '未录制';
-                document.getElementById('recordStatus').style.color = '#10b981';
-                
+                setRecordUI(false);
                 if (result.ok !== false && result.data && result.data.filename) {
                     alert('录制已停止\n文件: ' + result.data.filename);
                 }
-                
-                console.log('录制已停止');
             } catch (error) {
                 recordActive = false;
-                document.getElementById('btnStartRecord').disabled = false;
-                btnStop.disabled = true;
-                
+                setRecordUI(false);
                 alert('停止录制失败: ' + error.message);
-                console.error('录制停止错误:', error);
             }
         }
 
@@ -1810,13 +1854,30 @@
         function displayFrames(frames) {
             const container = document.getElementById('framesContainer');
             
-            // 如果没有帧，显示提示
             if (!frames || frames.length === 0) {
                 container.innerHTML = '<div style="text-align: center; color: #666; padding: 50px;">暂无CAN数据<br>等待接收...</div>';
                 return;
             }
-            
-            console.log('显示帧数量:', frames.length, '第一帧:', frames[0]);
+
+            // 按过滤器白名单筛选
+            if (filters.length > 0) {
+                frames = frames.filter(f => {
+                    const idHex = (f.id||0).toString(16).toUpperCase().padStart(3,'0');
+                    return filters.some(fi => idHex.includes(fi.toUpperCase()));
+                });
+            }
+
+            // 累积帧历史（供导出/统计）
+            allFrames = allFrames.concat(frames);
+            if (allFrames.length > 5000) allFrames = allFrames.slice(-5000);
+            // 帧率采样
+            rateWindow += frames.length;
+            const now = Date.now();
+            if (now - lastRateTs >= 1000) {
+                rateHistory.push(rateWindow);
+                if (rateHistory.length > 60) rateHistory.shift();
+                rateWindow = 0; lastRateTs = now;
+            }
             
             // 创建表格结构
             let tableHTML = `
@@ -1892,51 +1953,69 @@
         }
 
         // 切换选项卡
-        function switchTab(tabName) {
+        function switchTab(tabName, el) {
             document.querySelectorAll('.tab').forEach(tab => tab.classList.remove('active'));
             document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
-            
-            event.target.classList.add('active');
+            const btn = el || document.querySelector(`.tab[onclick*="'${tabName}'"]`);
+            if (btn) btn.classList.add('active');
             document.getElementById('tab-' + tabName).classList.add('active');
+            if (tabName === 'stats') renderStatsChart();
         }
 
         // 暂停/继续监控
-        function pauseMonitor() {
+        function pauseMonitor(el) {
             monitorPaused = !monitorPaused;
-            event.target.textContent = monitorPaused ? '继续' : '暂停';
+            const btn = el || document.querySelector('button[onclick*="pauseMonitor"]');
+            if (btn) btn.textContent = monitorPaused ? '继续' : '暂停';
         }
 
-        // 导出帧
+        // 导出帧 (CSV)
         function exportFrames() {
-            alert('导出功能开发中...');
+            const rows = [['时间戳','接口','ID(hex)','DLC','数据(hex)']];
+            allFrames.forEach(f => {
+                const ts = f.timestamp ? new Date(f.timestamp * 1000).toISOString() : '--';
+                const id = '0x' + (f.id || 0).toString(16).toUpperCase().padStart(3,'0');
+                const data = (f.data||[]).map(b=>b.toString(16).toUpperCase().padStart(2,'0')).join(' ');
+                rows.push([ts, f.iface||'--', id, (f.data||[]).length, data]);
+            });
+            const csv = rows.map(r=>r.join(',')).join('\r\n');
+            const blob = new Blob([csv], {type:'text/csv'});
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = 'can_frames_' + Date.now() + '.csv';
+            a.click();
         }
 
-        // 添加过滤器
         function addFilter() {
-            const id = prompt('输入要过滤的CAN ID (hex):');
-            if (id) {
+            const inp = document.getElementById('filterInput');
+            const id = (inp ? inp.value : '').trim().toUpperCase().replace(/^0X/,'');
+            if (!id) return;
+            if (!filters.includes(id)) {
                 filters.push(id);
                 updateFilterList();
             }
+            if (inp) inp.value = '';
         }
 
-        // 更新过滤器列表
+        function clearFilters() {
+            filters = [];
+            updateFilterList();
+        }
+
         function updateFilterList() {
             const list = document.getElementById('filterList');
-            list.innerHTML = '';
-            
-            filters.forEach((filter, index) => {
-                const div = document.createElement('div');
-                div.className = 'filter-item';
-                div.innerHTML = `
-                    <input type="text" value="${filter}" readonly>
-                    <button onclick="removeFilter(${index})">删除</button>
-                `;
-                list.appendChild(div);
-            });
+            if (filters.length === 0) {
+                list.innerHTML = '<div style="text-align:center;color:#666;padding:30px">暂无过滤规则（当前显示全部帧）</div>';
+                return;
+            }
+            list.innerHTML = filters.map((f, i) =>
+                `<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid #1e293b">
+                   <span style="font-family:monospace;color:#0ea5e9;background:#0f172a;padding:3px 10px;border-radius:4px">0x${f}</span>
+                   <button onclick="removeFilter(${i})" style="background:#7f1d1d;color:#fca5a5;border:none;padding:2px 10px;border-radius:4px;cursor:pointer">删除</button>
+                 </div>`
+            ).join('');
         }
 
-        // 删除过滤器
         function removeFilter(index) {
             filters.splice(index, 1);
             updateFilterList();
@@ -1947,11 +2026,60 @@
             document.getElementById('statTotal').textContent = frameCount;
             document.getElementById('statCan0').textContent = can0Count;
             document.getElementById('statCan1').textContent = can1Count;
-            
-            const now = Date.now();
-            const elapsed = (now - lastUpdateTime) / 1000;
-            const rate = Math.round(frameCount / elapsed);
-            document.getElementById('statRate').textContent = rate;
+            const curRate = rateHistory.length > 0 ? rateHistory[rateHistory.length-1] : 0;
+            document.getElementById('statRate').textContent = curRate;
+        }
+
+        function renderStatsChart() {
+            const canvas = document.getElementById('statsChart');
+            if (!canvas) return;
+            canvas.width = canvas.parentElement.clientWidth || 600;
+            const ctx = canvas.getContext('2d');
+            const W = canvas.width, H = canvas.height;
+            ctx.clearRect(0, 0, W, H);
+
+            // 背景
+            ctx.fillStyle = '#1a1a2e'; ctx.fillRect(0, 0, W, H);
+
+            const data = rateHistory.length > 0 ? rateHistory : Array(10).fill(0);
+            const maxV = Math.max(...data, 1);
+            const pad = {l:40, r:10, t:10, b:30};
+            const cW = W - pad.l - pad.r, cH = H - pad.t - pad.b;
+            const step = cW / Math.max(data.length - 1, 1);
+
+            // 网格
+            ctx.strokeStyle = '#334155'; ctx.lineWidth = 1;
+            for (let i = 0; i <= 4; i++) {
+                const y = pad.t + cH * (1 - i / 4);
+                ctx.beginPath(); ctx.moveTo(pad.l, y); ctx.lineTo(pad.l + cW, y); ctx.stroke();
+                ctx.fillStyle = '#64748b'; ctx.font = '11px monospace';
+                ctx.fillText(Math.round(maxV * i / 4), 2, y + 4);
+            }
+
+            // 折线
+            ctx.beginPath(); ctx.strokeStyle = '#0ea5e9'; ctx.lineWidth = 2;
+            data.forEach((v, i) => {
+                const x = pad.l + i * step;
+                const y = pad.t + cH * (1 - v / maxV);
+                i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+            });
+            ctx.stroke();
+
+            // 填充
+            ctx.beginPath();
+            data.forEach((v, i) => {
+                const x = pad.l + i * step;
+                const y = pad.t + cH * (1 - v / maxV);
+                i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+            });
+            ctx.lineTo(pad.l + (data.length-1)*step, pad.t+cH);
+            ctx.lineTo(pad.l, pad.t+cH);
+            ctx.closePath();
+            ctx.fillStyle = 'rgba(14,165,233,0.15)'; ctx.fill();
+
+            // X 轴标签
+            ctx.fillStyle = '#64748b'; ctx.font = '11px monospace';
+            ctx.fillText('帧率 (fps) — 最近60秒', pad.l, H - 8);
         }
 
         // 自动刷新
@@ -1982,97 +2110,56 @@
         // 同步设备端状态到Web端
         async function syncDeviceStatus() {
             try {
-                // 获取设备端CAN状态
                 const response = await fetch(API_BASE + '/api/can/status');
-                if (response.ok) {
-                    const result = await response.json();
-                    console.log('设备状态:', result);
-                    
-                    if (result.ok && result.data) {
-                        // 同步监控状态
-                        const isMonitoring = result.data.is_running || result.data.running || false;
-                        if (isMonitoring !== monitorActive) {
-                            monitorActive = isMonitoring;
-                            if (isMonitoring) {
-                                document.getElementById('canStatus').classList.add('active');
-                                document.getElementById('canText').textContent = 'CAN: 监控中';
-                                document.getElementById('btnStart').disabled = true;
-                                document.getElementById('btnStop').disabled = false;
-                            } else {
-                                document.getElementById('canStatus').classList.remove('active');
-                                document.getElementById('canText').textContent = 'CAN: 已停止';
-                                document.getElementById('btnStart').disabled = false;
-                                document.getElementById('btnStop').disabled = true;
-                            }
-                        }
-                        
-                        // 同步录制状态
-                        const isRecording = result.data.is_recording || result.data.recording || false;
-                        if (isRecording !== recordActive) {
-                            recordActive = isRecording;
-                            if (isRecording) {
-                                document.getElementById('btnStartRecord').disabled = true;
-                                document.getElementById('btnStopRecord').disabled = false;
-                                document.getElementById('recordStatus').textContent = '录制中...';
-                                document.getElementById('recordStatus').style.color = '#ef4444';
-                            } else {
-                                document.getElementById('btnStartRecord').disabled = false;
-                                document.getElementById('btnStopRecord').disabled = true;
-                                document.getElementById('recordStatus').textContent = '未录制';
-                                document.getElementById('recordStatus').style.color = '#10b981';
-                            }
-                        }
+                if (!response.ok) return;
+                const result = await response.json();
+                if (result.ok && result.data) {
+                    const isMonitoring = !!(result.data.is_running || result.data.running);
+                    if (isMonitoring !== monitorActive) {
+                        monitorActive = isMonitoring;
+                        setMonitorUI(monitorActive);
                     }
+                    const isRecording = !!(result.data.is_recording || result.data.recording);
+                    if (isRecording !== recordActive) {
+                        recordActive = isRecording;
+                        setRecordUI(recordActive);
+                    }
+                    _syncBitratesFromData(result.data);
+                    deviceOnline = true;
+                    renderConnectionStatus(true);
                 }
             } catch (error) {
                 console.error('同步设备状态失败:', error);
             }
         }
 
-        // 获取并更新波特率信息
+        // 从设备状态数据同步波特率到 UI
+        function _syncBitratesFromData(data) {
+            const br0 = data.can0_bitrate || 500000;
+            const br1 = data.can1_bitrate || 500000;
+            const s0 = document.getElementById('can0Bitrate');
+            const s1 = document.getElementById('can1Bitrate');
+            if (s0) s0.textContent = (br0 / 1000) + 'K';
+            if (s1) s1.textContent = (br1 / 1000) + 'K';
+            const sel0 = document.getElementById('bitrateSelect0');
+            const sel1 = document.getElementById('bitrateSelect1');
+            if (sel0) sel0.value = br0;
+            if (sel1) sel1.value = br1;
+        }
+
         async function updateBitrates() {
             try {
-                // 尝试从设备获取当前波特率
-                const response = await fetch(API_BASE + '/api/can/config');
+                const response = await fetch(API_BASE + '/api/can/status');
                 if (response.ok) {
                     const result = await response.json();
-                    console.log('收到CAN配置:', result);
-                    
                     if (result.ok && result.data) {
-                        // 注意：API中can1对应设备can0，can2对应设备can1
-                        const can0Bitrate = result.data.can1_bitrate || result.data.can0 || result.data.bitrate0 || 500000;
-                        const can1Bitrate = result.data.can2_bitrate || result.data.can1 || result.data.bitrate1 || 500000;
-                        
-                        console.log('解析波特率:', {can0: can0Bitrate, can1: can1Bitrate});
-                        
-                        // 更新头部显示（显示为K单位）
-                        const can0Span = document.getElementById('can0Bitrate');
-                        const can1Span = document.getElementById('can1Bitrate');
-                        if (can0Span) can0Span.textContent = (can0Bitrate / 1000) + 'K';
-                        if (can1Span) can1Span.textContent = (can1Bitrate / 1000) + 'K';
-                        
-                        // 更新下拉框选择
-                        const select0 = document.getElementById('bitrateSelect0');
-                        const select1 = document.getElementById('bitrateSelect1');
-                        if (select0) select0.value = can0Bitrate;
-                        if (select1) select1.value = can1Bitrate;
-                        
-                        console.log('波特率显示已更新: CAN1=' + can0Bitrate + ', CAN2=' + can1Bitrate);
+                        _syncBitratesFromData(result.data);
                         return;
                     }
                 }
-            } catch (error) {
-                console.log('获取CAN配置失败，使用默认值:', error);
-            }
-            
-            // 如果API不支持或失败，使用默认值
-            const can1Bitrate = 500000;
-            const can2Bitrate = 500000;
-            
-            const can0Span = document.querySelector('[id*="can0Bitrate"]');
-            const can1Span = document.querySelector('[id*="can1Bitrate"]');
-            if (can0Span) can0Span.textContent = (can1Bitrate / 1000) + 'K';
-            if (can1Span) can1Span.textContent = (can2Bitrate / 1000) + 'K';
+            } catch (e) {}
+            // 设备不可达时保持默认
+            _syncBitratesFromData({can0_bitrate: 500000, can1_bitrate: 500000});
         }
 
         // 显示状态消息
@@ -2509,10 +2596,10 @@
 
         // 页面加载时初始化
         window.addEventListener('load', () => {
-            console.log('CAN监控页面已加载 - WebSocket实时模式');
+            console.log('CAN监控页面已加载 - MQTT优先实时模式');
             
-            // 连接WebSocket（实时接收CAN帧）
-            connectWebSocket();
+            // 连接实时链路（优先 MQTT，失败回退 WebSocket）
+            connectRealtime();
             
             // 检查服务器状态
             checkStatus();
@@ -2541,16 +2628,19 @@
                 }
             });
             
-            // 注意：不再需要定时刷新，WebSocket会实时推送数据
-            // 但保留刷新函数作为fallback（在WebSocket断开时使用）
-            console.log('✓ WebSocket实时推送模式已启用');
-            console.log('  - CAN帧将通过WebSocket实时接收');
-            console.log('  - 不再使用REST API轮询');
+            // 立即拉一次数据，然后启动轮询（每秒），作为 WebSocket 推送的可靠保底
+            // WebSocket 在线时数据会通过两路到达，重复帧由时序/序号去重逻辑过滤
+            refreshFrames();
+            startAutoRefresh();
+            console.log('✓ 数据更新已启动（轮询 1s + WebSocket 双保险）');
         });
         
         // 页面卸载时停止刷新
         window.addEventListener('beforeunload', () => {
             stopAutoRefresh();
+            if (realtimeClient) {
+                realtimeClient.close();
+            }
         });
     </script>
     <script src="/static/shared.js"></script>

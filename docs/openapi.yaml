@@ -1,0 +1,1095 @@
+openapi: 3.0.3
+info:
+  title: app_lvgl Web API
+  version: 1.0.0
+  description: >
+    app_lvgl 当前 HTTP 接口说明。该服务由 `server/web_server.py` 提供，
+    大部分接口会通过 WebSocket 转发给开发板程序执行。
+servers:
+  - url: http://localhost:18080
+    description: Default local server
+tags:
+  - name: page
+  - name: status
+  - name: ws
+  - name: can
+  - name: dbc
+  - name: uds
+  - name: fs
+  - name: ui
+  - name: system
+  - name: wifi
+  - name: file
+  - name: diagnostic
+paths:
+  /api/hardware/status:
+    get:
+      tags: [status]
+      summary: Get latest cached hardware status
+      responses:
+        '200':
+          description: Hardware status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericResponse'
+  /api/status:
+    get:
+      tags: [status]
+      summary: Get server and device status
+      parameters:
+        - in: query
+          name: fast
+          schema:
+            type: integer
+          description: Use fast mode when set to 1
+      responses:
+        '200':
+          description: Status info
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StatusResponse'
+  /api/status_fast:
+    get:
+      tags: [status]
+      summary: Get fast status
+      responses:
+        '200':
+          description: Fast status info
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StatusResponse'
+  /api/ws/clients:
+    get:
+      tags: [ws]
+      summary: List connected and historical devices
+      responses:
+        '200':
+          description: Device list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericResponse'
+  /api/ws/history/clear:
+    post:
+      tags: [ws]
+      summary: Clear websocket history
+      responses:
+        '200':
+          description: Clear result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericResponse'
+  /api/ws/history/remove:
+    post:
+      tags: [ws]
+      summary: Remove specific device IDs from history
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                ids:
+                  type: array
+                  items:
+                    oneOf:
+                      - type: string
+                      - type: integer
+      responses:
+        '200':
+          description: Remove result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericResponse'
+  /api/ping:
+    get:
+      tags: [status]
+      summary: Ping device via websocket
+      responses:
+        '200':
+          description: Device response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProxyResponse'
+  /api/show:
+    post:
+      tags: [page]
+      summary: Switch current page on device
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [page]
+              properties:
+                page:
+                  type: string
+                  enum: [home, can, uds]
+      responses:
+        '200':
+          description: Device response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProxyResponse'
+        '400':
+          description: Invalid page
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/can/scan:
+    post:
+      tags: [can]
+      summary: Scan CAN
+      responses:
+        '200':
+          $ref: '#/components/responses/ProxyOk'
+  /api/can/configure:
+    post:
+      tags: [can]
+      summary: Configure CAN
+      responses:
+        '200':
+          $ref: '#/components/responses/ProxyOk'
+  /api/can/start:
+    post:
+      tags: [can]
+      summary: Start CAN
+      responses:
+        '200':
+          $ref: '#/components/responses/ProxyOk'
+  /api/can/stop:
+    post:
+      tags: [can]
+      summary: Stop CAN
+      responses:
+        '200':
+          $ref: '#/components/responses/ProxyOk'
+  /api/can/clear:
+    post:
+      tags: [can]
+      summary: Clear CAN view or buffer
+      responses:
+        '200':
+          $ref: '#/components/responses/ProxyOk'
+  /api/can/status:
+    get:
+      tags: [can]
+      summary: Get CAN status
+      responses:
+        '200':
+          $ref: '#/components/responses/ProxyOk'
+  /api/can/record/start:
+    post:
+      tags: [can]
+      summary: Start CAN recording
+      responses:
+        '200':
+          $ref: '#/components/responses/ProxyOk'
+  /api/can/record/stop:
+    post:
+      tags: [can]
+      summary: Stop CAN recording
+      responses:
+        '200':
+          $ref: '#/components/responses/ProxyOk'
+  /api/can/config:
+    get:
+      tags: [can]
+      summary: Get CAN bitrate config
+      responses:
+        '200':
+          $ref: '#/components/responses/ProxyOk'
+  /api/can/set_bitrates:
+    post:
+      tags: [can]
+      summary: Set CAN channel bitrates
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                can1:
+                  type: integer
+                can2:
+                  type: integer
+      responses:
+        '200':
+          $ref: '#/components/responses/ProxyOk'
+  /api/can/send:
+    post:
+      tags: [can]
+      summary: Send one CAN frame in text format
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                text:
+                  type: string
+      responses:
+        '200':
+          $ref: '#/components/responses/ProxyOk'
+  /api/can/forward:
+    post:
+      tags: [can]
+      summary: Set forward mode
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                enabled:
+                  type: boolean
+      responses:
+        '200':
+          $ref: '#/components/responses/ProxyOk'
+  /api/can/server:
+    post:
+      tags: [can]
+      summary: Set CAN server target
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                host:
+                  type: string
+                port:
+                  type: integer
+      responses:
+        '200':
+          $ref: '#/components/responses/ProxyOk'
+  /api/can/frames:
+    get:
+      tags: [can]
+      summary: Get recent CAN frames from device
+      parameters:
+        - in: query
+          name: limit
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Recent frames
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericResponse'
+  /api/can/parse:
+    post:
+      tags: [can]
+      summary: Parse CAN frame text lines
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                frames:
+                  type: array
+                  items:
+                    type: string
+      responses:
+        '200':
+          description: Parse result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericResponse'
+  /api/can/config/parser:
+    get:
+      tags: [can]
+      summary: Get parser config summary
+      responses:
+        '200':
+          description: Parser config summary
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericResponse'
+    post:
+      tags: [can]
+      summary: Update parser config placeholder
+      responses:
+        '200':
+          description: Placeholder response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericResponse'
+  /api/dbc/upload:
+    post:
+      tags: [dbc]
+      summary: Upload DBC or KCD file
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+      responses:
+        '200':
+          description: Upload result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericResponse'
+  /api/dbc/list:
+    get:
+      tags: [dbc]
+      summary: List DBC files
+      responses:
+        '200':
+          description: DBC list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericResponse'
+  /api/dbc/delete:
+    post:
+      tags: [dbc]
+      summary: Delete DBC file
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+      responses:
+        '200':
+          description: Delete result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericResponse'
+  /api/dbc/reload:
+    post:
+      tags: [dbc]
+      summary: Reload DBC service
+      responses:
+        '200':
+          description: Reload result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericResponse'
+  /api/dbc/mappings:
+    get:
+      tags: [dbc]
+      summary: Get message mappings
+      parameters:
+        - in: query
+          name: prefix
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Mapping list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericResponse'
+  /api/dbc/stats:
+    get:
+      tags: [dbc]
+      summary: Get DBC stats
+      responses:
+        '200':
+          description: Stats result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericResponse'
+  /api/dbc/recent_raw:
+    get:
+      tags: [dbc]
+      summary: Get recent raw CAN lines
+      parameters:
+        - in: query
+          name: limit
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Raw lines
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericResponse'
+  /api/dbc/test_parse:
+    post:
+      tags: [dbc]
+      summary: Test DBC parsing
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                test_lines:
+                  type: array
+                  items:
+                    type: string
+      responses:
+        '200':
+          description: Test parse result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericResponse'
+  /api/dbc/debug:
+    get:
+      tags: [dbc]
+      summary: Get DBC debug info
+      responses:
+        '200':
+          description: Debug info
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericResponse'
+  /api/dbc/signals:
+    get:
+      tags: [dbc]
+      summary: Get signals for a DBC file
+      parameters:
+        - in: query
+          name: name
+          schema:
+            type: string
+          required: true
+      responses:
+        '200':
+          description: Signal info
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericResponse'
+  /api/dbc/parse:
+    post:
+      tags: [dbc]
+      summary: Parse CAN lines using DBC service
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                lines:
+                  type: array
+                  items:
+                    type: string
+      responses:
+        '200':
+          description: Parse result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericResponse'
+  /api/can/live_data:
+    get:
+      tags: [can]
+      summary: Get cached live CAN data
+      parameters:
+        - in: query
+          name: limit
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Live data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericResponse'
+  /api/can/cache/clear:
+    post:
+      tags: [can]
+      summary: Clear server-side CAN cache
+      responses:
+        '200':
+          description: Clear result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericResponse'
+  /api/can/cache/status:
+    get:
+      tags: [can]
+      summary: Get CAN cache status
+      responses:
+        '200':
+          description: Cache status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericResponse'
+  /api/uds/set_file:
+    post:
+      tags: [uds]
+      summary: Set UDS firmware file path
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                path:
+                  type: string
+      responses:
+        '200':
+          $ref: '#/components/responses/ProxyOk'
+  /api/uds/can_apply:
+    post:
+      tags: [uds]
+      summary: Apply CAN params for UDS
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                iface:
+                  type: string
+                bitrate:
+                  type: integer
+      responses:
+        '200':
+          $ref: '#/components/responses/ProxyOk'
+  /api/uds/config:
+    get:
+      tags: [uds]
+      summary: Get UDS config
+      responses:
+        '200':
+          description: Config result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericResponse'
+    post:
+      tags: [uds]
+      summary: Set UDS config
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                iface:
+                  type: string
+                bitrate:
+                  type: integer
+                tx_id:
+                  type: integer
+                rx_id:
+                  type: integer
+                block_size:
+                  type: integer
+      responses:
+        '200':
+          description: Config apply result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericResponse'
+  /api/uds/upload:
+    post:
+      tags: [uds]
+      summary: Upload firmware file to device filesystem
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+                base:
+                  type: string
+      responses:
+        '200':
+          description: Upload result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericResponse'
+  /api/uds/list:
+    get:
+      tags: [uds]
+      summary: List available firmware files
+      responses:
+        '200':
+          $ref: '#/components/responses/ProxyOk'
+  /api/uds/start:
+    post:
+      tags: [uds]
+      summary: Start UDS flashing
+      responses:
+        '200':
+          $ref: '#/components/responses/ProxyOk'
+  /api/uds/stop:
+    post:
+      tags: [uds]
+      summary: Stop UDS flashing
+      responses:
+        '200':
+          $ref: '#/components/responses/ProxyOk'
+  /api/uds/progress:
+    get:
+      tags: [uds]
+      summary: Get UDS progress
+      responses:
+        '200':
+          description: Progress info
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericResponse'
+  /api/uds/logs:
+    get:
+      tags: [uds]
+      summary: Get UDS logs
+      parameters:
+        - in: query
+          name: limit
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Log list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericResponse'
+  /api/fs/list:
+    get:
+      tags: [fs]
+      summary: List directory
+      parameters:
+        - in: query
+          name: path
+          schema:
+            type: string
+      responses:
+        '200':
+          $ref: '#/components/responses/ProxyOk'
+  /api/fs/mkdir:
+    post:
+      tags: [fs]
+      summary: Create directory
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                base:
+                  type: string
+      responses:
+        '200':
+          $ref: '#/components/responses/ProxyOk'
+  /api/fs/delete:
+    post:
+      tags: [fs]
+      summary: Delete file or directory
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                path:
+                  type: string
+      responses:
+        '200':
+          $ref: '#/components/responses/ProxyOk'
+  /api/fs/rename:
+    post:
+      tags: [fs]
+      summary: Rename file or directory
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                path:
+                  type: string
+                new_name:
+                  type: string
+      responses:
+        '200':
+          $ref: '#/components/responses/ProxyOk'
+  /api/fs/upload:
+    post:
+      tags: [fs]
+      summary: Upload file to filesystem
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+                base:
+                  type: string
+      responses:
+        '200':
+          description: Upload result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericResponse'
+  /api/fs/base:
+    get:
+      tags: [fs]
+      summary: Get writable base directory
+      responses:
+        '200':
+          description: Base directory
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericResponse'
+  /api/fs/download:
+    get:
+      tags: [fs]
+      summary: Download file from device
+      parameters:
+        - in: query
+          name: path
+          schema:
+            type: string
+          required: true
+        - in: query
+          name: chunk
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: File stream or JSON error
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/ui/screenshot:
+    get:
+      tags: [ui]
+      summary: Request UI screenshot
+      responses:
+        '200':
+          $ref: '#/components/responses/ProxyOk'
+  /api/ui/get_state:
+    get:
+      tags: [ui]
+      summary: Get UI state
+      responses:
+        '200':
+          $ref: '#/components/responses/ProxyOk'
+  /api/ui/get_current_page:
+    get:
+      tags: [ui]
+      summary: Get current UI page
+      responses:
+        '200':
+          $ref: '#/components/responses/ProxyOk'
+  /api/ui/click:
+    post:
+      tags: [ui]
+      summary: Simulate UI click
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                x:
+                  type: integer
+                y:
+                  type: integer
+      responses:
+        '200':
+          $ref: '#/components/responses/ProxyOk'
+  /api/ui/input_text:
+    post:
+      tags: [ui]
+      summary: Simulate UI text input
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                text:
+                  type: string
+      responses:
+        '200':
+          $ref: '#/components/responses/ProxyOk'
+  /api/system/info:
+    get:
+      tags: [system]
+      summary: Get system info
+      responses:
+        '200':
+          $ref: '#/components/responses/ProxyOk'
+  /api/system/reboot:
+    post:
+      tags: [system]
+      summary: Reboot device
+      responses:
+        '200':
+          $ref: '#/components/responses/ProxyOk'
+  /api/system/logs:
+    get:
+      tags: [system]
+      summary: Get system logs
+      parameters:
+        - in: query
+          name: limit
+          schema:
+            type: integer
+      responses:
+        '200':
+          $ref: '#/components/responses/ProxyOk'
+  /api/wifi/status:
+    get:
+      tags: [wifi]
+      summary: Get WiFi status
+      responses:
+        '200':
+          $ref: '#/components/responses/ProxyOk'
+  /api/wifi/scan:
+    post:
+      tags: [wifi]
+      summary: Scan WiFi
+      responses:
+        '200':
+          $ref: '#/components/responses/ProxyOk'
+  /api/wifi/connect:
+    post:
+      tags: [wifi]
+      summary: Connect to WiFi
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                ssid:
+                  type: string
+                password:
+                  type: string
+      responses:
+        '200':
+          $ref: '#/components/responses/ProxyOk'
+  /api/wifi/disconnect:
+    post:
+      tags: [wifi]
+      summary: Disconnect WiFi
+      responses:
+        '200':
+          $ref: '#/components/responses/ProxyOk'
+  /api/file/batch_upload:
+    post:
+      tags: [file]
+      summary: Upload multiple files
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                files:
+                  type: array
+                  items:
+                    type: string
+                    format: binary
+                base:
+                  type: string
+      responses:
+        '200':
+          description: Batch upload result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericResponse'
+  /api/file/upload_progress:
+    get:
+      tags: [file]
+      summary: Get upload progress
+      responses:
+        '200':
+          $ref: '#/components/responses/ProxyOk'
+  /api/can/filter:
+    post:
+      tags: [can]
+      summary: Set CAN filters
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                filters:
+                  type: array
+                  items:
+                    type: object
+                    additionalProperties: true
+      responses:
+        '200':
+          $ref: '#/components/responses/ProxyOk'
+  /api/can/record:
+    post:
+      tags: [can]
+      summary: Start or stop CAN recording
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                action:
+                  type: string
+                filename:
+                  type: string
+      responses:
+        '200':
+          $ref: '#/components/responses/ProxyOk'
+  /api/can/replay:
+    post:
+      tags: [can]
+      summary: Replay CAN recording
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                filename:
+                  type: string
+      responses:
+        '200':
+          $ref: '#/components/responses/ProxyOk'
+  /api/diagnostic/dtc:
+    get:
+      tags: [diagnostic]
+      summary: Read diagnostic trouble codes
+      responses:
+        '200':
+          $ref: '#/components/responses/ProxyOk'
+  /api/diagnostic/clear_dtc:
+    post:
+      tags: [diagnostic]
+      summary: Clear diagnostic trouble codes
+      responses:
+        '200':
+          $ref: '#/components/responses/ProxyOk'
+components:
+  responses:
+    ProxyOk:
+      description: Response proxied from device websocket handler
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ProxyResponse'
+  schemas:
+    GenericResponse:
+      type: object
+      additionalProperties: true
+      properties:
+        ok:
+          type: boolean
+        error:
+          type: string
+        message:
+          type: string
+        data:
+          type: object
+          additionalProperties: true
+    ErrorResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+          example: false
+        error:
+          type: string
+      required: [ok, error]
+    ProxyResponse:
+      type: object
+      description: Generic device-side websocket response
+      additionalProperties: true
+      properties:
+        ok:
+          type: boolean
+        id:
+          type: string
+        error:
+          type: string
+        data:
+          type: object
+          additionalProperties: true
+    StatusResponse:
+      type: object
+      properties:
+        hub:
+          type: object
+          additionalProperties: true
+        ok:
+          type: boolean
+      additionalProperties: true

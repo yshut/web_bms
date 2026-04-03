@@ -4,13 +4,14 @@
  */
 
 #include "ws_command_handler.h"
-#include "ws_client.h"
+#include "remote_transport.h"
 #include "can_handler.h"
 #include "can_recorder.h"
 #include "file_transfer.h"
 #include "uds_handler.h"
 #include "ui_remote_control.h"
 #include "../logic/app_manager.h"
+#include "../ui/ui_uds.h"
 #include "../utils/logger.h"
 #include "../utils/app_config.h"
 #include <stdio.h>
@@ -112,7 +113,7 @@ void ws_command_handler_deinit(void)
  */
 void ws_command_send_ok(const char *request_id, const char *extra_data)
 {
-    char response[1024];
+    char response[16384];
     
     if (extra_data && request_id) {
         snprintf(response, sizeof(response), 
@@ -130,7 +131,7 @@ void ws_command_send_ok(const char *request_id, const char *extra_data)
         snprintf(response, sizeof(response), "{\"ok\":true}");
     }
     
-    ws_client_send_json(response);
+    remote_transport_send_reply_json(response);
 }
 
 /**
@@ -150,7 +151,7 @@ void ws_command_send_error(const char *request_id, const char *error_msg)
                 error_msg);
     }
     
-    ws_client_send_json(response);
+    remote_transport_send_reply_json(response);
 }
 
 /**
@@ -262,27 +263,31 @@ static int handle_can_cmd(const char *json, const char *cmd, const char *request
     }
     
     if (strcmp(cmd, "can_get_status") == 0) {
-        // 获取CAN监控和录制状态
-        bool is_running = can_handler_is_running();
+        bool is_running   = can_handler_is_running();
         bool is_recording = can_recorder_is_recording();
-        
-        char data[256];
-        snprintf(data, sizeof(data), 
-                "{\"is_running\":%s,\"running\":%s,\"is_recording\":%s,\"recording\":%s}",
-                is_running ? "true" : "false",
-                is_running ? "true" : "false",
+        uint32_t br0 = g_app_config.can0_bitrate;
+        uint32_t br1 = g_app_config.can1_bitrate;
+        can_handler_get_bitrate_dual(&br0, &br1);
+
+        char data[512];
+        snprintf(data, sizeof(data),
+                "{\"is_running\":%s,\"running\":%s,"
+                "\"is_recording\":%s,\"recording\":%s,"
+                "\"can0_bitrate\":%u,\"can1_bitrate\":%u}",
+                is_running   ? "true" : "false",
+                is_running   ? "true" : "false",
                 is_recording ? "true" : "false",
-                is_recording ? "true" : "false");
+                is_recording ? "true" : "false",
+                (unsigned)br0, (unsigned)br1);
         ws_command_send_ok(request_id, data);
         return 0;
     }
     
     if (strcmp(cmd, "can_record_start") == 0) {
-        // 开始录制CAN报文
         if (can_recorder_is_recording()) {
-            ws_command_send_error(request_id, "Already recording");
+            ws_command_send_ok(request_id, "{\"recording\":true,\"note\":\"already_recording\"}");
         } else if (can_recorder_start() == 0) {
-            ws_command_send_ok(request_id, NULL);
+            ws_command_send_ok(request_id, "{\"recording\":true}");
         } else {
             ws_command_send_error(request_id, "Failed to start recording");
         }
@@ -290,9 +295,8 @@ static int handle_can_cmd(const char *json, const char *cmd, const char *request
     }
     
     if (strcmp(cmd, "can_record_stop") == 0) {
-        // 停止录制CAN报文
         if (!can_recorder_is_recording()) {
-            ws_command_send_error(request_id, "Not recording");
+            ws_command_send_ok(request_id, "{\"recording\":false,\"note\":\"not_recording\"}");
         } else {
             const char *filename = can_recorder_get_filename();
             char data[512];
@@ -466,6 +470,7 @@ static int handle_uds_cmd(const char *json, const char *cmd, const char *request
         extern int uds_set_params(const char *iface, uint32_t tx_id, uint32_t rx_id, uint32_t block_size);
         const char *iface_out = (iface && iface[0]) ? iface : "can0";
         uds_set_params(iface_out, tx_id, rx_id, blk);
+        ui_remote_uds_set_params(iface_out, 0, tx_id, rx_id, blk);
         char data[256];
         snprintf(data, sizeof(data),
                  "{\"iface\":\"%s\",\"tx_id\":%u,\"rx_id\":%u,\"block_size\":%u}",
@@ -478,9 +483,7 @@ static int handle_uds_cmd(const char *json, const char *cmd, const char *request
     if (strcmp(cmd, "uds_set_file") == 0) {
         char *path = extract_json_string(json, "path");
         if (path) {
-            // 设置UDS文件路径
-            extern int uds_set_file_path(const char *path);
-            if (uds_set_file_path(path) == 0) {
+            if (ui_uds_remote_set_file(path) == 0) {
                 ws_command_send_ok(request_id, NULL);
             } else {
                 ws_command_send_error(request_id, "Invalid file path");
@@ -493,25 +496,32 @@ static int handle_uds_cmd(const char *json, const char *cmd, const char *request
     }
     
     if (strcmp(cmd, "uds_progress") == 0) {
-        // 获取UDS刷写进度（简化版：running + percent）
-        extern bool uds_is_running(void);
-        // 当前实现未对外暴露精确进度，先提供基础状态，避免前端永远0%
-        char progress[256];
-        snprintf(progress, sizeof(progress),
-                 "{\"percent\":%d,\"running\":%s}",
-                 uds_is_running() ? 5 : 0,
-                 uds_is_running() ? "true" : "false");
-        ws_command_send_ok(request_id, progress);
+        char state[8192];
+        if (ui_uds_get_state_json(state, sizeof(state)) == 0) {
+            ws_command_send_ok(request_id, state);
+        } else {
+            ws_command_send_error(request_id, "Failed to get UDS state");
+        }
         return 0;
     }
     
     if (strcmp(cmd, "uds_logs") == 0) {
-        int limit = extract_json_int(json, "limit", 100);
-        (void)limit;
-        // 当前实现未对外暴露日志缓存，先返回空数组（后续可扩展为环形缓存）
-        char logs[256];
-        snprintf(logs, sizeof(logs), "{\"logs\":[]}");
-        ws_command_send_ok(request_id, logs);
+        char state[8192];
+        if (ui_uds_get_state_json(state, sizeof(state)) == 0) {
+            ws_command_send_ok(request_id, state);
+        } else {
+            ws_command_send_error(request_id, "Failed to get UDS logs");
+        }
+        return 0;
+    }
+
+    if (strcmp(cmd, "uds_state") == 0) {
+        char state[8192];
+        if (ui_uds_get_state_json(state, sizeof(state)) == 0) {
+            ws_command_send_ok(request_id, state);
+        } else {
+            ws_command_send_error(request_id, "Failed to get UDS state");
+        }
         return 0;
     }
     
@@ -567,9 +577,7 @@ static int handle_uds_cmd(const char *json, const char *cmd, const char *request
     }
     
     if (strcmp(cmd, "uds_start") == 0) {
-        // 开始UDS刷写
-        extern int uds_start_flash(void);
-        if (uds_start_flash() == 0) {
+        if (ui_uds_remote_start() == 0) {
             ws_command_send_ok(request_id, NULL);
         } else {
             ws_command_send_error(request_id, "Failed to start flashing");
@@ -578,9 +586,7 @@ static int handle_uds_cmd(const char *json, const char *cmd, const char *request
     }
     
     if (strcmp(cmd, "uds_stop") == 0) {
-        // 停止UDS刷写
-        extern void uds_stop_flash(void);
-        uds_stop_flash();
+        ui_uds_remote_stop();
         ws_command_send_ok(request_id, NULL);
         return 0;
     }
@@ -591,8 +597,11 @@ static int handle_uds_cmd(const char *json, const char *cmd, const char *request
         // 远程点击"选择文件"按钮
         char *path = extract_json_string(json, "path");
         if (path) {
-            ui_remote_uds_select_file(path);
-            ws_command_send_ok(request_id, NULL);
+            if (ui_uds_remote_set_file(path) == 0) {
+                ws_command_send_ok(request_id, NULL);
+            } else {
+                ws_command_send_error(request_id, "Invalid file path");
+            }
             free(path);
         } else {
             ws_command_send_error(request_id, "Missing file path");
@@ -601,15 +610,16 @@ static int handle_uds_cmd(const char *json, const char *cmd, const char *request
     }
     
     if (strcmp(cmd, "uds_click_start") == 0) {
-        // 远程点击"开始刷写"按钮
-        ui_remote_uds_click_start();
-        ws_command_send_ok(request_id, NULL);
+        if (ui_uds_remote_start() == 0) {
+            ws_command_send_ok(request_id, NULL);
+        } else {
+            ws_command_send_error(request_id, "Failed to start flashing");
+        }
         return 0;
     }
     
     if (strcmp(cmd, "uds_click_stop") == 0) {
-        // 远程点击"停止"按钮
-        ui_remote_uds_click_stop();
+        ui_uds_remote_stop();
         ws_command_send_ok(request_id, NULL);
         return 0;
     }
@@ -617,14 +627,13 @@ static int handle_uds_cmd(const char *json, const char *cmd, const char *request
     if (strcmp(cmd, "uds_set_bitrate") == 0) {
         // 远程设置UDS波特率
         int bitrate = extract_json_int(json, "bitrate", (int)g_app_config.can0_bitrate);
-        ui_remote_uds_set_bitrate((uint32_t)bitrate);
+        ui_remote_uds_set_params(NULL, (uint32_t)bitrate, 0, 0, 0);
         ws_command_send_ok(request_id, NULL);
         return 0;
     }
     
     if (strcmp(cmd, "uds_clear_log") == 0) {
-        // 远程清除日志
-        ui_remote_uds_clear_log();
+        ui_uds_remote_clear_logs();
         ws_command_send_ok(request_id, NULL);
         return 0;
     }
@@ -1012,7 +1021,7 @@ static int handle_system_cmd(const char *json, const char *cmd, const char *requ
         char status[512];
         snprintf(status, sizeof(status),
                 "{\"device_id\":\"%s\",\"can_running\":%s,\"uptime\":%ld}",
-                ws_client_get_device_id(),
+                remote_transport_get_device_id(),
                 can_handler_is_running() ? "true" : "false",
                 time(NULL));
         ws_command_send_ok(request_id, status);

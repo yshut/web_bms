@@ -21,14 +21,12 @@
     // 路由优先用 server/web_server.py 提供的入口；工具页用 /static/*.html
     return [
       { href: "/", label: "主页" },
-      { href: "/dashboard", label: "仪表盘" },
       { href: "/can", label: "CAN 监控" },
-      { href: "/dbc", label: "DBC 解析" },
-      { href: "/static/dbc_tool.html", label: "DBC 工具" },
-      { href: "/uds", label: "UDS" },
       { href: "/hardware", label: "硬件监控" },
-      { href: "/static/file_manager.html", label: "文件管理" },
-      { href: "/test", label: "API 测试" },
+      { href: "/dbc", label: "DBC 解析" },
+      { href: "/uds", label: "UDS" },
+      { href: "/files", label: "文件管理" },
+      { href: "/device_config", label: "设备配置" },
     ];
   }
 
@@ -84,7 +82,7 @@
 
     document.body.prepend(header);
 
-    // 大多数页面需要预留顶部空间；全屏类页面（dashboard 旧版）不强制 padding
+    // 大多数页面需要预留顶部空间；全屏类页面不强制 padding
     const hasFullscreenStage = !!document.querySelector(".stage, canvas#bg");
     document.documentElement.classList.add("app-has-header");
     if (hasFullscreenStage) {

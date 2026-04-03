@@ -41,6 +41,14 @@ typedef struct {
     uint32_t bitrate;
 } bitrate_data_t;
 
+typedef struct {
+    char iface[16];
+    uint32_t bitrate;
+    uint32_t tx_id;
+    uint32_t rx_id;
+    uint32_t block_size;
+} uds_param_data_t;
+
 /* ========== 初始化和清理 ========== */
 
 int ui_remote_init(void)
@@ -214,8 +222,8 @@ static void uds_select_file_async_cb(void *user_data)
     
     log_info("[远程控制] 选择UDS文件: %s", path);
     
-    // 设置UDS文件路径
-    uds_set_file_path(path);
+    // 设置UDS文件路径并同步到页面状态
+    ui_uds_remote_set_file(path);
     
     log_info("[远程控制] UDS文件已选择");
     free(path);
@@ -235,9 +243,7 @@ static void uds_start_async_cb(void *user_data)
 {
     (void)user_data;
     log_info("[远程控制] 开始UDS刷写");
-    
-    // 开始刷写
-    uds_start_flash();
+    ui_uds_remote_start();
     
     log_info("[远程控制] UDS刷写已开始");
 }
@@ -251,9 +257,7 @@ static void uds_stop_async_cb(void *user_data)
 {
     (void)user_data;
     log_info("[远程控制] 停止UDS刷写");
-    
-    // 停止刷写
-    uds_stop_flash();
+    ui_uds_remote_stop();
     
     log_info("[远程控制] UDS刷写已停止");
 }
@@ -269,9 +273,7 @@ static void uds_set_bitrate_async_cb(void *user_data)
     if (!bitrate) return;
     
     log_info("[远程控制] 设置UDS波特率: %u", *bitrate);
-    
-    // 设置CAN0波特率（UDS使用CAN0）
-    can_handler_configure("can0", *bitrate);
+    ui_uds_remote_set_params(NULL, *bitrate, 0, 0, 0);
     
     log_info("[远程控制] UDS波特率已设置");
     free(bitrate);
@@ -286,20 +288,48 @@ void ui_remote_uds_set_bitrate(uint32_t bitrate)
     lv_async_call(uds_set_bitrate_async_cb, data);
 }
 
+static void uds_set_params_async_cb(void *user_data)
+{
+    uds_param_data_t *data = (uds_param_data_t *)user_data;
+    if (!data) return;
+
+    log_info("[远程控制] 同步UDS参数: iface=%s bitrate=%u tx=0x%X rx=0x%X blk=%u",
+             data->iface[0] ? data->iface : "(keep)", data->bitrate, data->tx_id, data->rx_id, data->block_size);
+    ui_uds_remote_set_params(data->iface, data->bitrate, data->tx_id, data->rx_id, data->block_size);
+    free(data);
+}
+
+void ui_remote_uds_set_params(const char *iface, uint32_t bitrate, uint32_t tx_id, uint32_t rx_id, uint32_t block_size)
+{
+    uds_param_data_t *data = (uds_param_data_t *)malloc(sizeof(uds_param_data_t));
+    if (!data) return;
+    memset(data, 0, sizeof(*data));
+    if (iface && iface[0]) {
+        strncpy(data->iface, iface, sizeof(data->iface) - 1);
+    }
+    data->bitrate = bitrate;
+    data->tx_id = tx_id;
+    data->rx_id = rx_id;
+    data->block_size = block_size;
+    lv_async_call(uds_set_params_async_cb, data);
+}
+
 static void uds_clear_log_async_cb(void *user_data)
 {
     (void)user_data;
     log_info("[远程控制] 清除UDS日志");
-    
-    // TODO: 实现清除UDS日志的逻辑
-    // 需要访问ui_uds的日志列表
-    
+    ui_uds_remote_clear_logs();
     log_info("[远程控制] UDS日志已清除");
 }
 
 void ui_remote_uds_clear_log(void)
 {
     lv_async_call(uds_clear_log_async_cb, NULL);
+}
+
+int ui_remote_uds_get_state_json(char *buf, size_t size)
+{
+    return ui_uds_get_state_json(buf, size);
 }
 
 /* ========== WiFi页面控制 ========== */

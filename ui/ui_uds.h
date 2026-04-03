@@ -7,6 +7,7 @@
 #define UI_UDS_H
 
 #include "lvgl.h"
+#include <stddef.h>
 
 typedef struct {
     lv_obj_t *screen;
@@ -37,5 +38,12 @@ typedef struct {
 
 ui_uds_t* ui_uds_create(void);
 void ui_uds_destroy(ui_uds_t *uds);
+
+int ui_uds_remote_set_file(const char *path);
+void ui_uds_remote_set_params(const char *iface, uint32_t bitrate, uint32_t tx_id, uint32_t rx_id, uint32_t block_size);
+int ui_uds_remote_start(void);
+void ui_uds_remote_stop(void);
+void ui_uds_remote_clear_logs(void);
+int ui_uds_get_state_json(char *buf, size_t size);
 
 #endif /* UI_UDS_H */

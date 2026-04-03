@@ -5,6 +5,7 @@
 
 #include "app_manager.h"
 #include "../utils/logger.h"
+#include "remote_transport.h"
 #include "../ui/ui_home.h"
 #include "../ui/ui_can_monitor.h"
 #include "../ui/ui_uds.h"
@@ -104,12 +105,10 @@ int app_manager_switch_to_page(app_page_t page)
                 lv_scr_load(g_app_manager.ui_home->screen);
                 
                 // 强制更新WebSocket连接状态（解决返回主页时显示离线的问题）
-                extern bool ws_client_is_connected(void);
-                extern int ws_client_get_server_info(char *host, size_t host_size, uint16_t *port);
-                if (ws_client_is_connected()) {
+                if (remote_transport_is_connected()) {
                     char host[128];
                     uint16_t port;
-                    if (ws_client_get_server_info(host, sizeof(host), &port) == 0) {
+                    if (remote_transport_get_server_info(host, sizeof(host), &port) == 0) {
                         extern void ui_home_update_server_status(ui_home_t *ui, bool connected, const char *host, uint16_t port);
                         ui_home_update_server_status(g_app_manager.ui_home, true, host, port);
                         log_info("主页面：更新WebSocket状态为已连接");

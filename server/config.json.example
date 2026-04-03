@@ -1,5 +1,7 @@
 {
-  "_comment": "服务器配置文件 - 部署时请复制为 config.json 并修改相应配置",
+  "_comment": "服务器配置文件 - 部署时请复制为 config.json 并修改相应配置。默认推荐连接外部 MQTT broker。若服务运行在 WSL 且开发板经 Windows 访问，请将 public_host 配成 Windows 主机局域网 IP，并在 Windows 上做端口转发。",
+  
+  "public_host": "192.168.100.1",
   
   "qt_client": {
     "_comment": "QT客户端连接配置（当服务器作为客户端连接QT时使用）",
@@ -24,6 +26,26 @@
     "_comment": "WebSocket服务器配置（QT客户端通过WebSocket连接）",
     "listen_host": "0.0.0.0",
     "listen_port": 5052
+  },
+
+  "mqtt": {
+    "_comment": "MQTT 配置。服务端本身不是 broker，而是连接到外部 broker 并桥接到 Web UI。若 host=127.0.0.1，可由 web_server.py 自动拉起本地 mosquitto。",
+    "enable": true,
+    "host": "127.0.0.1",
+    "port": 1883,
+    "embedded_broker": false,
+    "embedded_bind_host": "0.0.0.0",
+    "embedded_port": 1883,
+    "auto_start_local_broker": true,
+    "mosquitto_bin": "mosquitto",
+    "username": "",
+    "password": "",
+    "client_id": "app_lvgl_server",
+    "keepalive_s": 30,
+    "qos": 1,
+    "topic_prefix": "app_lvgl",
+    "use_tls": false,
+    "ws_url": ""
   },
   
   "paths": {

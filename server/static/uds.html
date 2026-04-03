@@ -4,7 +4,6 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>UDS 固件下载</title>
-  <link rel="icon" href="/static/dashboard/favicon.ico">
   <link rel="stylesheet" href="/static/shared.css">
   <style>
     :root { --bg:#0b2447; --panel:#0d366b40; --border:#3f8cff4d; --text:#d7e3ff; --acc:#7fb3ff; }
@@ -48,7 +47,7 @@
     <div class="title">
       <h1>UDS 固件下载</h1>
       <div class="row">
-        <a href="/dashboard">返回仪表盘</a>
+        <a href="/">返回主页</a>
       </div>
     </div>
 
@@ -104,10 +103,18 @@
         </div>
         <div class="spacer"></div>
         <div class="progress">
-          <label>进度</label>
-          <div id="progressText" class="mono">0%</div>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+            <label>进度</label>
+            <div id="progressText" class="mono" style="font-size:15px;font-weight:600;color:#0ea5e9">0%</div>
+          </div>
+          <div style="background:#1e293b;border-radius:6px;height:14px;overflow:hidden;border:1px solid #334155">
+            <div id="progressBar" style="height:14px;width:0%;background:linear-gradient(90deg,#0284c7,#0ea5e9);border-radius:6px;transition:width .4s;position:relative">
+              <div style="position:absolute;right:6px;top:50%;transform:translateY(-50%);font-size:10px;color:#fff;font-weight:600" id="progressBarText"></div>
+            </div>
+          </div>
+          <div id="progressEta" style="font-size:12px;color:#64748b;margin-top:4px"></div>
         </div>
-        <div id="progressRaw" class="hint mono" style="margin-top:8px"></div>
+        <div id="progressRaw" class="hint mono" style="margin-top:8px;font-size:11px;line-height:1.6"></div>
       </div>
 
       <div class="panel">
@@ -147,102 +154,269 @@
     const progressText = qs('progressText');
     const progressRaw = qs('progressRaw');
     const logsEl = qs('logs');
-  // 文件管理已迁移
+    const txIdEl = qs('txid');
+    const rxIdEl = qs('rxid');
+    const blkEl = qs('blk');
 
-  let BASE_DIR = '';
-    let progressTimer = null;
+    let BASE_DIR = '';
+    let stateTimer = null;
+    let stateBusy = false;
+    let _canCfg = { can0_bitrate: 500000, can1_bitrate: 500000 };
+
+    async function fetchCanConfig() {
+      try {
+        const r = await fetch('/api/device/can_config');
+        const j = await r.json().catch(() => ({}));
+        if (j && j.ok && j.config) {
+          _canCfg = j.config;
+        }
+      } catch (e) {}
+    }
+
+    function bitrateForIface(iface) {
+      if (iface === 'can1') return _canCfg.can1_bitrate || 500000;
+      return _canCfg.can0_bitrate || 500000;
+    }
 
     function setStatus(txt, on) {
       statusText.textContent = txt || '';
       statusDot.className = 'dot' + (on ? ' on' : '');
     }
 
+    function setValueIfIdle(el, value) {
+      if (!el || value == null) return;
+      if (document.activeElement === el) return;
+      const next = String(value);
+      if (el.value !== next) el.value = next;
+    }
+
+    /* 用于 select 元素的安全赋值（先检查 option 是否存在） */
+    function setSelectIfIdle(el, value) {
+      if (!el || value == null) return;
+      if (document.activeElement === el) return;
+      const opt = Array.from(el.options).find(o => o.value === String(value));
+      if (opt && el.value !== String(value)) el.value = String(value);
+    }
+
+    function joinPosix(a, b) {
+      if (!a) return b || '';
+      if (!b) return a;
+      return a.endsWith('/') ? (a + b) : (a + '/' + b);
+    }
+
+    function showPicker(open) {
+      qs('pickerModal').classList[open ? 'remove' : 'add']('hidden');
+    }
+
+    function applyState(state) {
+      if (!state || typeof state !== 'object') return;
+      /* 字段更新：仅在用户未聚焦时更新，保留用户编辑 */
+      if (state.iface)      setSelectIfIdle(ifaceEl, state.iface);
+      /* 轮询时不覆盖波特率（保留用户手动设置），仅首次同步时更新 */
+      if (state.tx_id)      setValueIfIdle(txIdEl, state.tx_id);
+      if (state.rx_id)      setValueIfIdle(rxIdEl, state.rx_id);
+      if (state.block_size) setValueIfIdle(blkEl, state.block_size);
+      if (state.path)       setValueIfIdle(s19PathEl, state.path);
+
+      const percent = Math.min(100, Math.max(0, Number(state.percent || 0)));
+      progressText.textContent = percent.toFixed(1) + '%';
+      const bar = qs('progressBar');
+      const barTxt = qs('progressBarText');
+      if (bar) {
+        bar.style.width = percent + '%';
+        bar.style.background = percent >= 100 ? 'linear-gradient(90deg,#16a34a,#22c55e)'
+                              : state.running ? 'linear-gradient(90deg,#0284c7,#0ea5e9)'
+                              : 'linear-gradient(90deg,#475569,#64748b)';
+      }
+      if (barTxt) barTxt.textContent = percent > 10 ? percent.toFixed(0)+'%' : '';
+
+      // ETA 估算（根据进度和运行状态）
+      const etaEl = qs('progressEta');
+      if (etaEl) {
+        if (state.running && percent > 0 && percent < 100) {
+          etaEl.textContent = '下载中…';
+        } else if (percent >= 100) {
+          etaEl.textContent = '✓ 下载完成';
+          etaEl.style.color = '#22c55e';
+        } else {
+          etaEl.textContent = '';
+        }
+      }
+
+      progressRaw.innerHTML =
+        '<span style="color:#64748b">接口:</span> ' + String(state.iface || '-') +
+        ' &nbsp; <span style="color:#64748b">波特率:</span> ' + String(state.bitrate || '-') +
+        ' &nbsp; <span style="color:#64748b">TX/RX:</span> ' + String(state.tx_id || '-') + '/' + String(state.rx_id || '-') +
+        ' &nbsp; <span style="color:#64748b">块大小:</span> ' + String(state.block_size || '-') +
+        '<br><span style="color:#64748b">文件:</span> <span style="color:#e2e8f0">' + String(state.path || '-') + '</span>';
+
+      if (state.running) {
+        setStatus('下载中', true);
+      } else if (percent >= 100) {
+        setStatus('已完成', false);
+      } else if (state.path) {
+        setStatus('待开始', false);
+      } else {
+        setStatus('空闲', false);
+      }
+
+      const logs = Array.isArray(state.logs) ? state.logs : [];
+      if (logs.length) {
+        const atBottom = logsEl.scrollHeight - logsEl.clientHeight - logsEl.scrollTop < 40;
+        logsEl.textContent = logs.join('\n');
+        if (state.running || atBottom) logsEl.scrollTop = logsEl.scrollHeight;
+      } else if (!state.running) {
+        logsEl.textContent = '暂无日志';
+      }
+    }
+
+    async function refreshState() {
+      if (stateBusy) return;
+      stateBusy = true;
+      try {
+        const r = await fetch('/api/uds/state');
+        const j = await r.json().catch(() => ({}));
+        if (j && j.ok && j.state) {
+          applyState(j.state);
+        }
+      } catch (e) {
+      } finally {
+        stateBusy = false;
+      }
+    }
+
+    function startStatePolling() {
+      if (stateTimer) return;
+      stateTimer = setInterval(refreshState, 1000);
+    }
+
     async function applyCan() {
+      const syncMsg = qs('applyMsg');
+      syncMsg.textContent = '正在同步到设备...';
+      syncMsg.style.color = '';
       const body = {
         iface: ifaceEl.value || 'can0',
-        bitrate: parseInt(bitrateEl.value||'500000', 10),
-        tx_id: (qs('txid').value || '7F3').trim(),
-        rx_id: (qs('rxid').value || '7FB').trim(),
-        block_size: parseInt(qs('blk').value || '256', 10)
+        bitrate: parseInt(bitrateEl.value || '500000', 10),
+        tx_id: (txIdEl.value || '7F3').trim(),
+        rx_id: (rxIdEl.value || '7FB').trim(),
+        block_size: parseInt(blkEl.value || '256', 10)
       };
-      const r = await fetch('/api/uds/config', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
-      const j = await r.json().catch(()=>({}));
+      const r = await fetch('/api/uds/config', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(body)
+      });
+      const j = await r.json().catch(() => ({}));
       if (j && j.ok) {
-        qs('applyMsg').textContent = '已同步到设备';
+        syncMsg.textContent = '已同步到设备 ✓';
+        syncMsg.style.color = '#22c55e';
+        setTimeout(() => { syncMsg.textContent = ''; syncMsg.style.color = ''; }, 3000);
+        if (j.device && j.device.state) applyState(j.device.state);
+        await refreshState();
         return;
       }
-      // 兼容旧设备：不支持 uds_set_params
+      syncMsg.style.color = '#f87171';
       const dev = (j && j.device) || {};
       const e1 = dev && dev.uds_set_params && (dev.uds_set_params.error || dev.uds_set_params.msg);
       if (String(e1 || '').toLowerCase().includes('unknown')) {
-        qs('applyMsg').textContent = '设备端 lvgl_app 版本过旧：不支持同步 TX/RX/Block（请升级开发板程序）';
+        syncMsg.textContent = '设备端 lvgl_app 版本过旧：不支持同步 TX/RX/Block';
       } else {
-        qs('applyMsg').textContent = '失败: ' + (j && (j.error||j.msg||JSON.stringify(j)));
+        syncMsg.textContent = '失败: ' + (j && (j.error || j.msg || JSON.stringify(j)));
       }
     }
 
     async function upload() {
       const f = fileEl.files && fileEl.files[0];
-      if (!f) { qs('uploadMsg').textContent = '请选择 .s19 文件'; return; }
+      if (!f) {
+        qs('uploadMsg').textContent = '请选择 .s19 文件';
+        return;
+      }
+      qs('uploadMsg').textContent = '准备上传...';
       const fd = new FormData();
       fd.append('file', f);
       if (BASE_DIR) fd.append('base', BASE_DIR);
-      const r = await fetch('/api/uds/upload', { method:'POST', body: fd });
-      const j = await r.json().catch(()=>({}));
-      if (j && j.ok) {
-        qs('uploadMsg').textContent = j.auto_set_file === false
-          ? ('上传成功，但自动设置路径失败：' + (j.auto_set_error || 'unknown'))
-          : '上传成功';
-        // 使用后端返回的实际路径（后端会做文件名规范化，避免中文路径导致设备端无法识别）
-        if (j.path) {
-          s19PathEl.value = String(j.path);
-        } else if (BASE_DIR) {
-          s19PathEl.value = (BASE_DIR.endsWith('/')?BASE_DIR:BASE_DIR+'/') + (f.name || 'firmware.s19');
-        }
-      } else {
-        qs('uploadMsg').textContent = '上传失败: ' + (j && (j.error||j.msg||JSON.stringify(j)));
-      }
+
+      await new Promise((resolve) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', '/api/uds/upload', true);
+        xhr.upload.onprogress = (evt) => {
+          if (!evt.lengthComputable) return;
+          const pct = Math.max(0, Math.min(100, Math.round((evt.loaded / evt.total) * 100)));
+          qs('uploadMsg').textContent = '上传中: ' + pct + '%';
+        };
+        xhr.onerror = () => {
+          qs('uploadMsg').textContent = '上传失败: 网络异常';
+          resolve();
+        };
+        xhr.onload = async () => {
+          let j = {};
+          try { j = JSON.parse(xhr.responseText || '{}'); } catch (e) {}
+          if (j && j.ok) {
+            const sizeMB = j.size ? (' (' + (j.size/1024/1024).toFixed(2) + ' MB)') : '';
+            qs('uploadMsg').textContent = '上传成功，已保存到服务器' + sizeMB;
+            if (j.path) {
+              s19PathEl.value = String(j.path);
+            }
+            await refreshState();
+          } else {
+            qs('uploadMsg').textContent = '上传失败: ' + (j && (j.error || j.msg || xhr.responseText || 'unknown'));
+          }
+          resolve();
+        };
+        xhr.send(fd);
+      });
     }
 
     async function setPath() {
       const path = (s19PathEl.value || '').trim();
-      if (!path) { qs('pathMsg').textContent = '请输入设备文件路径'; return; }
-      const r = await fetch('/api/uds/set_file', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ path }) });
-      const j = await r.json().catch(()=>({}));
-      qs('pathMsg').textContent = j && j.ok ? '已设置: ' + path : ('失败: ' + (j && (j.error||j.msg||JSON.stringify(j))));
-      return !!(j && j.ok);
+      if (!path) {
+        qs('pathMsg').textContent = '请输入设备文件路径';
+        return false;
+      }
+      const r = await fetch('/api/uds/set_file', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ path })
+      });
+      const j = await r.json().catch(() => ({}));
+      if (j && j.ok) {
+        qs('pathMsg').textContent = '已同步文件路径';
+        await refreshState();
+        return true;
+      }
+      qs('pathMsg').textContent = '失败: ' + (j && (j.error || j.msg || JSON.stringify(j)));
+      return false;
     }
-
-    function joinPosix(a, b) { if (!a) return b||''; if (!b) return a; return a.endsWith('/') ? (a + b) : (a + '/' + b); }
-
-    function showPicker(open) { qs('pickerModal').classList[open? 'remove':'add']('hidden'); }
 
     async function openDevicePicker() {
       try {
         qs('pickerInfo').textContent = '正在扫描设备上的固件文件 (.s19)...';
         qs('pickerList').innerHTML = '';
         showPicker(true);
-        const r = await fetch('/api/uds/list');
-        const j = await r.json().catch(()=>({}));
+        const url = BASE_DIR ? ('/api/uds/list?base=' + encodeURIComponent(BASE_DIR)) : '/api/uds/list';
+        const r = await fetch(url);
+        const j = await r.json().catch(() => ({}));
         const files = (j && j.data && j.data.files) || j.files || [];
         if (!j || !j.ok) {
           qs('pickerInfo').textContent = '获取文件列表失败：' + JSON.stringify(j);
           return;
         }
-        qs('pickerInfo').textContent = files.length ? ('共找到 ' + files.length + ' 个固件文件') : '未找到 .s19 文件';
+        qs('pickerInfo').textContent = files.length ? ('共找到 ' + files.length + ' 个固件文件') : '服务器 uploads 目录暂无固件文件';
         if (!files.length) {
-          qs('pickerList').innerHTML = '<div class="picker-empty">在 ' + (BASE_DIR||'/mnt') + ' 及其子目录未发现 .s19 文件</div>';
+          qs('pickerList').innerHTML = '<div class="picker-empty">请先通过"选择固件"上传 .s19/.hex/.bin 文件</div>';
           return;
         }
         const listEl = qs('pickerList');
         listEl.innerHTML = '';
-        files.forEach(rel => {
-          const full = joinPosix(BASE_DIR, rel);
+        files.forEach(item => {
+          const name = typeof item === 'string' ? item : (item.name || item);
+          const full = typeof item === 'object' && item.path ? item.path : joinPosix(BASE_DIR, name);
+          const size = typeof item === 'object' && item.size ? (' — ' + (item.size/1024/1024).toFixed(2) + ' MB') : '';
           const div = document.createElement('div');
           div.className = 'picker-item';
-          div.textContent = rel;
+          div.textContent = name + size;
           div.title = full;
-          div.addEventListener('click', async ()=>{
+          div.addEventListener('click', async () => {
             s19PathEl.value = full;
             await setPath();
             showPicker(false);
@@ -254,38 +428,14 @@
       }
     }
 
-    function startProgressPolling() {
-      stopProgressPolling();
-      progressTimer = setInterval(async ()=>{
-        try {
-          const r = await fetch('/api/uds/progress');
-          const j = await r.json();
-          if (j && j.ok) {
-            setStatus('下载中', true);
-            const percent = j.percent ?? j.progress ?? j.pct ?? 0;
-            progressText.textContent = String(percent) + '%';
-            progressRaw.textContent = JSON.stringify(j);
-          } else {
-            progressRaw.textContent = JSON.stringify(j);
-          }
-        } catch(e) {}
-      }, 1000);
-    }
-
-    function stopProgressPolling() {
-      if (progressTimer) { clearInterval(progressTimer); progressTimer = null; }
-    }
-
     async function startDownload() {
-      // 启动前自动 set_file，避免用户忘记点“设置路径”
       const okSet = await setPath();
       if (!okSet) return;
-      const r = await fetch('/api/uds/start', { method:'POST' });
-      const j = await r.json().catch(()=>({}));
+      const r = await fetch('/api/uds/start', { method: 'POST' });
+      const j = await r.json().catch(() => ({}));
       if (j && j.ok) {
-        setStatus('下载已启动', true);
-        startProgressPolling();
-        setTimeout(refreshLogs, 300);
+        qs('pathMsg').textContent = '已开始下载';
+        await refreshState();
       } else {
         setStatus('启动失败', false);
         progressRaw.textContent = JSON.stringify(j);
@@ -293,64 +443,97 @@
     }
 
     async function stopDownload() {
-      const r = await fetch('/api/uds/stop', { method:'POST' });
-      const j = await r.json().catch(()=>({}));
-      setStatus('已停止', false);
-      stopProgressPolling();
-      progressRaw.textContent = JSON.stringify(j);
-      setTimeout(refreshLogs, 300);
-    }
-
-    async function refreshLogs() {
-      const r = await fetch('/api/uds/logs?limit=200');
-      const j = await r.json().catch(()=>({}));
+      const r = await fetch('/api/uds/stop', { method: 'POST' });
+      const j = await r.json().catch(() => ({}));
       if (j && j.ok) {
-        const logs = (j.logs || j.data || j.items || []).map(x => (typeof x === 'string'? x : JSON.stringify(x)));
-        logsEl.textContent = logs.length ? logs.join('\n') : '暂无日志';
+        qs('pathMsg').textContent = '已停止下载';
+        await refreshState();
       } else {
-        logsEl.textContent = JSON.stringify(j);
+        progressRaw.textContent = JSON.stringify(j);
       }
     }
 
-  async function getBase() {
-    const r = await fetch('/api/fs/base');
-    const j = await r.json().catch(()=>({}));
-    if (j && j.ok && j.base) {
-      BASE_DIR = j.base;
-      if (!s19PathEl.value) s19PathEl.value = (BASE_DIR.endsWith('/')?BASE_DIR:BASE_DIR+'/') + 'firmware.s19';
+    async function refreshLogs() {
+      await refreshState();
     }
-  }
 
-  async function loadUdsConfig() {
-    try {
-      const r = await fetch('/api/uds/config');
-      const j = await r.json().catch(()=>({}));
-      const c = (j && j.ok && j.config) ? j.config : null;
-      if (!c) return;
-      ifaceEl.value = c.iface || 'can0';
-      bitrateEl.value = String(c.bitrate || 500000);
-      qs('txid').value = String(c.tx_id || '7F3');
-      qs('rxid').value = String(c.rx_id || '7FB');
-      qs('blk').value = String(c.block_size || 256);
-    } catch (e) {}
-  }
+    let _firstSync = false;
 
-  // listBase() 移除
+    async function getBase() {
+      const r = await fetch('/api/fs/base').catch(() => null);
+      const j = r ? await r.json().catch(() => ({})) : {};
+      if (j && j.ok && j.base) BASE_DIR = j.base;
+    }
 
-    // Wire events
+    /* 启动时从设备同步一次所有配置 */
+    async function syncFromDevice() {
+      const syncMsg = qs('applyMsg');
+      if (syncMsg) syncMsg.textContent = '正在从设备同步配置...';
+      try {
+        const r = await fetch('/api/uds/state');
+        const j = await r.json().catch(() => ({}));
+        const state = j && j.ok && j.state ? j.state : null;
+        if (state) {
+          /* 强制用设备值覆盖所有字段（首次同步，不检查焦点） */
+          const ifaceOpt = Array.from(ifaceEl.options).find(o => o.value === state.iface);
+          if (state.iface && ifaceOpt) ifaceEl.value = state.iface;
+          /* 以设备 CAN 配置波特率为准（与硬件监控一致），忽略 UDS 历史值 */
+          const canBr = bitrateForIface(state.iface || ifaceEl.value);
+          bitrateEl.value = canBr || state.bitrate || 500000;
+          if (state.tx_id)      txIdEl.value    = state.tx_id;
+          if (state.rx_id)      rxIdEl.value    = state.rx_id;
+          if (state.block_size) blkEl.value     = state.block_size;
+          if (state.path)       s19PathEl.value = state.path;
+          applyState(state);
+          if (syncMsg) {
+            syncMsg.textContent = '已与设备同步 ✓';
+            syncMsg.style.color = '#22c55e';
+            setTimeout(() => { syncMsg.textContent = ''; syncMsg.style.color = ''; }, 3000);
+          }
+          _firstSync = true;
+          return;
+        }
+      } catch (e) {}
+      /* 如果设备不可达，从服务端缓存加载 */
+      try {
+        const r2 = await fetch('/api/uds/config');
+        const j2 = await r2.json().catch(() => ({}));
+        const c = j2 && j2.ok && j2.config ? j2.config : null;
+        if (c) {
+          if (c.iface) ifaceEl.value = c.iface;
+          if (c.bitrate) bitrateEl.value = c.bitrate;
+          if (c.tx_id)   txIdEl.value   = c.tx_id;
+          if (c.rx_id)   rxIdEl.value   = c.rx_id;
+          if (c.block_size) blkEl.value = c.block_size;
+        }
+        if (syncMsg) syncMsg.textContent = '⚠ 设备离线，已加载服务端缓存配置';
+      } catch (e) {}
+      _firstSync = true;
+    }
+
     qs('btnApply').addEventListener('click', applyCan);
     qs('btnUpload').addEventListener('click', upload);
     qs('btnSetPath').addEventListener('click', setPath);
     qs('btnPick').addEventListener('click', openDevicePicker);
-    qs('btnClosePicker').addEventListener('click', ()=> showPicker(false));
+    qs('btnClosePicker').addEventListener('click', () => showPicker(false));
     qs('btnStart').addEventListener('click', startDownload);
     qs('btnStop').addEventListener('click', stopDownload);
     qs('btnRefreshLogs').addEventListener('click', refreshLogs);
-  // 文件管理按钮已移除
 
-    // Init
-    getBase();
-    loadUdsConfig();
+    /* 切换接口时自动填入该接口对应的配置波特率 */
+    ifaceEl.addEventListener('change', () => {
+      const configured = bitrateForIface(ifaceEl.value);
+      if (document.activeElement !== bitrateEl) {
+        bitrateEl.value = configured;
+      }
+    });
+
+    (async () => {
+      await getBase();
+      await fetchCanConfig();   /* 先拉 CAN 配置，供接口切换使用 */
+      await syncFromDevice();   /* 再用设备 UDS state 覆盖（包含实际在用值） */
+      startStatePolling();
+    })();
   </script>
   <script src="/static/shared.js"></script>
 </body>

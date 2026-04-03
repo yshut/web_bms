@@ -6,7 +6,7 @@
 #include "can_frame_dispatcher.h"
 #include "can_recorder.h"
 #include "can_frame_buffer.h"
-#include "ws_client.h"
+#include "remote_transport.h"
 #include "../utils/logger.h"
 #include <stdio.h>
 #include <string.h>
@@ -17,6 +17,10 @@
 /* UI回调（由UI页面注册） */
 static can_frame_callback_t g_ui_callback = NULL;
 static void *g_ui_callback_user_data = NULL;
+
+/* CAN-MQTT 引擎回调 */
+static can_frame_callback_t g_engine_callback = NULL;
+static void *g_engine_callback_user_data = NULL;
 
 /* 调试计数器 */
 static int g_frame_count = 0;
@@ -45,7 +49,7 @@ void can_frame_dispatcher_callback(int channel, const can_frame_t *frame, void *
     /* 1. 分发到录制器 */
     can_recorder_frame_callback(channel, frame, NULL);
     
-    /* 2. 分发到WebSocket */
+    /* 2. 分发到远程传输层 */
     // 获取当前时间戳
     struct timeval tv;
     gettimeofday(&tv, NULL);
@@ -85,11 +89,16 @@ void can_frame_dispatcher_callback(int channel, const can_frame_t *frame, void *
                  time_str, channel_name, id, frame->can_dlc, data_str);
     }
     
-    ws_client_report_can_frame(channel, frame_text);
+    remote_transport_report_can_frame(channel, frame_text);
     
     /* 3. 分发到UI回调（如果已注册） */
     if (g_ui_callback) {
         g_ui_callback(channel, frame, g_ui_callback_user_data);
+    }
+
+    /* 4. 分发到 CAN-MQTT 引擎回调（如果已注册） */
+    if (g_engine_callback) {
+        g_engine_callback(channel, frame, g_engine_callback_user_data);
     }
 }
 
@@ -105,6 +114,21 @@ void can_frame_dispatcher_register_ui_callback(can_frame_callback_t callback, vo
         log_info("CAN帧分发器: UI回调已注册");
     } else {
         log_info("CAN帧分发器: UI回调已注销");
+    }
+}
+
+/**
+ * @brief 注册 CAN-MQTT 引擎回调
+ */
+void can_frame_dispatcher_register_engine_callback(can_frame_callback_t callback, void *user_data)
+{
+    g_engine_callback = callback;
+    g_engine_callback_user_data = user_data;
+
+    if (callback) {
+        log_info("CAN帧分发器: 引擎回调已注册");
+    } else {
+        log_info("CAN帧分发器: 引擎回调已注销");
     }
 }
 

@@ -1,0 +1,29 @@
+# 开发板远程连接配置示例
+# 若服务运行在 WSL，且开发板通过 Windows 访问：
+# 1) mqtt_host / ws_host 请填写 Windows 主机局域网 IP
+# 2) 不要填写 127.0.0.1 / localhost / WSL 的 172.* 地址
+
+transport_mode=mqtt
+
+# MQTT 主通道
+mqtt_host=192.168.100.1
+mqtt_port=1883
+mqtt_client_id=
+mqtt_username=
+mqtt_password=
+mqtt_keepalive_s=30
+mqtt_qos=1
+mqtt_topic_prefix=app_lvgl
+mqtt_use_tls=false
+
+# WebSocket 回退通道
+ws_host=192.168.100.1
+ws_port=5052
+ws_path=/ws
+ws_use_ssl=false
+ws_reconnect_interval_ms=4000
+ws_keepalive_interval_s=20
+
+# 其他常用项
+log_file=/tmp/lvgl_app.log
+log_level=debug

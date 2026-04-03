@@ -1,0 +1,533 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>CAN 信号解析规则编辑器</title>
+<style>
+:root{--bg:#0e1117;--panel:#161b22;--card:#1c2333;--border:#30363d;--accent:#58a6ff;--green:#3fb950;--yellow:#d29922;--red:#f85149;--text:#e6edf3;--text2:#8b949e;--text3:#6e7681}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font-family:'Segoe UI',system-ui,sans-serif;font-size:13px}
+.topbar{height:50px;background:var(--panel);border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 18px;gap:12px;position:sticky;top:0;z-index:200}
+.topbar-brand{font-size:16px;font-weight:700;color:var(--accent)}
+.topbar a{color:var(--text2);text-decoration:none;font-size:12px;padding:4px 10px;border-radius:5px}
+.topbar a:hover{background:var(--card);color:var(--text)}
+.btn{border:none;cursor:pointer;border-radius:5px;padding:5px 13px;font-size:12px;font-weight:500;transition:.15s;white-space:nowrap}
+.btn:hover:not(:disabled){opacity:.85}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+.btn-pri{background:var(--accent);color:#000}
+.btn-green{background:var(--green);color:#000}
+.btn-red{background:var(--red);color:#fff}
+.btn-sec{background:var(--card);color:var(--text);border:1px solid var(--border)}
+.btn-warn{background:var(--yellow);color:#000}
+.btn-sm{padding:3px 9px;font-size:11px}
+input,select{background:#0d1117;border:1px solid var(--border);color:var(--text);border-radius:4px;padding:4px 7px;font-size:12px}
+input:focus,select:focus{outline:none;border-color:var(--accent)}
+.toolbar{background:var(--panel);border-bottom:1px solid var(--border);padding:10px 18px;display:flex;flex-wrap:wrap;gap:8px;align-items:center;position:sticky;top:50px;z-index:190}
+.stat-bar{padding:6px 18px;background:var(--bg);border-bottom:1px solid var(--border);font-size:11px;color:var(--text3);display:flex;gap:16px;align-items:center;flex-wrap:wrap}
+.stat-bar .sv{color:var(--text);font-weight:600}
+.table-wrap{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:12px}
+th{background:var(--card);padding:6px 8px;text-align:left;color:var(--text3);font-size:11px;font-weight:600;border-bottom:2px solid var(--border);cursor:pointer;white-space:nowrap;user-select:none;position:sticky;top:0;z-index:10}
+th:hover{color:var(--text)}
+td{padding:4px 8px;border-bottom:1px solid #21262d;vertical-align:middle;white-space:nowrap;max-width:200px;overflow:hidden;text-overflow:ellipsis}
+tr.modified td{background:rgba(210,153,34,.06)}
+tr.editing td{background:rgba(88,166,255,.06)}
+tr:hover td{background:rgba(255,255,255,.02)}
+.badge-on{background:rgba(63,185,80,.18);color:var(--green);border-radius:3px;padding:1px 5px;font-size:10px}
+.badge-off{background:rgba(248,81,73,.13);color:var(--red);border-radius:3px;padding:1px 5px;font-size:10px}
+.val-live{color:var(--green);font-family:monospace}
+.val-live.stale{color:var(--text3)}
+.ep{background:var(--panel);border:1px solid var(--border);border-radius:6px;padding:14px;display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:14px}
+.ep-sec .ep-ttl{font-size:10px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid var(--border);padding-bottom:4px;margin-bottom:8px}
+.ep-row{display:flex;align-items:center;gap:6px;margin-bottom:6px}
+.ep-lbl{color:var(--text3);font-size:11px;min-width:90px}
+.ep-inp{flex:1}
+.ep-inp input,.ep-inp select{width:100%}
+.bit-grid{border-collapse:collapse;font-family:monospace;font-size:10px}
+.bit-grid th,.bit-grid td{width:22px;height:20px;text-align:center;border:1px solid var(--border)}
+.bit-grid th{background:var(--card);color:var(--text3);font-size:9px;font-weight:400}
+.b-sel{background:rgba(88,166,255,.45);color:#fff;font-weight:700}
+.b-start{background:var(--green);color:#000;font-weight:700}
+.prev-val{font-size:20px;font-weight:700;color:var(--accent);font-family:monospace}
+.pg{display:flex;gap:3px;align-items:center}
+.pg button{background:var(--card);border:1px solid var(--border);color:var(--text);border-radius:4px;padding:3px 8px;cursor:pointer;font-size:11px}
+.pg button.act{background:var(--accent);color:#000;border-color:var(--accent)}
+.pg button:disabled{opacity:.4;cursor:not-allowed}
+#toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%) translateY(50px);padding:9px 20px;border-radius:7px;font-size:12px;opacity:0;transition:.25s;z-index:9999;pointer-events:none}
+#toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+#toast.ok{background:var(--green);color:#000}
+#toast.err{background:var(--red);color:#fff}
+.fl-bar{position:fixed;bottom:14px;right:14px;background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:8px 12px;display:flex;gap:6px;flex-wrap:wrap;box-shadow:0 4px 20px rgba(0,0,0,.5);z-index:50;align-items:center;max-width:600px}
+</style>
+</head>
+<body>
+<div class="topbar">
+  <div class="topbar-brand">🔧 规则编辑器</div>
+  <a href="/">首页</a><a href="/rules">规则管理</a><a href="/bms">BMS看板</a>
+  <div style="margin-left:auto;display:flex;gap:8px;align-items:center">
+    <span id="mod-tip" style="color:var(--yellow);font-size:12px;display:none">⚠ <span id="mod-n">0</span> 条未保存</span>
+    <button class="btn btn-sec" onclick="loadData()">⟳ 重载</button>
+    <button class="btn btn-pri" id="btn-save" onclick="saveAll()" disabled>💾 保存并推送</button>
+  </div>
+</div>
+
+<div class="toolbar">
+  <input id="f-msg" style="width:160px" placeholder="消息名..." oninput="applyFilter()">
+  <input id="f-sig" style="width:160px" placeholder="信号名..." oninput="applyFilter()">
+  <input id="f-id"  style="width:90px"  placeholder="CAN ID..." oninput="applyFilter()">
+  <select id="f-ch" onchange="applyFilter()" style="width:80px">
+    <option value="">全部通道</option>
+    <option>can0</option><option>can1</option><option>any</option>
+  </select>
+  <select id="f-order" onchange="applyFilter()" style="width:110px">
+    <option value="">全部字节序</option>
+    <option value="little_endian">Intel(LE)</option>
+    <option value="big_endian">Motorola(BE)</option>
+  </select>
+  <select id="f-grp" onchange="applyFilter()" style="width:170px">
+    <option value="">全部消息组</option>
+  </select>
+  <button class="btn btn-sec btn-sm" onclick="clearF()">✕ 清除</button>
+  <span style="color:var(--text3)">每页</span>
+  <select id="f-ps" onchange="applyFilter();_page=1" style="width:60px">
+    <option>50</option><option selected>100</option><option>200</option>
+  </select>
+</div>
+
+<div class="stat-bar">
+  显示 <span class="sv" id="s-shown">-</span>/<span class="sv" id="s-total">-</span> 条 &nbsp;|&nbsp;
+  消息组 <span class="sv" id="s-grps">-</span> &nbsp;|&nbsp;
+  修改 <span class="sv" id="s-mods" style="color:var(--yellow)">0</span> 条 &nbsp;|&nbsp;
+  有实时值 <span class="sv" id="s-live" style="color:var(--green)">0</span> &nbsp;|&nbsp;
+  <div class="pg" id="pg-top"></div>
+</div>
+
+<div class="table-wrap">
+<table>
+  <thead><tr>
+    <th style="width:26px"><input type="checkbox" id="chk-all" onchange="toggleAll(this.checked)"></th>
+    <th onclick="sb('message_name')">消息</th>
+    <th onclick="sb('signal_name')">信号</th>
+    <th onclick="sb('can_id')">CAN ID</th>
+    <th>通道</th>
+    <th onclick="sb('start_bit')">起始位</th>
+    <th onclick="sb('bit_length')">位长</th>
+    <th>字节序</th>
+    <th>符号</th>
+    <th onclick="sb('factor')">Factor</th>
+    <th onclick="sb('offset')">Offset</th>
+    <th>单位</th>
+    <th style="color:var(--green)">实时值</th>
+    <th>启用</th>
+    <th>操作</th>
+  </tr></thead>
+  <tbody id="tbody"></tbody>
+</table>
+</div>
+<div style="padding:8px 18px;display:flex;justify-content:center"><div class="pg" id="pg-bot"></div></div>
+
+<!-- 批量操作浮动栏 -->
+<div class="fl-bar">
+  <span style="font-size:11px;color:var(--text3)">批量(勾选行):</span>
+  <button class="btn btn-sec btn-sm" onclick="batchSet('decode.start_bit','起始位',true)">改起始位</button>
+  <button class="btn btn-sec btn-sm" onclick="batchSet('decode.bit_length','位长',true)">改位长</button>
+  <button class="btn btn-sec btn-sm" onclick="batchSet('decode.factor','Factor',false)">改Factor</button>
+  <button class="btn btn-sec btn-sm" onclick="batchSet('decode.offset','Offset',false)">改Offset</button>
+  <button class="btn btn-sec btn-sm" onclick="batchOrder('little_endian')">→Intel</button>
+  <button class="btn btn-sec btn-sm" onclick="batchOrder('big_endian')">→Motorola</button>
+  <button class="btn btn-warn btn-sm" onclick="selGroup()">勾选当前组</button>
+</div>
+
+<div id="toast"></div>
+<script>
+const API='';
+let _rules=[], _mods={}, _filtered=[], _page=1, _ps=100;
+let _sk='message_name', _sa=true, _expId=null, _allGrps=[];
+
+// ── 工具函数 ────────────────────────────────────────────────────────
+function toast(m,ok=true){const e=document.getElementById('toast');e.textContent=m;e.className='toast show '+(ok?'ok':'err');clearTimeout(e._t);e._t=setTimeout(()=>e.classList.remove('show'),3500);}
+function hex(n){return n!=null?'0x'+n.toString(16).toUpperCase().padStart(3,'0'):'-';}
+function fv(v){if(v==null)return'';const a=Math.abs(v);return a>=10000?v.toFixed(0):a>=100?v.toFixed(1):a>=1?v.toFixed(3):a===0?'0':v.toExponential(2);}
+
+// ── 规则访问器（支持嵌套格式）────────────────────────────────────────
+function rGet(r,path){
+  // 路径: match.channel, source.signal_name, decode.start_bit, mqtt.topic_template
+  // 也支持顶层: id, name, enabled
+  const parts=path.split('.');
+  let o=r;
+  for(const p of parts){if(o==null)return undefined;o=o[p];}
+  return o;
+}
+function rSet(rule,path,val){
+  const parts=path.split('.');
+  let o=rule;
+  for(const p of parts.slice(0,-1)){if(!o[p]||typeof o[p]!=='object')o[p]={};o=o[p];}
+  o[parts[parts.length-1]]=val;
+}
+// 便捷访问
+const MSG  =r=>rGet(r,'source.message_name')||rGet(r,'message_name')||'';
+const SIG  =r=>rGet(r,'source.signal_name') ||rGet(r,'signal_name') ||'';
+const CANID=r=>rGet(r,'match.can_id')       ??rGet(r,'can_id')       ??0;
+const CH   =r=>rGet(r,'match.channel')      ||rGet(r,'channel')      ||'any';
+const SB   =r=>rGet(r,'decode.start_bit')   ??0;
+const BL   =r=>rGet(r,'decode.bit_length')  ??8;
+const ORD  =r=>rGet(r,'decode.byte_order')  ||'little_endian';
+const SGN  =r=>rGet(r,'decode.signed')      ??rGet(r,'decode.is_signed')??false;
+const FAC  =r=>rGet(r,'decode.factor')      ??1;
+const OFF  =r=>rGet(r,'decode.offset')      ??0;
+const UNIT =r=>rGet(r,'decode.unit')        ||'';
+
+function getRule(id){return _mods[id]||_rules.find(r=>r.id===id);}
+
+// ── 数据加载 ────────────────────────────────────────────────────────
+async function loadData(){
+  document.getElementById('tbody').innerHTML='<tr><td colspan="15" style="text-align:center;padding:30px;color:var(--text3)">加载中...</td></tr>';
+  try{
+    const j=await(await fetch(API+'/api/rules/editor')).json();
+    if(!j.ok){toast(j.error||'加载失败',false);return;}
+    _rules=j.data.rules||[];
+    _mods={};
+    updateModUI();
+    buildGrpSel();
+    applyFilter();
+    toast('已加载 '+_rules.length+' 条规则');
+  }catch(e){toast('网络错误: '+e.message,false);}
+}
+
+function buildGrpSel(){
+  _allGrps=[...new Set(_rules.map(r=>MSG(r)))].filter(Boolean).sort((a,b)=>{
+    const ma=a.startsWith('module_'),mb=b.startsWith('module_');
+    if(ma&&!mb)return 1;if(!ma&&mb)return-1;
+    if(ma&&mb)return(parseInt(a.split('_')[1])||0)-(parseInt(b.split('_')[1])||0);
+    return a.localeCompare(b);
+  });
+  const sel=document.getElementById('f-grp');
+  const pv=sel.value;
+  sel.innerHTML='<option value="">全部消息组 ('+_allGrps.length+')</option>';
+  _allGrps.forEach(g=>{const o=document.createElement('option');o.value=g;o.textContent=g;sel.appendChild(o);});
+  if(pv) sel.value=pv;
+}
+
+// ── 过滤+排序 ────────────────────────────────────────────────────────
+function applyFilter(){
+  _ps=parseInt(document.getElementById('f-ps').value)||100;
+  const fm=(document.getElementById('f-msg').value||'').toLowerCase();
+  const fs=(document.getElementById('f-sig').value||'').toLowerCase();
+  const fid=(document.getElementById('f-id').value||'').toLowerCase().replace('0x','');
+  const fch=document.getElementById('f-ch').value;
+  const ford=document.getElementById('f-order').value;
+  const fgrp=document.getElementById('f-grp').value;
+
+  _filtered=_rules.filter(orig=>{
+    const r=getRule(orig.id);
+    if(fm&&!MSG(r).toLowerCase().includes(fm))return false;
+    if(fs&&!SIG(r).toLowerCase().includes(fs))return false;
+    if(fid&&!CANID(r).toString(16).toLowerCase().includes(fid))return false;
+    if(fch&&CH(r)!==fch)return false;
+    if(ford&&ORD(r)!==ford)return false;
+    if(fgrp&&MSG(r)!==fgrp)return false;
+    return true;
+  });
+  _filtered.sort((a,b)=>{
+    const ra=getRule(a.id),rb=getRule(b.id);
+    let va,vb;
+    switch(_sk){
+      case 'message_name':va=MSG(ra);vb=MSG(rb);break;
+      case 'signal_name':va=SIG(ra);vb=SIG(rb);break;
+      case 'can_id':va=CANID(ra);vb=CANID(rb);break;
+      case 'start_bit':va=SB(ra);vb=SB(rb);break;
+      case 'bit_length':va=BL(ra);vb=BL(rb);break;
+      case 'factor':va=FAC(ra);vb=FAC(rb);break;
+      case 'offset':va=OFF(ra);vb=OFF(rb);break;
+      default:va=ra[_sk]??'';vb=rb[_sk]??'';
+    }
+    const c=typeof va==='number'?va-vb:String(va).localeCompare(String(vb));
+    return _sa?c:-c;
+  });
+  _page=1;
+  render();
+  updateStats();
+}
+
+function sb(k){if(_sk===k)_sa=!_sa;else{_sk=k;_sa=true;}applyFilter();}
+function clearF(){['f-msg','f-sig','f-id'].forEach(i=>document.getElementById(i).value='');['f-ch','f-order','f-grp'].forEach(i=>document.getElementById(i).value='');applyFilter();}
+
+// ── 渲染 ────────────────────────────────────────────────────────────
+function totalPages(){return Math.max(1,Math.ceil(_filtered.length/_ps));}
+
+function render(){
+  const start=(_page-1)*_ps;
+  const slice=_filtered.slice(start,start+_ps);
+  const tbody=document.getElementById('tbody');
+  tbody.innerHTML='';
+  slice.forEach(orig=>{
+    const r=getRule(orig.id);
+    const isMod=!!_mods[r.id], isExp=_expId===r.id;
+    const lv=r._live;
+
+    const tr=document.createElement('tr');
+    tr.id='row-'+r.id;
+    tr.className=(isMod?'modified ':'')+(isExp?'editing ':'');
+    const liveHtml=lv?`<span class="val-live ${(Date.now()/1000-lv.ts)>60?'stale':''}">${fv(lv.value)}${lv.unit?' '+lv.unit:''}</span>`:'<span style="color:var(--text3)">-</span>';
+    tr.innerHTML=`
+      <td><input type="checkbox" class="rchk" data-id="${r.id}"></td>
+      <td title="${MSG(r)}" style="color:var(--text2)">${MSG(r)}</td>
+      <td title="${SIG(r)}">${SIG(r)}</td>
+      <td style="font-family:monospace;color:var(--yellow)">${hex(CANID(r))}</td>
+      <td style="color:var(--text3)">${CH(r)}</td>
+      <td style="font-family:monospace">${SB(r)}</td>
+      <td style="font-family:monospace">${BL(r)}</td>
+      <td style="font-size:11px;color:${ORD(r)==='big_endian'?'var(--yellow)':'var(--text3)'}">${ORD(r)==='big_endian'?'Motorola':'Intel'}</td>
+      <td style="font-size:11px;color:var(--text3)">${SGN(r)?'有符号':''}</td>
+      <td style="font-family:monospace">${FAC(r)}</td>
+      <td style="font-family:monospace">${OFF(r)}</td>
+      <td style="color:var(--text3)">${UNIT(r)}</td>
+      <td>${liveHtml}</td>
+      <td><span class="${r.enabled!==false?'badge-on':'badge-off'}">${r.enabled!==false?'ON':'OFF'}</span></td>
+      <td><button class="btn btn-sec btn-sm" onclick="toggleExp('${r.id}')">${isExp?'收起':'编辑'}</button></td>`;
+    tbody.appendChild(tr);
+
+    if(isExp){
+      const et=document.createElement('tr');
+      et.id='erow-'+r.id; et.className='editing';
+      const td=document.createElement('td'); td.colSpan=15;
+      td.appendChild(makePanel(r));
+      et.appendChild(td); tbody.appendChild(et);
+    }
+  });
+  renderPg();
+}
+
+function renderPg(){
+  const tp=totalPages(),h=pgHTML(tp);
+  document.getElementById('pg-top').innerHTML=h;
+  document.getElementById('pg-bot').innerHTML=h;
+}
+function pgHTML(tp){
+  if(tp<=1)return'';
+  let s=`<button onclick="gp(${Math.max(1,_page-1)})" ${_page===1?'disabled':''}>‹</button>`;
+  const st=Math.max(1,_page-3),en=Math.min(tp,_page+3);
+  if(st>1)s+=`<button onclick="gp(1)">1</button>${st>2?'<span style="color:var(--text3);padding:0 3px">…</span>':''}`;
+  for(let i=st;i<=en;i++)s+=`<button class="${i===_page?'act':''}" onclick="gp(${i})">${i}</button>`;
+  if(en<tp)s+=`${en<tp-1?'<span style="color:var(--text3);padding:0 3px">…</span>':''}<button onclick="gp(${tp})">${tp}</button>`;
+  s+=`<button onclick="gp(${Math.min(tp,_page+1)})" ${_page===tp?'disabled':''}>›</button>`;
+  s+=`<span style="color:var(--text3);font-size:10px;margin-left:6px">${tp}页/${_filtered.length}条</span>`;
+  return s;
+}
+function gp(n){_page=n;render();window.scrollTo(0,80);}
+
+function updateStats(){
+  document.getElementById('s-shown').textContent=_filtered.length;
+  document.getElementById('s-total').textContent=_rules.length;
+  document.getElementById('s-grps').textContent=_allGrps.length;
+  document.getElementById('s-mods').textContent=Object.keys(_mods).length;
+  document.getElementById('s-live').textContent=_rules.filter(r=>r._live).length;
+}
+function updateModUI(){
+  const n=Object.keys(_mods).length;
+  document.getElementById('mod-n').textContent=n;
+  document.getElementById('mod-tip').style.display=n?'':'none';
+  document.getElementById('btn-save').disabled=!n;
+}
+function toggleAll(v){document.querySelectorAll('.rchk').forEach(c=>c.checked=v);}
+
+// ── 编辑面板 ────────────────────────────────────────────────────────
+function toggleExp(id){_expId=(_expId===id)?null:id;render();if(_expId){setTimeout(()=>{const e=document.getElementById('erow-'+id);if(e)e.scrollIntoView({block:'nearest'});},60);}}
+
+function makePanel(r){
+  const dec=r.decode||{}, mq=r.mqtt||{}, mt=r.match||{}, sr=r.source||{};
+  const div=document.createElement('div');
+  div.className='ep';
+  div.innerHTML=`
+  <div class="ep-sec">
+    <div class="ep-ttl">解码参数</div>
+    <div class="ep-row"><span class="ep-lbl">起始位</span>
+      <div class="ep-inp"><input id="es-${r.id}" type="number" min="0" max="511" value="${SB(r)}"
+        onchange="patch('${r.id}','decode.start_bit',+this.value);bgrd('${r.id}')"></div></div>
+    <div class="ep-row"><span class="ep-lbl">位长</span>
+      <div class="ep-inp"><input id="el-${r.id}" type="number" min="1" max="64" value="${BL(r)}"
+        onchange="patch('${r.id}','decode.bit_length',+this.value);bgrd('${r.id}')"></div></div>
+    <div class="ep-row"><span class="ep-lbl">字节序</span>
+      <div class="ep-inp"><select id="eo-${r.id}" onchange="patch('${r.id}','decode.byte_order',this.value);bgrd('${r.id}')">
+        <option value="little_endian" ${ORD(r)!=='big_endian'?'selected':''}>Intel 小端</option>
+        <option value="big_endian"    ${ORD(r)==='big_endian' ?'selected':''}>Motorola 大端</option>
+      </select></div></div>
+    <div class="ep-row"><span class="ep-lbl">有符号</span>
+      <input type="checkbox" ${SGN(r)?'checked':''} onchange="patch('${r.id}','decode.signed',this.checked)"></div>
+    <div class="ep-row"><span class="ep-lbl">Factor</span>
+      <div class="ep-inp"><input type="number" step="any" value="${FAC(r)}"
+        onchange="patch('${r.id}','decode.factor',+this.value)"></div></div>
+    <div class="ep-row"><span class="ep-lbl">Offset</span>
+      <div class="ep-inp"><input type="number" step="any" value="${OFF(r)}"
+        onchange="patch('${r.id}','decode.offset',+this.value)"></div></div>
+    <div class="ep-row"><span class="ep-lbl">单位</span>
+      <div class="ep-inp"><input type="text" value="${UNIT(r)}"
+        onchange="patch('${r.id}','decode.unit',this.value)"></div></div>
+  </div>
+
+  <div class="ep-sec">
+    <div class="ep-ttl">帧匹配</div>
+    <div class="ep-row"><span class="ep-lbl">CAN ID</span>
+      <div class="ep-inp"><input type="text" value="${hex(CANID(r))}"
+        onchange="patchId('${r.id}',this.value)"></div></div>
+    <div class="ep-row"><span class="ep-lbl">通道</span>
+      <div class="ep-inp"><select onchange="patch('${r.id}','match.channel',this.value)">
+        <option ${CH(r)==='any'  ?'selected':''}>any</option>
+        <option ${CH(r)==='can0' ?'selected':''}>can0</option>
+        <option ${CH(r)==='can1' ?'selected':''}>can1</option>
+      </select></div></div>
+    <div class="ep-row"><span class="ep-lbl">扩展帧</span>
+      <input type="checkbox" ${(mt.is_extended||r.is_extended)?'checked':''}
+        onchange="patch('${r.id}','match.is_extended',this.checked)"></div>
+    <div class="ep-row"><span class="ep-lbl">启用</span>
+      <input type="checkbox" ${r.enabled!==false?'checked':''}
+        onchange="patch('${r.id}','enabled',this.checked)"></div>
+    <div style="margin-top:10px">
+      <div class="ep-ttl">MQTT 主题</div>
+      <input style="width:100%;font-size:11px;font-family:monospace" value="${mq.topic_template||''}"
+        onchange="patch('${r.id}','mqtt.topic_template',this.value)">
+    </div>
+    ${r._live?`<div style="margin-top:10px;font-size:11px;color:var(--text3)">
+      实时值: <span style="color:var(--green);font-weight:700">${fv(r._live.value)} ${r._live.unit||''}</span>
+      <span style="color:var(--text3)">@ ${new Date(r._live.ts*1000).toLocaleTimeString('zh-CN')}</span>
+    </div>`:''}
+  </div>
+
+  <div class="ep-sec">
+    <div class="ep-ttl">位范围可视化</div>
+    <div id="bg-${r.id}"></div>
+    <div style="margin-top:10px">
+      <div class="ep-row"><span class="ep-lbl">手动测试(hex)</span>
+        <input id="et-${r.id}" type="text" placeholder="08 00 00 00 00 00 00 00"
+          style="width:190px;font-family:monospace" oninput="calcPrev('${r.id}')">
+      </div>
+      <div id="ep-${r.id}" style="margin-top:6px;font-size:12px;color:var(--text3)">输入8字节hex测试解码</div>
+    </div>
+  </div>`;
+  setTimeout(()=>bgrd(r.id),0);
+  return div;
+}
+
+function bgrd(id){
+  const r=getRule(id); if(!r) return;
+  const sb=SB(r), bl=BL(r), isBE=ORD(r)==='big_endian';
+  const sel=new Set();
+  if(!isBE){for(let i=0;i<bl;i++)sel.add(sb+i);}
+  else{
+    let bit=sb;
+    for(let i=0;i<bl;i++){
+      sel.add(bit);
+      const by=Math.floor(bit/8),bi=bit%8;
+      bit=bi===0?(by+1)*8+7:bit-1;
+    }
+  }
+  let h='<table class="bit-grid"><tr><th></th>';
+  for(let b=7;b>=0;b--)h+=`<th>${b}</th>`;h+='</tr>';
+  for(let B=0;B<8;B++){
+    h+=`<tr><td style="background:var(--card);color:var(--text3);padding:0 2px;font-size:9px">B${B}</td>`;
+    for(let b=7;b>=0;b--){
+      const bp=B*8+b;
+      h+=`<td class="${bp===sb?'b-start':sel.has(bp)?'b-sel':''}" title="bit${bp}">${sel.has(bp)?(bp===sb?'S':'·'):''}</td>`;
+    }h+='</tr>';
+  }
+  h+=`</table><div style="font-size:10px;color:var(--text3);margin-top:3px">S=起始 · =选中 | ${isBE?'<span style="color:var(--yellow)">Motorola</span>':'<span style="color:var(--accent)">Intel</span>'} | ${bl}位</div>`;
+  const wrap=document.getElementById('bg-'+id); if(wrap) wrap.innerHTML=h;
+}
+
+function calcPrev(id){
+  const r=getRule(id); if(!r) return;
+  const hexStr=(document.getElementById('et-'+id).value||'').replace(/[^0-9A-Fa-f\s]/g,'');
+  const bytes=hexStr.trim().split(/\s+/).map(h=>parseInt(h,16)||0);
+  while(bytes.length<8)bytes.push(0);
+  const sb=SB(r),bl=BL(r),isBE=ORD(r)==='big_endian',sgn=SGN(r);
+  const fac=FAC(r)||1, off=OFF(r)||0;
+  let raw=BigInt(0);
+  if(!isBE){
+    for(let i=0;i<bl;i++){const bp=sb+i;if(bp<64&&(bytes[Math.floor(bp/8)]>>(bp%8))&1)raw|=BigInt(1)<<BigInt(i);}
+  }else{
+    let bit=sb;
+    for(let i=0;i<bl;i++){
+      const by=Math.floor(bit/8),bi=bit%8;
+      if(by<8&&(bytes[by]>>bi)&1)raw|=BigInt(1)<<BigInt(bl-1-i);
+      bit=bi===0?(by+1)*8+7:bit-1;
+    }
+  }
+  let rn=Number(raw);
+  if(sgn&&rn>=(1<<(bl-1)))rn-=(1<<bl);
+  const phys=rn*fac+off;
+  const wrap=document.getElementById('ep-'+id);
+  if(wrap)wrap.innerHTML=`<span style="color:var(--text3);font-family:monospace">raw=0x${rn.toString(16).toUpperCase()}(${rn})</span>&nbsp;
+    <span class="prev-val">${phys.toFixed(4)}</span> <span style="color:var(--text3)">${UNIT(r)}</span>
+    <span style="font-size:11px;color:var(--text3)"> = ${rn}×${fac}+${off}</span>`;
+}
+
+// ── 修改追踪 ────────────────────────────────────────────────────────
+function patch(id,path,val){
+  if(!_mods[id]){
+    const orig=_rules.find(r=>r.id===id);
+    if(!orig)return;
+    _mods[id]=JSON.parse(JSON.stringify(orig));
+  }
+  rSet(_mods[id],path,val);
+  // 同步回 _rules 中的 _live
+  const orig=_rules.find(r=>r.id===id);
+  if(orig&&orig._live) _mods[id]._live=orig._live;
+  updateModUI();
+  const row=document.getElementById('row-'+id);
+  if(row)row.className=(row.className.includes('editing')?'modified editing':'modified');
+}
+function patchId(id,v){const n=v.startsWith('0x')||v.startsWith('0X')?parseInt(v,16):parseInt(v,10);if(!isNaN(n))patch(id,'match.can_id',n);}
+
+// ── 批量操作 ────────────────────────────────────────────────────────
+function checkedIds(){return[...document.querySelectorAll('.rchk:checked')].map(c=>c.dataset.id);}
+function batchSet(field,label,isInt){
+  const ids=checkedIds();
+  if(!ids.length){toast('请先勾选规则行',false);return;}
+  const v=prompt(`批量设置 [${label}]（选中${ids.length}条）:`);
+  if(v===null)return;
+  const val=isInt?parseInt(v):parseFloat(v);
+  if(isNaN(val)){toast('请输入有效数字',false);return;}
+  ids.forEach(id=>patch(id,field,val));
+  render();toast(`已批量更新${ids.length}条`);
+}
+function batchOrder(ord){
+  const ids=checkedIds();
+  if(!ids.length){toast('请先勾选规则行',false);return;}
+  ids.forEach(id=>patch(id,'decode.byte_order',ord));
+  render();toast(`已将${ids.length}条字节序改为${ord==='big_endian'?'Motorola':'Intel'}`);
+}
+function selGroup(){
+  const grp=document.getElementById('f-grp').value;
+  if(!grp){toast('请先选择消息组',false);return;}
+  let n=0;document.querySelectorAll('.rchk').forEach(c=>{const r=getRule(c.dataset.id);if(r&&MSG(r)===grp){c.checked=true;n++;}});
+  toast(`已勾选[${grp}]的${n}条规则`);
+}
+
+// ── 保存 ────────────────────────────────────────────────────────────
+async function saveAll(){
+  if(!Object.keys(_mods).length){toast('无修改',false);return;}
+  const btn=document.getElementById('btn-save');
+  btn.disabled=true;btn.textContent='推送中...';
+  const finalRules=_rules.map(r=>{const m=_mods[r.id];if(!m)return r;const c=JSON.parse(JSON.stringify(m));delete c._live;return c;});
+  try{
+    const j=await(await fetch(API+'/api/rules/save',{
+      method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({version:1,rules:finalRules}),
+    })).json();
+    if(j.ok){
+      toast(`✓ 已保存${j.rule_count}条规则并推送到设备`);
+      // 更新本地副本，保留 _live
+      const liveMap={};_rules.forEach(r=>{if(r._live)liveMap[r.id]=r._live;});
+      _rules=finalRules.map(r=>{if(liveMap[r.id])r._live=liveMap[r.id];return r;});
+      _mods={};updateModUI();applyFilter();
+    }else toast('保存失败: '+(j.error||JSON.stringify(j.device_response||{})),false);
+  }catch(e){toast('网络错误: '+e.message,false);}
+  finally{btn.disabled=false;btn.textContent='💾 保存并推送';}
+}
+
+// ── 启动 ────────────────────────────────────────────────────────────
+loadData();
+</script>
+</body>
+</html>

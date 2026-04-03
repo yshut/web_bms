@@ -63,7 +63,7 @@ const routes = computed(() => {
 const activeMenu = computed(() => route.path);
 
 const currentPageTitle = computed(() => {
-  return route.meta?.title as string || 'Dashboard';
+  return route.meta?.title as string || '控制台';
 });
 </script>
 

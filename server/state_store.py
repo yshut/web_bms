@@ -32,7 +32,8 @@ class StateStore:
 
     def start(self) -> None:
         os.makedirs(os.path.dirname(self._db_path) or ".", exist_ok=True)
-        conn = sqlite3.connect(self._db_path, check_same_thread=False)
+        conn = sqlite3.connect(self._db_path, timeout=15.0, check_same_thread=False)
+        conn.execute("PRAGMA busy_timeout=15000")
         conn.execute(
             "CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at REAL NOT NULL)"
         )
@@ -86,5 +87,6 @@ class StateStore:
             return float(row[0])
         except Exception:
             return None
+
 
 
