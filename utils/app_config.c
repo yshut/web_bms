@@ -82,7 +82,7 @@ void app_config_set_defaults(void) {
     g_app_config.transport_mode = APP_TRANSPORT_MQTT;
 
     /* ws */
-    set_str(g_app_config.ws_host, sizeof(g_app_config.ws_host), "192.168.100.1");
+    set_str(g_app_config.ws_host, sizeof(g_app_config.ws_host), "cloud.yshut.cn");
     g_app_config.ws_port = 5052;
     set_str(g_app_config.ws_path, sizeof(g_app_config.ws_path), "/ws");
     g_app_config.ws_use_ssl = false;
@@ -90,7 +90,7 @@ void app_config_set_defaults(void) {
     g_app_config.ws_keepalive_interval_s = 20;
 
     /* mqtt */
-    set_str(g_app_config.mqtt_host, sizeof(g_app_config.mqtt_host), "192.168.100.1");
+    set_str(g_app_config.mqtt_host, sizeof(g_app_config.mqtt_host), "cloud.yshut.cn");
     g_app_config.mqtt_port = 1883;
     g_app_config.mqtt_client_id[0] = '\0';
     g_app_config.mqtt_username[0] = '\0';
@@ -113,13 +113,9 @@ void app_config_set_defaults(void) {
 
     /* storage/network */
     set_str(g_app_config.storage_mount, sizeof(g_app_config.storage_mount), "/mnt/SDCARD");
-    set_str(g_app_config.net_iface, sizeof(g_app_config.net_iface), "eth0");
+    set_str(g_app_config.net_iface, sizeof(g_app_config.net_iface), "auto");
     set_str(g_app_config.wifi_iface, sizeof(g_app_config.wifi_iface), "wlan0");
-    g_app_config.net_use_dhcp = false;
-    set_str(g_app_config.net_ip, sizeof(g_app_config.net_ip), "192.168.100.100");
-    set_str(g_app_config.net_netmask, sizeof(g_app_config.net_netmask), "255.255.255.0");
-    set_str(g_app_config.net_gateway, sizeof(g_app_config.net_gateway), "192.168.100.1");
-    g_app_config.net_use_dhcp = false;
+    g_app_config.net_use_dhcp = true;
     set_str(g_app_config.net_ip, sizeof(g_app_config.net_ip), "192.168.100.100");
     set_str(g_app_config.net_netmask, sizeof(g_app_config.net_netmask), "255.255.255.0");
     set_str(g_app_config.net_gateway, sizeof(g_app_config.net_gateway), "192.168.100.1");
@@ -665,5 +661,4 @@ int app_config_save_network_best(char *used_path, size_t used_path_size) {
     if (used_path && used_path_size > 0) used_path[0] = '\0';
     return -1;
 }
-
 

@@ -248,20 +248,167 @@ _STATUS_CACHE_TTL = 0.5  # 秒
 UDISK_DIR = BASE_DIR
 
 # 通过 WebSocket 与 Qt 设备通信
-def qt_request(payload: dict, timeout: float = None) -> dict:
+def qt_request(payload: dict, timeout: float = None, device_id: Optional[str] = None) -> dict:
     if timeout is None:
         timeout = cfg.SOCKET_TIMEOUT
     if _mqtt_hub and _mqtt_hub.is_connected():
         try:
-            return _mqtt_hub.request(payload, timeout=timeout)
+            return _mqtt_hub.request(payload, timeout=timeout, device_id=device_id)
         except Exception as e:
             return {"ok": False, "error": f"MQTT request failed: {e}"}
     if False:
         try:
-            return _mqtt_hub.request(payload, timeout=timeout)
+            return _mqtt_hub.request(payload, timeout=timeout, device_id=device_id)
         except Exception as e:
             return {"ok": False, "error": f"WebSocket request failed: {e}"}
     return {"ok": False, "error": "Device not connected via MQTT/WebSocket"}
+
+
+def _get_requested_device_id(default: Optional[str] = None) -> Optional[str]:
+    device_id = default
+    if device_id is None:
+        device_id = request.args.get('device_id') or request.args.get('deviceId')
+    device_id = str(device_id or '').strip()
+    return device_id or None
+
+
+def _get_mqtt_device_info(device_id: Optional[str] = None) -> dict:
+    try:
+        return _mqtt_hub.info(device_id=device_id) if _mqtt_hub else {"connected": False}
+    except Exception:
+        return {"connected": False}
+
+
+def _unwrap_remote_data(resp: dict):
+    if isinstance(resp, dict) and resp.get('ok') and isinstance(resp.get('data'), dict):
+        return resp.get('data')
+    return resp
+
+
+_DEVICE_WS_CONFIG_PATHS = ['/mnt/UDISK/ws_config.txt', '/mnt/SDCARD/ws_config.txt']
+_DEVICE_NET_CONFIG_PATHS = ['/mnt/UDISK/net_config.txt', '/mnt/SDCARD/net_config.txt']
+_DEVICE_RULES_PATHS = ['/mnt/UDISK/can_mqtt_rules.json', '/mnt/SDCARD/can_mqtt_rules.json']
+_DEVICE_CONFIG_DEFAULTS = {
+    'transport_mode': 'mqtt',
+    'ws_host': 'cloud.yshut.cn',
+    'ws_port': '5052',
+    'ws_path': '/ws',
+    'mqtt_host': 'cloud.yshut.cn',
+    'mqtt_port': '1883',
+    'mqtt_topic_prefix': 'app_lvgl',
+    'mqtt_qos': '1',
+    'mqtt_client_id': '',
+    'mqtt_keepalive_s': '30',
+    'mqtt_username': '',
+    'mqtt_password': '',
+    'can0_bitrate': '500000',
+    'can1_bitrate': '500000',
+    'can_record_dir': '/mnt/SDCARD/can_records',
+    'can_record_max_mb': '40',
+}
+_DEVICE_NETWORK_DEFAULTS = {
+    'iface': 'auto',
+    'dhcp': 'true',
+    'ip': '192.168.100.100',
+    'netmask': '255.255.255.0',
+    'gateway': '192.168.100.1',
+    'wifi_iface': 'wlan0',
+}
+
+
+def _to_bool(value) -> bool:
+    if isinstance(value, bool):
+        return value
+    return str(value or '').strip().lower() in ('1', 'true', 'yes', 'on')
+
+
+def _to_int(value, default: int) -> int:
+    try:
+        return int(value)
+    except Exception:
+        return int(default)
+
+
+def _parse_kv_text(text_value: str, allow_legacy: bool = False) -> dict:
+    result = {}
+    legacy = []
+    for raw_line in (text_value or '').splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith('#') or line.startswith(';'):
+            continue
+        if '#' in line:
+            line = line.split('#', 1)[0].strip()
+            if not line:
+                continue
+        if '=' in line:
+            key, value = line.split('=', 1)
+            result[key.strip()] = value.strip()
+        elif allow_legacy:
+            legacy.append(line)
+    if allow_legacy and legacy:
+        if len(legacy) > 0:
+            result.setdefault('ws_host', legacy[0])
+        if len(legacy) > 1:
+            result.setdefault('ws_port', legacy[1])
+        if len(legacy) > 2:
+            result.setdefault('wifi_ssid', legacy[2])
+        if len(legacy) > 3:
+            result.setdefault('wifi_psk', legacy[3])
+        if len(legacy) > 4:
+            result.setdefault('wifi_iface', legacy[4])
+    return result
+
+
+def _serialize_kv_config(values: dict, ordered_keys: list) -> str:
+    lines = []
+    seen = set()
+    for key in ordered_keys:
+        if key in values:
+            lines.append(f'{key}={values[key]}')
+            seen.add(key)
+    for key in sorted(values.keys()):
+        if key not in seen:
+            lines.append(f'{key}={values[key]}')
+    return chr(10).join(lines) + chr(10)
+
+
+def _remote_fs_read(path: str, device_id: Optional[str] = None):
+    # Config pages should fail fast and fall back to defaults/cache rather than
+    # stalling the whole UI for multiple sequential file-read timeouts.
+    resp = qt_request({'cmd': 'fs_read', 'path': path}, timeout=2.0, device_id=device_id)
+    if not isinstance(resp, dict) or not resp.get('ok') or not isinstance(resp.get('data'), dict):
+        return False, resp
+    payload = resp.get('data') or {}
+    try:
+        content = base64.b64decode(str(payload.get('data') or '').encode('ascii')) if payload.get('data') else b''
+    except Exception as exc:
+        return False, {'ok': False, 'error': f'base64 decode failed: {exc}'}
+    return True, {'path': path, 'content': content, 'raw': payload}
+
+
+def _remote_fs_read_best(paths: list, device_id: Optional[str] = None):
+    last_error = None
+    for path in paths:
+        ok, data = _remote_fs_read(path, device_id=device_id)
+        if ok:
+            return True, data
+        last_error = data
+    return False, last_error or {'ok': False, 'error': 'file not found'}
+
+
+def _remote_fs_write(path: str, content: bytes, device_id: Optional[str] = None) -> dict:
+    b64 = base64.b64encode(content).decode('ascii')
+    return qt_request({'cmd': 'fs_upload', 'path': path, 'data': b64}, timeout=15.0, device_id=device_id)
+
+
+def _load_remote_config_map(paths: list, defaults: dict, device_id: Optional[str] = None, allow_legacy: bool = False):
+    ok, payload = _remote_fs_read_best(paths, device_id=device_id)
+    if ok:
+        parsed = _parse_kv_text(payload['content'].decode('utf-8', errors='ignore'), allow_legacy=allow_legacy)
+        merged = dict(defaults)
+        merged.update(parsed)
+        return merged, payload['path'], 'device'
+    return dict(defaults), paths[0], 'default'
 
 
 def _get_preferred_hub():
@@ -1215,15 +1362,16 @@ def api_can_server():
 
 @app.route('/api/can/frames', methods=['GET'])
 def api_can_frames():
-    # 通过远程命令无法直接取数组，这里用专门的命令，Qt 端返回最近 N 行（后续实现）
+    # ????????????????? CAN ??
     limit = int(request.args.get('limit', 50))
-    resp = qt_request({"cmd": "can_recent_frames", "limit": limit}, timeout=3.0)
-    # 标准化返回结构，前端可直接读取 data.frames
+    device_id = _get_requested_device_id()
+    resp = qt_request({"cmd": "can_recent_frames", "limit": limit}, timeout=3.0, device_id=device_id)
+    # ??????????????? data.frames
     if not resp:
         return jsonify({"ok": False, "error": "no response"})
     if resp.get('ok') and isinstance(resp.get('data'), dict) and 'frames' in resp['data']:
         return jsonify(resp)
-    # 兼容旧实现：直接返回 frames 数组
+    # ?????????? frames ??
     if isinstance(resp.get('frames'), list):
         return jsonify({"ok": True, "data": {"frames": resp.get('frames')}})
     return jsonify(resp)
@@ -2757,14 +2905,185 @@ def device_api_proxy(subpath):
 
 @app.route('/api/device/list', methods=['GET'])
 def device_list():
-    """返回已知设备列表（当前从 MQTT hub 获取在线设备）"""
+    """???????????? MQTT hub ????/?????"""
     try:
-        hub_info = _mqtt_hub.info() if _mqtt_hub else {}
-        devices = list((hub_info or {}).get('devices', []))
+        hub_info = _get_mqtt_device_info()
+        devices = [str(x).strip() for x in (hub_info or {}).get('devices', []) if str(x).strip()]
+        history = [str(x).strip() for x in (hub_info or {}).get('history', []) if str(x).strip()]
+        current_device_id = str((hub_info or {}).get('device_id') or '').strip() or None
     except Exception:
         devices = []
+        history = []
+        current_device_id = None
+
+    merged = []
+    seen = set()
+    for device_id in devices + history:
+        if device_id and device_id not in seen:
+            seen.add(device_id)
+            merged.append(device_id)
+
     default_ip = '192.168.100.100'
-    return jsonify({"ok": True, "devices": devices, "default_ip": default_ip})
+    return jsonify({
+        "ok": True,
+        "devices": devices,
+        "history": merged,
+        "current_device_id": current_device_id,
+        "default_ip": default_ip,
+    })
+
+
+@app.route('/api/device/remote/status', methods=['GET'])
+def device_remote_status():
+    device_id = _get_requested_device_id()
+    info = _get_mqtt_device_info(device_id)
+    events = (info or {}).get('events') or {}
+    status = dict(events.get('device_status') or {}) if isinstance(events.get('device_status'), dict) else {}
+    hardware = dict(events.get('hardware_status') or {}) if isinstance(events.get('hardware_status'), dict) else {}
+    system_status = dict(hardware.get('system') or {}) if isinstance(hardware.get('system'), dict) else {}
+
+    status.setdefault('device_id', (info or {}).get('device_id') or device_id)
+    status['connected'] = bool((info or {}).get('connected'))
+    status['mqtt_connected'] = bool((info or {}).get('broker_connected'))
+    status.setdefault('uptime_seconds', system_status.get('uptime_seconds', 0))
+    status.setdefault('rule_count', 0)
+    status['devices'] = (info or {}).get('devices') or []
+    status['history'] = (info or {}).get('history') or []
+    status['ok'] = bool(status.get('connected'))
+    if not status['ok'] and not status.get('error'):
+        status['error'] = 'Device not connected'
+    return jsonify(status)
+
+
+@app.route('/api/device/remote/hardware', methods=['GET'])
+def device_remote_hardware():
+    device_id = _get_requested_device_id()
+    info = _get_mqtt_device_info(device_id)
+    events = (info or {}).get('events') or {}
+    hardware = events.get('hardware_status') if isinstance(events, dict) else None
+    if isinstance(hardware, dict):
+        return jsonify(hardware)
+    return jsonify({"ok": False, "error": "Hardware status not available yet"})
+
+
+@app.route('/api/device/remote/config', methods=['GET', 'POST'])
+def device_remote_config():
+    device_id = _get_requested_device_id()
+    current, target_path, source = _load_remote_config_map(_DEVICE_WS_CONFIG_PATHS, _DEVICE_CONFIG_DEFAULTS, device_id=device_id, allow_legacy=True)
+
+    if request.method == 'GET':
+        return jsonify({
+            'transport_mode': current.get('transport_mode', 'mqtt'),
+            'mqtt_host': current.get('mqtt_host', _DEVICE_CONFIG_DEFAULTS['mqtt_host']),
+            'mqtt_port': _to_int(current.get('mqtt_port'), 1883),
+            'mqtt_topic_prefix': current.get('mqtt_topic_prefix', _DEVICE_CONFIG_DEFAULTS['mqtt_topic_prefix']),
+            'mqtt_qos': _to_int(current.get('mqtt_qos'), 1),
+            'mqtt_client_id': current.get('mqtt_client_id', ''),
+            'mqtt_keepalive': _to_int(current.get('mqtt_keepalive_s', current.get('mqtt_keepalive', 30)), 30),
+            'mqtt_username': current.get('mqtt_username', ''),
+            'mqtt_password': current.get('mqtt_password', ''),
+            'ws_host': current.get('ws_host', _DEVICE_CONFIG_DEFAULTS['ws_host']),
+            'ws_port': _to_int(current.get('ws_port'), 5052),
+            'ws_path': current.get('ws_path', '/ws'),
+            'can0_bitrate': _to_int(current.get('can0_bitrate'), 500000),
+            'can1_bitrate': _to_int(current.get('can1_bitrate'), 500000),
+            'can_record_dir': current.get('can_record_dir', _DEVICE_CONFIG_DEFAULTS['can_record_dir']),
+            'can_record_max_mb': _to_int(current.get('can_record_max_mb'), 40),
+            'source': source,
+            'path': target_path,
+        })
+
+    body = request.get_json(silent=True) or {}
+    if not isinstance(body, dict):
+        return jsonify({'ok': False, 'error': 'invalid body'}), 400
+
+    updated = dict(current)
+    updated['transport_mode'] = str(body.get('transport_mode', updated.get('transport_mode', 'mqtt')) or 'mqtt')
+    updated['mqtt_host'] = str(body.get('mqtt_host', updated.get('mqtt_host', _DEVICE_CONFIG_DEFAULTS['mqtt_host'])) or _DEVICE_CONFIG_DEFAULTS['mqtt_host'])
+    updated['mqtt_port'] = str(_to_int(body.get('mqtt_port', updated.get('mqtt_port', 1883)), 1883))
+    updated['mqtt_topic_prefix'] = str(body.get('mqtt_topic_prefix', updated.get('mqtt_topic_prefix', _DEVICE_CONFIG_DEFAULTS['mqtt_topic_prefix'])) or _DEVICE_CONFIG_DEFAULTS['mqtt_topic_prefix'])
+    updated['mqtt_qos'] = str(max(0, min(_to_int(body.get('mqtt_qos', updated.get('mqtt_qos', 1)), 1), 2)))
+    updated['mqtt_client_id'] = str(body.get('mqtt_client_id', updated.get('mqtt_client_id', '')) or '')
+    updated['mqtt_keepalive_s'] = str(max(1, _to_int(body.get('mqtt_keepalive', updated.get('mqtt_keepalive_s', 30)), 30)))
+    updated['mqtt_username'] = str(body.get('mqtt_username', updated.get('mqtt_username', '')) or '')
+    if 'mqtt_password' in body:
+        updated['mqtt_password'] = str(body.get('mqtt_password') or '')
+    updated['ws_host'] = str(body.get('ws_host', updated.get('ws_host', _DEVICE_CONFIG_DEFAULTS['ws_host'])) or _DEVICE_CONFIG_DEFAULTS['ws_host'])
+    updated['ws_port'] = str(_to_int(body.get('ws_port', updated.get('ws_port', 5052)), 5052))
+    updated['ws_path'] = str(body.get('ws_path', updated.get('ws_path', '/ws')) or '/ws')
+    updated['can0_bitrate'] = str(_to_int(body.get('can0_bitrate', updated.get('can0_bitrate', 500000)), 500000))
+    updated['can1_bitrate'] = str(_to_int(body.get('can1_bitrate', updated.get('can1_bitrate', 500000)), 500000))
+    updated['can_record_dir'] = str(body.get('can_record_dir', updated.get('can_record_dir', _DEVICE_CONFIG_DEFAULTS['can_record_dir'])) or _DEVICE_CONFIG_DEFAULTS['can_record_dir'])
+    updated['can_record_max_mb'] = str(max(1, _to_int(body.get('can_record_max_mb', updated.get('can_record_max_mb', 40)), 40)))
+
+    ordered_keys = [
+        'transport_mode', 'ws_host', 'ws_port', 'ws_path', 'mqtt_host', 'mqtt_port',
+        'mqtt_client_id', 'mqtt_username', 'mqtt_password', 'mqtt_keepalive_s', 'mqtt_qos',
+        'mqtt_topic_prefix', 'can0_bitrate', 'can1_bitrate', 'can_record_dir', 'can_record_max_mb'
+    ]
+    content = _serialize_kv_config(updated, ordered_keys).encode('utf-8')
+    resp = _remote_fs_write(target_path, content, device_id=device_id)
+    ok = bool(isinstance(resp, dict) and resp.get('ok'))
+    return jsonify({'ok': ok, 'saved_path': target_path, 'restart_required': True, 'can_restarted': False, 'device': resp})
+
+
+@app.route('/api/device/remote/network', methods=['GET', 'POST'])
+def device_remote_network():
+    device_id = _get_requested_device_id()
+    current, target_path, source = _load_remote_config_map(_DEVICE_NET_CONFIG_PATHS, _DEVICE_NETWORK_DEFAULTS, device_id=device_id, allow_legacy=False)
+
+    if request.method == 'GET':
+        return jsonify({
+            'net_iface': current.get('iface', current.get('net_iface', _DEVICE_NETWORK_DEFAULTS['iface'])),
+            'net_use_dhcp': _to_bool(current.get('dhcp', current.get('net_use_dhcp', True))),
+            'net_ip': current.get('ip', current.get('net_ip', _DEVICE_NETWORK_DEFAULTS['ip'])),
+            'net_netmask': current.get('netmask', current.get('net_netmask', _DEVICE_NETWORK_DEFAULTS['netmask'])),
+            'net_gateway': current.get('gateway', current.get('net_gateway', _DEVICE_NETWORK_DEFAULTS['gateway'])),
+            'source': source,
+            'path': target_path,
+        })
+
+    body = request.get_json(silent=True) or {}
+    if not isinstance(body, dict):
+        return jsonify({'ok': False, 'error': 'invalid body'}), 400
+
+    updated = dict(current)
+    updated['iface'] = str(body.get('net_iface', updated.get('iface', updated.get('net_iface', _DEVICE_NETWORK_DEFAULTS['iface']))) or _DEVICE_NETWORK_DEFAULTS['iface'])
+    updated['dhcp'] = 'true' if _to_bool(body.get('net_use_dhcp', updated.get('dhcp', updated.get('net_use_dhcp', True)))) else 'false'
+    updated['ip'] = str(body.get('net_ip', updated.get('ip', updated.get('net_ip', _DEVICE_NETWORK_DEFAULTS['ip']))) or _DEVICE_NETWORK_DEFAULTS['ip'])
+    updated['netmask'] = str(body.get('net_netmask', updated.get('netmask', updated.get('net_netmask', _DEVICE_NETWORK_DEFAULTS['netmask']))) or _DEVICE_NETWORK_DEFAULTS['netmask'])
+    updated['gateway'] = str(body.get('net_gateway', updated.get('gateway', updated.get('net_gateway', _DEVICE_NETWORK_DEFAULTS['gateway']))) or _DEVICE_NETWORK_DEFAULTS['gateway'])
+    if 'wifi_iface' not in updated:
+        updated['wifi_iface'] = _DEVICE_NETWORK_DEFAULTS['wifi_iface']
+
+    ordered_keys = ['dhcp', 'ip', 'netmask', 'gateway', 'iface', 'wifi_iface']
+    content = _serialize_kv_config(updated, ordered_keys).encode('utf-8')
+    resp = _remote_fs_write(target_path, content, device_id=device_id)
+    ok = bool(isinstance(resp, dict) and resp.get('ok'))
+    return jsonify({'ok': ok, 'saved_path': target_path, 'restart_required': True, 'applied': False, 'device': resp})
+
+
+@app.route('/api/device/remote/rules', methods=['GET', 'POST'])
+def device_remote_rules():
+    device_id = _get_requested_device_id()
+    ok, payload = _remote_fs_read_best(_DEVICE_RULES_PATHS, device_id=device_id)
+    target_path = payload.get('path') if ok else _DEVICE_RULES_PATHS[0]
+
+    if request.method == 'GET':
+        if ok:
+            try:
+                return jsonify(json.loads(payload['content'].decode('utf-8', errors='ignore') or '{}'))
+            except Exception as exc:
+                return jsonify({'ok': False, 'error': f'invalid rules json: {exc}'})
+        return jsonify({'version': 1, 'rules': []})
+
+    body = request.get_json(silent=True) or {}
+    if not isinstance(body, dict):
+        return jsonify({'ok': False, 'error': 'invalid body'}), 400
+    content = json.dumps(body, ensure_ascii=False, indent=2).encode('utf-8')
+    resp = _remote_fs_write(target_path, content, device_id=device_id)
+    ok = bool(isinstance(resp, dict) and resp.get('ok'))
+    return jsonify({'ok': ok, 'saved_path': target_path, 'rule_count': len(body.get('rules', [])), 'restart_required': True, 'device': resp})
 
 
 _CAN_CONFIG_DEFAULTS = {

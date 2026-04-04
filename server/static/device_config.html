@@ -67,9 +67,10 @@ table tr:hover td{background:#1e293b55}
     <span id="conn-label" style="color:var(--txt2);font-size:12px">连接中...</span>
   </div>
   <div class="device-sel">
-    <label>设备 IP:</label>
-    <input id="device-ip" value="192.168.100.100" placeholder="192.168.100.100">
-    <button class="btn btn-s" onclick="connectDevice()" style="padding:5px 12px">连接</button>
+    <label>Device ID:</label>
+    <select id="device-id" onchange="onDeviceChange()" style="width:220px"></select>
+    <button class="btn btn-s" onclick="refreshDeviceList()" style="padding:5px 12px">Refresh</button>
+    <button class="btn btn-s" onclick="connectDevice()" style="padding:5px 12px">Connect</button>
   </div>
   <div id="dev-info" style="font-size:12px;color:var(--txt2);margin-left:8px"></div>
 </div>
@@ -127,7 +128,7 @@ table tr:hover td{background:#1e293b55}
   <div class="card">
     <h3>MQTT 配置</h3>
     <div class="row">
-      <div><label class="lbl">服务器地址</label><input id="m-host" placeholder="192.168.100.1"></div>
+      <div><label class="lbl">服务器地址</label><input id="m-host" placeholder="cloud.yshut.cn"></div>
       <div><label class="lbl">端口</label><input id="m-port" type="number" value="1883"></div>
     </div>
     <div class="row">
@@ -146,7 +147,7 @@ table tr:hover td{background:#1e293b55}
   <div class="card">
     <h3>WebSocket 配置</h3>
     <div class="row">
-      <div><label class="lbl">服务器地址</label><input id="w-host" placeholder="192.168.100.1"></div>
+      <div><label class="lbl">服务器地址</label><input id="w-host" placeholder="cloud.yshut.cn"></div>
       <div><label class="lbl">端口</label><input id="w-port" type="number" value="5052"></div>
     </div>
     <div class="row w1"><div><label class="lbl">路径</label><input id="w-path" value="/ws"></div></div>
@@ -180,7 +181,7 @@ table tr:hover td{background:#1e293b55}
   <button class="btn btn-p" onclick="saveNet()">保存并应用</button>
   <button class="btn btn-s" onclick="loadNet()" style="margin-left:8px">重新加载</button>
   <div class="msg" id="net-msg"></div>
-  <p style="color:var(--warn);font-size:12px;margin-top:8px">⚠ 修改 IP 后设备将以新地址响应，请同步修改上方"设备 IP"并重新连接。</p>
+  <p style="color:var(--warn);font-size:12px;margin-top:8px">应用网络配置后，设备可能会短暂离线；如果修改了设备 IP，请确保设备仍能连接到当前服务器和 MQTT Broker。</p>
 </div>
 
 <!-- ===== CAN 配置 ===== -->
@@ -309,12 +310,66 @@ table tr:hover td{background:#1e293b55}
 </div>
 
 <script>
-var gDevIp = '192.168.100.100';
+var gDeviceId = '';
 var gMonTimer = null, gMonRows = [], gMonRunning = false;
 var gr = {version:1, rules:[]}, gei = -1;
+var gApiMap = {
+  status: '/api/device/remote/status',
+  hardware: '/api/device/remote/hardware',
+  config: '/api/device/remote/config',
+  network: '/api/device/remote/network',
+  rules: '/api/device/remote/rules',
+  can_frames: '/api/can/frames'
+};
 
 function api(path, opts) {
-  return fetch('/api/device/proxy/' + path + '?device=' + gDevIp, opts || {});
+  var url = gApiMap[path] || path;
+  if(url.charAt(0) !== '/') url = '/api/device/remote/' + path;
+  if(gDeviceId) url += (url.indexOf('?') >= 0 ? '&' : '?') + 'device_id=' + encodeURIComponent(gDeviceId);
+  return fetch(url, opts || {});
+}
+
+function onDeviceChange() {
+  var sel = document.getElementById('device-id');
+  gDeviceId = (sel && sel.value || '').trim();
+}
+
+async function refreshDeviceList(preferredId) {
+  var sel = document.getElementById('device-id');
+  if(!sel) return;
+  try {
+    var r = await fetch('/api/device/list');
+    var d = await r.json();
+    var ids = [];
+    var seen = {};
+    function addId(id) {
+      id = String(id || '').trim();
+      if(!id || seen[id]) return;
+      seen[id] = true;
+      ids.push(id);
+    }
+    addId(d.current_device_id);
+    (d.devices || []).forEach(addId);
+    (d.history || []).forEach(addId);
+
+    if(ids.length === 0) {
+      sel.innerHTML = '<option value="">No devices</option>';
+      gDeviceId = '';
+      return;
+    }
+
+    sel.innerHTML = ids.map(function(id){
+      return '<option value="' + escH(id) + '">' + escH(id) + '</option>';
+    }).join('');
+
+    var nextId = (preferredId || gDeviceId || d.current_device_id || ids[0] || '').trim();
+    if(ids.indexOf(nextId) < 0) nextId = ids[0] || '';
+    sel.value = nextId;
+    gDeviceId = nextId;
+  } catch(e) {
+    sel.innerHTML = '<option value="">Load failed</option>';
+    gDeviceId = '';
+  }
 }
 
 function sm(id, ok, t) {
@@ -354,26 +409,36 @@ function tDhcp() {
 }
 
 async function connectDevice() {
-  gDevIp = document.getElementById('device-ip').value.trim() || '192.168.100.100';
+  onDeviceChange();
+  if(!gDeviceId) {
+    document.getElementById('conn-dot').style.background = 'var(--err)';
+    document.getElementById('conn-label').textContent = 'No device selected';
+    document.getElementById('dev-info').textContent = 'Refresh and choose a device first';
+    document.getElementById('hw-offline').style.display = 'block';
+    return;
+  }
+
   document.getElementById('conn-dot').style.background = 'var(--warn)';
-  document.getElementById('conn-label').textContent = '连接中...';
+  document.getElementById('conn-label').textContent = 'Connecting...';
   try {
     var r = await api('status');
-    if (r.ok) {
-      var d = await r.json();
+    var d = await r.json();
+    if (d.connected || d.ok) {
       document.getElementById('conn-dot').style.background = 'var(--ok)';
-      document.getElementById('conn-label').textContent = '已连接';
+      document.getElementById('conn-label').textContent = 'Connected';
       document.getElementById('dev-info').innerHTML =
-        '<b>ID:</b> '+(d.device_id||'--')+
-        ' &nbsp; <b>运行:</b> '+fu(d.uptime_seconds||0)+
-        ' &nbsp; <b>规则:</b> '+(d.rule_count||0)+
-        ' &nbsp; <b>MQTT:</b> '+(d.mqtt_connected?'<span class="badge bok">在线</span>':'<span class="badge berr">离线</span>');
+        '<b>ID:</b> '+(d.device_id||gDeviceId||'--')+
+        ' &nbsp; <b>Uptime:</b> '+fu(d.uptime_seconds||0)+
+        ' &nbsp; <b>Rules:</b> '+(d.rule_count||0)+
+        ' &nbsp; <b>MQTT:</b> '+(d.mqtt_connected?'<span class="badge bok">Online</span>':'<span class="badge berr">Offline</span>');
       document.getElementById('hw-offline').style.display = 'none';
       loadHw();
-    } else { throw new Error('HTTP '+r.status); }
+    } else {
+      throw new Error(d.error || ('HTTP ' + r.status));
+    }
   } catch(e) {
     document.getElementById('conn-dot').style.background = 'var(--err)';
-    document.getElementById('conn-label').textContent = '连接失败: '+e.message;
+    document.getElementById('conn-label').textContent = 'Connect failed: ' + e.message;
     document.getElementById('hw-offline').style.display = 'block';
   }
 }
@@ -388,38 +453,54 @@ async function loadHw() {
     document.getElementById('hw-mem').textContent = fb((sys.memory_used||0)*1024)+' / '+fb((sys.memory_total||1)*1024)+memFreeStr;
     document.getElementById('hw-uptime').textContent = fu(s.uptime_seconds||0);
 
+    var storageList = Array.isArray(hw.storage) ? hw.storage : (hw.storage ? [hw.storage] : []);
+    var networkList = Array.isArray(hw.network) ? hw.network : (hw.network ? [hw.network] : []);
+    var canList = Array.isArray(hw.can) ? hw.can : [];
+    if(!canList.length) {
+      if(hw.can0) canList.push(Object.assign({interface:'can0'}, hw.can0));
+      if(hw.can1) canList.push(Object.assign({interface:'can1'}, hw.can1));
+    }
+
     var sh = '';
-    (hw.storage||[]).forEach(function(s2){
+    storageList.forEach(function(s2){
       var lbl = s2.label || s2.mount_point;
-      if(!s2.is_mounted){
+      var mounted = typeof s2.is_mounted === 'boolean' ? s2.is_mounted : !!s2.mounted;
+      var totalBytes = s2.total_bytes != null ? s2.total_bytes : (s2.total || 0);
+      var usedBytes = s2.used_bytes != null ? s2.used_bytes : (s2.used || 0);
+      var freeBytes = s2.free_bytes != null ? s2.free_bytes : (s2.free || 0);
+      if(!mounted){
         sh += '<div style="margin-bottom:8px;display:flex;justify-content:space-between;align-items:center"><span>'+lbl+'</span><span class="badge" style="background:#475569">未插入</span></div>';
       } else {
-        var p = s2.total_bytes>0 ? ((s2.used_bytes/s2.total_bytes)*100).toFixed(1) : 0;
+        var p = totalBytes>0 ? ((usedBytes/totalBytes)*100).toFixed(1) : 0;
         var bc = p>90?'#ef4444':p>70?'#f59e0b':'#0284c7';
         sh += '<div style="margin-bottom:10px">';
         sh += '<div style="display:flex;justify-content:space-between"><span>'+lbl+'</span>';
-        sh += '<span>'+fb(s2.used_bytes)+' / '+fb(s2.total_bytes)+' ('+p+'%)</span></div>';
+        sh += '<span>'+fb(usedBytes)+' / '+fb(totalBytes)+' ('+p+'%)</span></div>';
         sh += '<div class="prog-wrap"><div class="prog-bar" style="background:'+bc+';width:'+p+'%"></div></div>';
-        sh += '<div style="color:var(--txt2);font-size:11px;margin-top:2px">可用: '+fb(s2.free_bytes)+'</div></div>';
+        sh += '<div style="color:var(--txt2);font-size:11px;margin-top:2px">可用: '+fb(freeBytes)+'</div></div>';
       }
     });
     document.getElementById('hw-stor').innerHTML = sh || '无信息';
 
     var nh = '';
-    (hw.network||[]).forEach(function(n){
+    networkList.forEach(function(n){
       nh += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">';
-      nh += '<span class="status-dot '+(n.is_connected?'dok':'derr')+'"></span>';
-      nh += '<b>'+n.interface+'</b> '+(n.ip_address||'无IP');
-      nh += ' <span style="color:var(--txt2)">'+(n.is_connected?'已连接':'未连接')+'</span></div>';
+      var connected = typeof n.is_connected === 'boolean' ? n.is_connected : !!n.connected;
+      nh += '<span class="status-dot '+(connected?'dok':'derr')+'"></span>';
+      nh += '<b>'+n.interface+'</b> '+(n.ip_address||n.ip||'无IP');
+      nh += ' <span style="color:var(--txt2)">'+(connected?'已连接':'未连接')+'</span></div>';
     });
     document.getElementById('hw-net').innerHTML = nh || '无信息';
 
     var ch = '';
-    (hw.can||[]).forEach(function(c){
-      var br = c.bitrate>=1000 ? (c.bitrate/1000).toFixed(0)+'kbps' : (c.bitrate||0)+' bps';
+    canList.forEach(function(c){
+      var bitrate = c.bitrate || 0;
+      var rxCount = c.rx_count != null ? c.rx_count : (c.rx || 0);
+      var txCount = c.tx_count != null ? c.tx_count : (c.tx || 0);
+      var br = bitrate>=1000 ? (bitrate/1000).toFixed(0)+'kbps' : bitrate+' bps';
       ch += '<div style="margin-bottom:5px"><b>'+c.interface+'</b> '+br;
-      ch += ' &nbsp; Rx:<span style="color:var(--ok)">'+(c.rx_count||0)+'</span>';
-      ch += ' Tx:<span style="color:#60a5fa">'+(c.tx_count||0)+'</span></div>';
+      ch += ' &nbsp; Rx:<span style="color:var(--ok)">'+rxCount+'</span>';
+      ch += ' Tx:<span style="color:#60a5fa">'+txCount+'</span></div>';
     });
     document.getElementById('hw-can').innerHTML = ch || '无信息';
   } catch(e) {
@@ -430,27 +511,27 @@ async function loadHw() {
 async function loadSys() {
   try {
     var r = await api('config'), d = await r.json();
-    document.getElementById('t-mode').value = d.transport_mode||'mqtt';
-    document.getElementById('m-host').value = d.mqtt_host||'';
-    document.getElementById('m-port').value = d.mqtt_port||1883;
-    document.getElementById('m-prefix').value = d.mqtt_topic_prefix||'';
-    document.getElementById('m-qos').value = d.mqtt_qos||0;
-    document.getElementById('m-cid').value = d.mqtt_client_id||'';
-    document.getElementById('m-ka').value = d.mqtt_keepalive||60;
-    document.getElementById('m-user').value = d.mqtt_username||'';
-    document.getElementById('w-host').value = d.ws_host||'';
-    document.getElementById('w-port').value = d.ws_port||5052;
-    document.getElementById('w-path').value = d.ws_path||'/ws';
-    document.getElementById('c0-baud').value = String(d.can0_bitrate||500000);
-    document.getElementById('c1-baud').value = String(d.can1_bitrate||500000);
-    document.getElementById('c0-auto').value = d.can0_bitrate===0?'true':'false';
-    document.getElementById('c1-auto').value = d.can1_bitrate===0?'true':'false';
-    document.getElementById('c-rdir').value = d.can_record_dir||'';
-    document.getElementById('c-rmb').value = d.can_record_max_mb||40;
-    /* 每次打开配置页，自动将设备 CAN 配置同步到服务端缓存 */
-    fetch('/api/device/can_config?device='+gDevIp).catch(()=>{});
+    document.getElementById('t-mode').value = d.transport_mode || 'mqtt';
+    document.getElementById('m-host').value = d.mqtt_host || '';
+    document.getElementById('m-port').value = d.mqtt_port || 1883;
+    document.getElementById('m-prefix').value = d.mqtt_topic_prefix || '';
+    document.getElementById('m-qos').value = d.mqtt_qos || 0;
+    document.getElementById('m-cid').value = d.mqtt_client_id || '';
+    document.getElementById('m-ka').value = d.mqtt_keepalive || 60;
+    document.getElementById('m-user').value = d.mqtt_username || '';
+    document.getElementById('m-pass').value = d.mqtt_password || '';
+    document.getElementById('w-host').value = d.ws_host || '';
+    document.getElementById('w-port').value = d.ws_port || 5052;
+    document.getElementById('w-path').value = d.ws_path || '/ws';
+    document.getElementById('c0-baud').value = String(d.can0_bitrate || 500000);
+    document.getElementById('c1-baud').value = String(d.can1_bitrate || 500000);
+    document.getElementById('c0-auto').value = d.can0_bitrate === 0 ? 'true' : 'false';
+    document.getElementById('c1-auto').value = d.can1_bitrate === 0 ? 'true' : 'false';
+    document.getElementById('c-rdir').value = d.can_record_dir || '';
+    document.getElementById('c-rmb').value = d.can_record_max_mb || 40;
   } catch(e) {}
 }
+
 
 async function saveSys() {
   var body = {
@@ -475,56 +556,55 @@ async function saveSys() {
 }
 
 async function saveCan() {
-  var a0 = document.getElementById('c0-auto').value==='true';
-  var a1 = document.getElementById('c1-auto').value==='true';
+  var a0 = document.getElementById('c0-auto').value === 'true';
+  var a1 = document.getElementById('c1-auto').value === 'true';
   var body = {
-    can0_bitrate: a0?0:parseInt(document.getElementById('c0-baud').value),
-    can1_bitrate: a1?0:parseInt(document.getElementById('c1-baud').value),
+    can0_bitrate: a0 ? 0 : parseInt(document.getElementById('c0-baud').value),
+    can1_bitrate: a1 ? 0 : parseInt(document.getElementById('c1-baud').value),
     can_record_dir: document.getElementById('c-rdir').value,
-    can_record_max_mb: parseInt(document.getElementById('c-rmb').value)||40
+    can_record_max_mb: parseInt(document.getElementById('c-rmb').value) || 40
   };
   try {
-    var r = await api('config', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    var r = await api('config', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
     var d = await r.json();
-    if(d.ok) {
-      sm('can-msg', true, d.can_restarted ? '已保存，CAN接口已立即重启' : '已保存（波特率未变）');
-      if(d.can_restarted) setTimeout(loadHw, 1500);
-      /* 同步到服务端缓存，供 UDS 页面等自动读取 */
-      fetch('/api/device/can_config?device='+gDevIp, {
-        method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)
-      }).catch(()=>{});
-    } else { sm('can-msg', false, d.error||'保存失败'); }
-  } catch(e) { sm('can-msg', false, '请求失败'); }
+    sm('can-msg', d.ok, d.ok ? 'CAN 配置已保存' : (d.error || '保存失败'));
+  } catch(e) {
+    sm('can-msg', false, '请求失败');
+  }
 }
+
 
 async function loadNet() {
   try {
     var r = await api('network'), d = await r.json();
-    document.getElementById('n-iface').value = d.net_iface||'eth0';
-    document.getElementById('n-dhcp').value = d.net_use_dhcp?'true':'false';
-    document.getElementById('n-ip').value = d.net_ip||'';
-    document.getElementById('n-mask').value = d.net_netmask||'';
-    document.getElementById('n-gw').value = d.net_gateway||'';
+    document.getElementById('n-iface').value = d.net_iface || 'auto';
+    document.getElementById('n-dhcp').value = d.net_use_dhcp ? 'true' : 'false';
+    document.getElementById('n-ip').value = d.net_ip || '';
+    document.getElementById('n-mask').value = d.net_netmask || '';
+    document.getElementById('n-gw').value = d.net_gateway || '';
     tDhcp();
   } catch(e) {}
 }
 
+
 async function saveNet() {
-  var dh = document.getElementById('n-dhcp').value==='true';
+  var dh = document.getElementById('n-dhcp').value === 'true';
   var body = {
     net_iface: document.getElementById('n-iface').value,
     net_use_dhcp: dh,
     net_ip: document.getElementById('n-ip').value,
     net_netmask: document.getElementById('n-mask').value,
-    net_gateway: document.getElementById('n-gw').value,
-    apply: true
+    net_gateway: document.getElementById('n-gw').value
   };
   try {
-    var r = await api('network', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    var r = await api('network', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
     var d = await r.json();
-    sm('net-msg', d.ok, d.ok ? '网络配置已保存并应用' : (d.error||'保存失败'));
-  } catch(e) { sm('net-msg', false, '请求失败'); }
+    sm('net-msg', d.ok, d.ok ? '网络配置已保存并应用' : (d.error || '保存失败'));
+  } catch(e) {
+    sm('net-msg', false, '请求失败');
+  }
 }
+
 
 /* ===== CAN-MQTT 规则 ===== */
 async function loadRules() {
@@ -663,7 +743,7 @@ function clearMon() { document.getElementById('mon-box').innerHTML='<div class="
 async function pollMon() {
   var filter = document.getElementById('mon-filter').value.trim().toUpperCase();
   try {
-    var r = await api('can_frames'), frames = await r.json();
+    var r = await api('can_frames?limit=50'), frames = await r.json();
     if(!Array.isArray(frames)) frames = frames.frames||frames.data||[];
     var box = document.getElementById('mon-box');
     var newCount = 0;
@@ -692,7 +772,8 @@ async function pollMon() {
 }
 
 /* 初始化 */
-window.onload = function(){
+window.onload = async function(){
+  await refreshDeviceList();
   connectDevice();
 };
 </script>

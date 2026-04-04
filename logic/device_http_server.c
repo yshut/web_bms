@@ -17,6 +17,7 @@
 #include "../utils/net_manager.h"
 #include "uds_handler.h"
 #include "can_recorder.h"
+#include "../src/wifi/wifi_manager.h"
 
 #include <arpa/inet.h>
 #include <dirent.h>
@@ -56,42 +57,85 @@ static const char HTML_PAGE[] =
 "<title>T113-S3 Config</title>\n"
 "<style>\n"
 "*{box-sizing:border-box;margin:0;padding:0}\n"
-"body{font-family:sans-serif;background:#0f172a;color:#e2e8f0;min-height:100vh}\n"
-"header{background:#1e293b;padding:12px 20px;display:flex;align-items:center;gap:12px;border-bottom:1px solid #334155}\n"
-"header h1{font-size:18px;font-weight:700;color:#38bdf8}\n"
-".tag{font-size:11px;background:#0284c7;color:#fff;padding:2px 8px;border-radius:99px}\n"
-".nav{display:flex;overflow-x:auto;background:#1e293b;border-bottom:1px solid #334155;padding:0 12px;gap:2px}\n"
-".nav button{background:none;border:none;color:#94a3b8;padding:10px 12px;cursor:pointer;border-bottom:2px solid transparent;font-size:13px;white-space:nowrap}\n"
+".mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}\n"
+"body{font-family:-apple-system,BlinkMacSystemFont,\"Segoe UI\",sans-serif;background:radial-gradient(circle at top,#1a2742 0,#0f172a 42%,#0b1120 100%);color:#e2e8f0;min-height:100vh;line-height:1.45}\n"
+"header{position:sticky;top:0;z-index:20;background:rgba(15,23,42,.92);backdrop-filter:blur(10px);padding:14px 18px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;border-bottom:1px solid rgba(100,116,139,.28);box-shadow:0 10px 28px rgba(2,6,23,.24)}\n"
+"header h1{font-size:18px;font-weight:700;color:#f8fafc;letter-spacing:.02em}\n"
+".tag{font-size:11px;background:#0f766e;color:#ecfeff;padding:4px 10px;border-radius:999px;border:1px solid rgba(255,255,255,.08)}\n"
+".nav{position:sticky;top:60px;z-index:19;display:flex;overflow-x:auto;background:rgba(15,23,42,.88);backdrop-filter:blur(8px);border-bottom:1px solid rgba(100,116,139,.22);padding:0 12px;gap:8px}\n"
+".nav button{background:none;border:none;color:#94a3b8;padding:12px 8px;cursor:pointer;border-bottom:2px solid transparent;font-size:13px;font-weight:700;white-space:nowrap;transition:all .16s ease}\n"
 ".nav button.active,.nav button:hover{color:#38bdf8;border-bottom-color:#38bdf8}\n"
-".tab{display:none;padding:16px;max-width:900px;margin:0 auto}.tab.active{display:block}\n"
-".card{background:#1e293b;border:1px solid #334155;border-radius:10px;padding:18px;margin-bottom:14px}\n"
-".card h2{font-size:13px;font-weight:600;color:#64748b;text-transform:uppercase;margin-bottom:14px}\n"
-".fr{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px}\n"
+".tab{display:none;padding:22px 18px 30px;max-width:1240px;margin:0 auto}.tab.active{display:block}\n"
+".card{background:linear-gradient(180deg,rgba(30,41,59,.95),rgba(15,23,42,.98));border:1px solid rgba(100,116,139,.28);border-radius:16px;padding:18px 18px 16px;margin-bottom:16px;min-height:96px;box-shadow:0 18px 40px rgba(2,6,23,.18)}\n"
+".card h2{font-size:12px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:.08em;margin-bottom:14px}\n"
+".fr{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px 12px;margin-bottom:12px;align-items:start}\n"
 ".fr.w1{grid-template-columns:1fr}.fr.w3{grid-template-columns:1fr 1fr 1fr}\n"
-"label{display:block;font-size:12px;color:#64748b;margin-bottom:3px}\n"
-"input,select{width:100%;background:#0f172a;border:1px solid #334155;color:#e2e8f0;padding:7px 9px;border-radius:6px;font-size:13px;outline:none}\n"
-"input:focus,select:focus{border-color:#38bdf8}\n"
-".btn{padding:8px 14px;border-radius:6px;border:none;cursor:pointer;font-size:13px;font-weight:500}\n"
-".btn-p{background:#0284c7;color:#fff}.btn-d{background:#dc2626;color:#fff}.btn-g{background:#334155;color:#e2e8f0}\n"
-".g2{display:grid;grid-template-columns:1fr 1fr;gap:10px}\n"
-".sc{background:#0f172a;border:1px solid #334155;border-radius:8px;padding:12px}\n"
-".sv{font-size:20px;font-weight:700;color:#38bdf8;line-height:1}.sl{font-size:11px;color:#64748b;margin-top:4px}\n"
+"label{display:block;font-size:12px;color:#94a3b8;margin-bottom:5px;font-weight:600}\n"
+"input,select{width:100%;background:rgba(15,23,42,.92);border:1px solid rgba(100,116,139,.34);color:#e2e8f0;padding:10px 11px;border-radius:10px;font-size:13px;outline:none;min-height:40px;box-shadow:inset 0 1px 0 rgba(255,255,255,.03)}\n"
+"input:focus,select:focus{border-color:#22d3ee;box-shadow:0 0 0 3px rgba(34,211,238,.14)}\n"
+".btn{padding:10px 14px;min-height:40px;border-radius:10px;border:1px solid transparent;cursor:pointer;font-size:13px;font-weight:700;letter-spacing:.01em;transition:transform .15s ease,box-shadow .15s ease,background .15s ease}\n"
+".btn:hover{transform:translateY(-1px)}\n"
+".btn-p{background:#0284c7;color:#fff;box-shadow:0 10px 24px rgba(2,132,199,.22)}.btn-d{background:#dc2626;color:#fff;box-shadow:0 10px 24px rgba(220,38,38,.18)}.btn-g{background:#334155;color:#e2e8f0;border-color:rgba(148,163,184,.18)}\n"
+".g2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}\n"
+".hero-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:16px}\n"
+".hero-grid .sc{min-height:104px;display:flex;flex-direction:column;justify-content:space-between}\n"
+".panel-split{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(320px,.85fr);gap:12px;align-items:start}\n"
+".sc{background:rgba(15,23,42,.9);border:1px solid rgba(100,116,139,.24);border-radius:14px;padding:14px;min-height:88px}\n"
+".sv{font-size:20px;font-weight:700;color:#e0f2fe;line-height:1.05}.sl{font-size:11px;color:#94a3b8;margin-top:6px;letter-spacing:.04em;text-transform:uppercase}\n"
 ".badge{padding:2px 8px;border-radius:99px;font-size:11px;font-weight:500}\n"
 ".bok{background:#14532d;color:#4ade80}.berr{background:#450a0a;color:#f87171}\n"
+".info-block{font-size:13px;line-height:1.8;color:#cbd5e1;word-break:break-word}\n"
+".stack-list{display:grid;gap:10px}\n"
+".section-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}\n"
+".subtle{font-size:12px;color:#94a3b8;line-height:1.6}\n"
 "table{width:100%;border-collapse:collapse;font-size:12px}\n"
-"th,td{padding:6px 9px;text-align:left;border-bottom:1px solid #1e293b}\n"
-"th{color:#64748b;background:#0f172a}tr:hover td{background:#1e293b}\n"
+"th,td{padding:9px 10px;text-align:left;border-bottom:1px solid rgba(51,65,85,.82)}\n"
+"th{color:#94a3b8;background:#0f172a;font-weight:700}tr:hover td{background:rgba(30,41,59,.7)}\n"
 ".rl{display:flex;flex-direction:column;gap:8px}\n"
 ".ri{background:#0f172a;border:1px solid #334155;border-radius:8px;padding:10px}\n"
 ".rh{display:flex;align-items:center;gap:8px;margin-bottom:6px}\n"
 ".rn{font-weight:600;font-size:13px}.rm{font-size:11px;color:#64748b}.ra{margin-left:auto;display:flex;gap:5px}\n"
 ".msg{padding:8px 12px;border-radius:6px;font-size:12px;margin-top:8px}\n"
 ".mok{background:#14532d;color:#4ade80}.merr{background:#450a0a;color:#f87171}\n"
-".cw{overflow-x:auto;max-height:380px;overflow-y:auto}\n"
+".cw{overflow-x:auto;max-height:420px;overflow-y:auto;border:1px solid rgba(100,116,139,.22);border-radius:12px;background:rgba(15,23,42,.78)}\n"
 ".dot{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:4px}\n"
 ".dok{background:#4ade80}.derr{background:#f87171}\n"
-".sa{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap}\n"
-"@media(max-width:580px){.fr,.fr.w3,.g2{grid-template-columns:1fr}}\n"
+".sa{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;align-items:center}\n"
+".toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;justify-content:flex-start}\n"
+".toolbar .grow{flex:1 1 220px}\n"
+".table-wrap{overflow:auto;max-height:56vh;max-width:100%;border:1px solid rgba(100,116,139,.24);border-radius:12px;background:rgba(15,23,42,.86)}\n"
+".rules-browser{display:grid;grid-template-columns:minmax(250px,300px) minmax(0,1fr);gap:12px;align-items:start}\n"
+".signal-list{display:grid;gap:10px;padding:12px;min-height:240px}\n"
+".signal-card{border:1px solid rgba(100,116,139,.2);border-radius:12px;background:rgba(2,6,23,.82);padding:12px;display:grid;gap:10px}\n"
+".signal-card-head{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap}\n"
+".signal-card-title b{display:block;font-size:15px;color:#f8fafc;line-height:1.4}\n"
+".signal-card-title .muted{font-size:12px;line-height:1.6}\n"
+".signal-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}\n"
+".signal-cell{padding:8px 10px;border:1px solid rgba(100,116,139,.14);border-radius:10px;background:rgba(15,23,42,.72)}\n"
+".signal-cell .k{display:block;font-size:11px;color:#94a3b8;margin-bottom:4px}\n"
+".signal-cell .v{display:block;font-size:13px;color:#e2e8f0;line-height:1.5;word-break:break-all}\n"
+".signal-actions{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}\n"
+".muted{color:#64748b;font-size:12px}\n"
+".panel-note{font-size:12px;color:#94a3b8;line-height:1.6}\n"
+".summary-strip{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:10px 0 14px}\n"
+".mini-card{background:rgba(15,23,42,.82);border:1px solid rgba(100,116,139,.18);border-radius:12px;padding:12px;min-height:82px;display:flex;flex-direction:column;justify-content:center}\n"
+".mini-card b{display:block;font-size:18px;color:#f8fafc;margin-bottom:4px}\n"
+".mini-card span{font-size:11px;color:#94a3b8;text-transform:uppercase;letter-spacing:.05em}\n"
+".rules-sidehead{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:8px}\n"
+".msg-meta{font-size:12px;color:#94a3b8;line-height:1.7}\n"
+".signal-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;margin-bottom:10px;padding:12px;border:1px solid rgba(100,116,139,.18);border-radius:12px;background:rgba(15,23,42,.75);min-height:78px}\n"
+".signal-head b{display:block;font-size:16px;color:#f8fafc;margin-bottom:4px}\n"
+".signal-head .meta{font-size:12px;color:#94a3b8;line-height:1.7}\n"
+".signal-empty{padding:18px;color:#94a3b8;font-size:13px}\n"
+".editor-grid{display:grid;grid-template-columns:1fr;gap:14px}\n"
+".editor-block{padding:14px;border:1px solid rgba(100,116,139,.18);border-radius:12px;background:rgba(15,23,42,.6);min-height:120px}\n"
+".editor-block h3{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:#94a3b8;margin-bottom:12px}\n"
+"#msg-list .btn{border:none}\n"
+"#msg-list .btn-p{background:#0f766e;box-shadow:none}\n"
+"#msg-list .btn-g{background:transparent;box-shadow:none}\n"
+"#msg-list .btn-g:hover{background:rgba(30,41,59,.75)}\n"
+"@media(max-width:900px){.tab{padding:16px 12px 24px}.nav{top:66px}.g2,.panel-split,.summary-strip,.rules-browser,.signal-grid{grid-template-columns:1fr}.hero-grid{grid-template-columns:1fr 1fr}.cw,.table-wrap{max-height:none}.card{padding:16px}}\n"
+"@media(max-width:580px){header{padding:12px}.nav{top:74px;padding:0 8px}.fr,.fr.w3,.g2,.hero-grid{grid-template-columns:1fr}.btn{width:100%}.sa .btn,.toolbar .btn,.signal-actions .btn{flex:1 1 100%}.sv{font-size:18px}.card{border-radius:14px;padding:14px}.summary-strip{gap:10px}}\n"
 "</style>\n"
 "<script src=\"https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js\"></script>\n"
 "</head>\n"
@@ -106,28 +150,29 @@ static const char HTML_PAGE[] =
 "<button onclick=\"sw('hw',this)\">硬件监控</button>\n"
 "<button onclick=\"sw('sys',this)\">系统配置</button>\n"
 "<button onclick=\"sw('net',this)\">网络配置</button>\n"
+"<button onclick=\"sw('wifi',this)\">WiFi配置</button>\n"
 "<button onclick=\"sw('can',this)\">CAN配置</button>\n"
 "<button onclick=\"sw('rules',this)\">CAN-MQTT规则</button>\n"
 "<button onclick=\"sw('mon',this)\">CAN监控</button>\n"
 "</div>\n"
 "\n"
 "<div id=\"tab-status\" class=\"tab active\">\n"
-"<div class=\"g2\" style=\"margin-bottom:14px\">\n"
+"<div class=\"hero-grid\">\n"
 "<div class=\"sc\"><div class=\"sv\" id=\"s-up\">--</div><div class=\"sl\">运行时间</div></div>\n"
 "<div class=\"sc\"><div class=\"sv\" id=\"s-mqtt\">--</div><div class=\"sl\">MQTT</div></div>\n"
 "<div class=\"sc\"><div class=\"sv\" id=\"s-rules\">--</div><div class=\"sl\">CAN-MQTT规则</div></div>\n"
 "<div class=\"sc\"><div class=\"sv\" id=\"s-did\" style=\"font-size:12px;word-break:break-all\">--</div><div class=\"sl\">设备ID</div></div>\n"
 "</div>\n"
-"<div class=\"card\"><h2>连接信息</h2><div id=\"mqtt-info\" style=\"font-size:13px;line-height:2;color:#94a3b8\">加载中...</div></div>\n"
+"<div class=\"card\"><h2>连接信息</h2><div id=\"mqtt-info\" class=\"info-block\">加载中...</div></div>\n"
 "<div class=\"card\"><h2>报文录制</h2>\n"
-"<div class=\"g2\" style=\"margin-bottom:10px\">\n"
+"<div class=\"g2\" style=\"margin-bottom:12px\">\n"
 "<div class=\"sc\"><div class=\"sv\" id=\"rec-status\">--</div><div class=\"sl\">录制状态</div></div>\n"
 "<div class=\"sc\"><div class=\"sv\" id=\"rec-total\">--</div><div class=\"sl\">总帧数</div></div>\n"
 "<div class=\"sc\"><div class=\"sv\" id=\"rec-can0\">--</div><div class=\"sl\">CAN0 帧</div></div>\n"
 "<div class=\"sc\"><div class=\"sv\" id=\"rec-can1\">--</div><div class=\"sl\">CAN1 帧</div></div>\n"
 "</div>\n"
-"<div style=\"font-size:11px;color:#64748b\" id=\"rec-file\">-</div>\n"
-"<div class=\"sa\" style=\"margin-top:8px\">\n"
+"<div class=\"subtle\" id=\"rec-file\">-</div>\n"
+"<div class=\"section-actions\">\n"
 "<button class=\"btn btn-g\" onclick=\"loadRecStatus()\">刷新</button>\n"
 "</div>\n"
 "</div>\n"
@@ -139,10 +184,10 @@ static const char HTML_PAGE[] =
 "<div class=\"sc\"><div class=\"sv\" id=\"hw-cpu\">--</div><div class=\"sl\">CPU</div></div>\n"
 "<div class=\"sc\"><div class=\"sv\" id=\"hw-mem\">--</div><div class=\"sl\">内存使用</div></div>\n"
 "</div></div>\n"
-"<div class=\"card\"><h2>存储</h2><div id=\"hw-stor\" style=\"color:#94a3b8;font-size:13px\">-</div></div>\n"
-"<div class=\"card\"><h2>网络</h2><div id=\"hw-net\" style=\"color:#94a3b8;font-size:13px\">-</div></div>\n"
-"<div class=\"card\"><h2>CAN</h2><div id=\"hw-can\" style=\"color:#94a3b8;font-size:13px\">-</div></div>\n"
-"<div class=\"sa\"><button class=\"btn btn-g\" onclick=\"loadHw()\">刷新</button></div>\n"
+"<div class=\"card\"><h2>存储</h2><div id=\"hw-stor\" class=\"stack-list subtle\">-</div></div>\n"
+"<div class=\"card\"><h2>网络</h2><div id=\"hw-net\" class=\"stack-list subtle\">-</div></div>\n"
+"<div class=\"card\"><h2>CAN</h2><div id=\"hw-can\" class=\"stack-list subtle\">-</div></div>\n"
+"<div class=\"section-actions\"><button class=\"btn btn-g\" onclick=\"loadHw()\">刷新</button></div>\n"
 "</div>\n"
 "\n"
 "<div id=\"tab-sys\" class=\"tab\">\n"
@@ -153,7 +198,7 @@ static const char HTML_PAGE[] =
 "</div></div>\n"
 "<div class=\"card\"><h2>MQTT</h2>\n"
 "<div class=\"fr\">\n"
-"<div><label>Host</label><input id=\"m-host\" placeholder=\"192.168.100.1\"></div>\n"
+"<div><label>Host</label><input id=\"m-host\" placeholder=\"cloud.yshut.cn\"></div>\n"
 "<div><label>Port</label><input id=\"m-port\" type=\"number\" placeholder=\"1883\"></div>\n"
 "</div>\n"
 "<div class=\"fr\">\n"
@@ -171,7 +216,7 @@ static const char HTML_PAGE[] =
 "</div>\n"
 "<div class=\"card\"><h2>WebSocket</h2>\n"
 "<div class=\"fr\">\n"
-"<div><label>Host</label><input id=\"w-host\" placeholder=\"192.168.100.1\"></div>\n"
+"<div><label>Host</label><input id=\"w-host\" placeholder=\"cloud.yshut.cn\"></div>\n"
 "<div><label>Port</label><input id=\"w-port\" type=\"number\" placeholder=\"5052\"></div>\n"
 "</div>\n"
 "<div class=\"fr w1\"><div><label>Path</label><input id=\"w-path\" placeholder=\"/ws\"></div></div>\n"
@@ -209,6 +254,34 @@ static const char HTML_PAGE[] =
 "<p style=\"font-size:12px;color:#64748b;margin-top:8px\">IP变更后需用新地址重新访问</p>\n"
 "</div>\n"
 "\n"
+"<div id=\"tab-wifi\" class=\"tab\">\n"
+"<div class=\"card\"><h2>WiFi状态</h2>\n"
+"<div class=\"g2\">\n"
+"<div class=\"sc\"><div class=\"sv\" id=\"wf-state\">--</div><div class=\"sl\">连接状态</div></div>\n"
+"<div class=\"sc\"><div class=\"sv\" id=\"wf-current\" style=\"font-size:14px;word-break:break-all\">--</div><div class=\"sl\">当前SSID</div></div>\n"
+"</div>\n"
+"</div>\n"
+"<div class=\"card\"><h2>WiFi配置</h2>\n"
+"<div class=\"fr\">\n"
+"<div><label>WiFi接口</label><input id=\"wf-iface\" placeholder=\"wlan0\"></div>\n"
+"<div><label>SSID</label><input id=\"wf-ssid\" placeholder=\"输入WiFi名称\"></div>\n"
+"</div>\n"
+"<div class=\"fr\">\n"
+"<div><label>密码</label><input id=\"wf-psk\" type=\"password\" placeholder=\"输入密码，开放网络可留空\"></div>\n"
+"<div></div>\n"
+"</div>\n"
+"<div class=\"sa\">\n"
+"<button class=\"btn btn-p\" onclick=\"saveWifi(false)\">保存配置</button>\n"
+"<button class=\"btn btn-p\" onclick=\"saveWifi(true)\">保存并连接</button>\n"
+"<button class=\"btn btn-g\" onclick=\"disconnectWifi()\">断开连接</button>\n"
+"<button class=\"btn btn-g\" onclick=\"scanWifi()\">扫描网络</button>\n"
+"<button class=\"btn btn-g\" onclick=\"loadWifi()\">重新加载</button>\n"
+"</div>\n"
+"<div id=\"wifi-msg\"></div>\n"
+"</div>\n"
+"<div class=\"card\"><h2>扫描结果</h2><div id=\"wf-list\" style=\"color:#94a3b8;font-size:13px\">点击“扫描网络”获取附近 WiFi</div></div>\n"
+"</div>\n"
+"\n"
 "<div id=\"tab-can\" class=\"tab\">\n"
 "<div class=\"card\"><h2>波特率</h2>\n"
 "<div class=\"fr\">\n"
@@ -226,27 +299,54 @@ static const char HTML_PAGE[] =
 "<div><label>单文件最大(MB)</label><input id=\"c-rmb\" type=\"number\" placeholder=\"100\"></div>\n"
 "</div>\n"
 "</div>\n"
-"<div class=\"sa\">\n"
+"<div class=\"section-actions\">\n"
 "<button class=\"btn btn-p\" onclick=\"saveCan()\">保存</button>\n"
-"<button class=\"btn\" onclick=\"loadSys()\" style=\"margin-left:8px\">重新加载</button>\n"
 "<button class=\"btn btn-g\" onclick=\"loadSys()\">重新加载</button>\n"
 "</div>\n"
 "<div id=\"can-msg\"></div>\n"
 "</div>\n"
 "\n"
 "<div id=\"tab-rules\" class=\"tab\">\n"
-"<div class=\"card\"><h2>CAN to MQTT规则</h2>\n"
-"<div id=\"rl\" class=\"rl\"></div>\n"
+"<div class=\"card\"><h2>规则导入</h2>\n"
+"<div class=\"panel-note\">这里主要用于导入和维护规则文件。Excel 导入会按规则ID合并，适合批量更新；板端页面更适合浏览协议和单条修订。</div>\n"
 "<div class=\"sa\">\n"
 "<button class=\"btn\" style=\"background:#16a34a;color:#fff\" onclick=\"addRule()\">新建规则</button>\n"
-"<button class=\"btn btn-g\" onclick=\"loadRules()\">刷新</button>\n"
 "<label class=\"btn\" style=\"background:#7c3aed;color:#fff;cursor:pointer\" id=\"xl-btn\">导入Excel<input type=\"file\" accept=\".xlsx\" style=\"display:none\" id=\"xl-input\" onchange=\"importExcel(this)\"></label>\n"
 "<button class=\"btn btn-g\" onclick=\"alert('Excel 模板请在服务端页面下载:\\nhttp://<服务端IP>:18080/rules\\n\\n也可直接访问:\\nhttp://<服务端IP>:18080/api/rules/template')\">模板说明</button>\n"
+"<button class=\"btn btn-g\" onclick=\"loadRules(true)\">刷新</button>\n"
+"<button class=\"btn btn-p\" onclick=\"saveRulesTable()\">保存当前规则</button>\n"
 "<div id=\"xl-msg\" class=\"msg\" style=\"display:none\"></div>\n"
+"</div>\n"
+"</div>\n"
+"<div class=\"card\"><h2>协议浏览</h2>\n"
+"<div class=\"toolbar\" style=\"margin-bottom:10px\">\n"
+"<input class=\"grow\" id=\"rf-key\" placeholder=\"搜索报文名 / 信号名 / CAN ID\" oninput=\"queueRenderRules()\">\n"
+"<select id=\"rf-ch\" onchange=\"renderRules()\"><option value=\"\">全部通道</option><option value=\"can0\">can0</option><option value=\"can1\">can1</option><option value=\"any\">any</option></select>\n"
+"<select id=\"rf-en\" onchange=\"renderRules()\"><option value=\"\">全部状态</option><option value=\"true\">仅启用</option><option value=\"false\">仅禁用</option></select>\n"
+"<button class=\"btn btn-g\" onclick=\"clearRuleFilter()\">清空筛选</button>\n"
+"<div class=\"muted\" id=\"rules-stat\">--</div>\n"
+"</div>\n"
+"<div class=\"summary-strip\">\n"
+"<div class=\"mini-card\"><b id=\"rules-msg-count\">--</b><span>报文组</span></div>\n"
+"<div class=\"mini-card\"><b id=\"rules-sig-count\">--</b><span>筛选后信号</span></div>\n"
+"<div class=\"mini-card\"><b id=\"rules-cur-msg\">--</b><span>当前报文</span></div>\n"
+"</div>\n"
+"<div class=\"rules-browser\">\n"
+"<div>\n"
+"<div class=\"rules-sidehead\"><div class=\"muted\" id=\"msg-stat\">报文列表</div><button class=\"btn btn-g\" style=\"padding:6px 10px\" onclick=\"grMsgKey='';renderRules()\">回到首个报文</button></div>\n"
+"<div id=\"msg-list\" style=\"max-height:52vh;overflow:auto;border:1px solid #334155;border-radius:8px;background:#0f172a\"></div>\n"
+"</div>\n"
+"<div>\n"
+"<div class=\"signal-head\"><div><b id=\"sig-title\">信号列表</b><div class=\"meta\" id=\"sig-meta\">请选择报文</div></div><div class=\"section-actions\" style=\"margin:0\"><button class=\"btn btn-g\" style=\"padding:6px 10px\" onclick=\"addRuleFromCurrent()\">在当前报文下新增信号</button></div></div>\n"
+"<div class=\"table-wrap\"><div id=\"rlb\" class=\"signal-list\"></div></div>\n"
+"</div>\n"
 "</div>\n"
 "</div>\n"
 "<div class=\"card\" id=\"re-card\" style=\"display:none\">\n"
 "<h2 id=\"re-title\">编辑规则</h2>\n"
+"<div class=\"editor-grid\">\n"
+"<div class=\"editor-block\">\n"
+"<h3>基础信息</h3>\n"
 "<div class=\"fr\">\n"
 "<div><label>规则ID</label><input id=\"re-id\" placeholder=\"rule_001\"></div>\n"
 "<div><label>名称</label><input id=\"re-name\" placeholder=\"发动机转速\"></div>\n"
@@ -263,6 +363,9 @@ static const char HTML_PAGE[] =
 "<div><label>信号名</label><input id=\"re-sig\" placeholder=\"EngineSpeed\"></div>\n"
 "<div><label>报文名</label><input id=\"re-msg\" placeholder=\"EngineStatus\"></div>\n"
 "</div>\n"
+"</div>\n"
+"<div class=\"editor-block\">\n"
+"<h3>解析参数</h3>\n"
 "<div class=\"fr w3\">\n"
 "<div><label>起始位</label><input id=\"re-sb\" type=\"number\" placeholder=\"0\"></div>\n"
 "<div><label>位长度</label><input id=\"re-bl\" type=\"number\" placeholder=\"16\"></div>\n"
@@ -277,6 +380,9 @@ static const char HTML_PAGE[] =
 "<div><label>单位</label><input id=\"re-unit\" placeholder=\"rpm\"></div>\n"
 "<div></div>\n"
 "</div>\n"
+"</div>\n"
+"<div class=\"editor-block\">\n"
+"<h3>发布设置</h3>\n"
 "<div class=\"fr\">\n"
 "<div><label>MQTT Topic模板</label><input id=\"re-topic\" placeholder=\"can/{channel}/{msg_name}/{sig_name}\"></div>\n"
 "<div><label>Payload格式</label><select id=\"re-pm\"><option value=\"0\">JSON</option><option value=\"1\">Raw</option></select></div>\n"
@@ -289,6 +395,7 @@ static const char HTML_PAGE[] =
 "<div><label>启用</label><select id=\"re-en\"><option value=\"true\">是</option><option value=\"false\">否</option></select></div>\n"
 "<div><label>优先级</label><input id=\"re-pri\" type=\"number\" placeholder=\"0\"></div>\n"
 "</div>\n"
+"</div>\n"
 "<div class=\"sa\">\n"
 "<button class=\"btn btn-p\" onclick=\"saveRule()\">保存规则</button>\n"
 "<button class=\"btn btn-g\" onclick=\"cancelEdit()\">取消</button>\n"
@@ -296,19 +403,20 @@ static const char HTML_PAGE[] =
 "<div id=\"re-msg2\"></div>\n"
 "</div>\n"
 "</div>\n"
+"</div>\n"
 "\n"
 "<div id=\"tab-mon\" class=\"tab\">\n"
 "<div class=\"card\"><h2>实时CAN帧</h2>\n"
-"<div class=\"sa\" style=\"margin-bottom:10px\">\n"
+"<div class=\"section-actions\" style=\"margin-bottom:12px\">\n"
 "<button class=\"btn btn-g\" id=\"btn-pause\" onclick=\"togglePause()\">暂停</button>\n"
 "<button class=\"btn btn-g\" onclick=\"clearCan()\">清空</button>\n"
 "</div>\n"
-"<div class=\"cw\"><table id=\"ct\"><thead><tr><th>时间</th><th>通道</th><th>CAN ID</th><th>DLC</th><th>数据</th></tr></thead><tbody id=\"ctb\"></tbody></table></div>\n"
+"<div class=\"cw\"><table id=\"ct\" class=\"mono\"><thead><tr><th>时间</th><th>通道</th><th>CAN ID</th><th>DLC</th><th>数据</th></tr></thead><tbody id=\"ctb\"></tbody></table></div>\n"
 "</div>\n"
 "</div>\n"
 "\n"
 "<script>\n"
-"function sw(n,b){document.querySelectorAll('.tab').forEach(function(t){t.classList.remove('active')});document.querySelectorAll('.nav button').forEach(function(x){x.classList.remove('active')});document.getElementById('tab-'+n).classList.add('active');b.classList.add('active');if(n==='hw')loadHw();if(n==='sys'||n==='can')loadSys();if(n==='net')loadNet();if(n==='rules')loadRules();if(n==='mon')startMon();}\n"
+"function sw(n,b){document.querySelectorAll('.tab').forEach(function(t){t.classList.remove('active')});document.querySelectorAll('.nav button').forEach(function(x){x.classList.remove('active')});document.getElementById('tab-'+n).classList.add('active');b.classList.add('active');if(n==='hw')loadHw();if(n==='sys'||n==='can')loadSys();if(n==='net')loadNet();if(n==='wifi')loadWifi();if(n==='rules')loadRules();if(n==='mon')startMon();}\n"
 "function sm(id,ok,t){var e=document.getElementById(id);e.className='msg '+(ok?'mok':'merr');e.textContent=(ok?'OK: ':'ERR: ')+t;setTimeout(function(){e.textContent='';e.className=''},5000);}\n"
 "function fb(b){if(b<1024)return b+'B';if(b<1048576)return (b/1024).toFixed(1)+'KB';if(b<1073741824)return (b/1048576).toFixed(1)+'MB';return (b/1073741824).toFixed(2)+'GB';}\n"
 "function fu(s){var h=Math.floor(s/3600),m=Math.floor((s%3600)/60),sc=s%60;return h+'h '+m+'m '+sc+'s';}\n"
@@ -386,16 +494,39 @@ static const char HTML_PAGE[] =
 "function tDhcp(){var dh=document.getElementById('n-dhcp').value==='true';document.getElementById('n-static').style.display=dh?'none':'block';}\n"
 "async function loadNet(){try{var r=await fetch('/api/network'),d=await r.json();document.getElementById('n-iface').value=d.net_iface||'eth0';document.getElementById('n-dhcp').value=d.net_use_dhcp?'true':'false';document.getElementById('n-ip').value=d.net_ip||'';document.getElementById('n-mask').value=d.net_netmask||'';document.getElementById('n-gw').value=d.net_gateway||'';document.getElementById('n-dns1').value=d.net_dns1||'';document.getElementById('n-dns2').value=d.net_dns2||'';tDhcp();}catch(e){}}\n"
 "async function saveNet(){var dh=document.getElementById('n-dhcp').value==='true';var body={net_iface:document.getElementById('n-iface').value,net_use_dhcp:dh,net_ip:document.getElementById('n-ip').value,net_netmask:document.getElementById('n-mask').value,net_gateway:document.getElementById('n-gw').value,net_dns1:document.getElementById('n-dns1').value,net_dns2:document.getElementById('n-dns2').value,apply:true};try{var r=await fetch('/api/network',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}),d=await r.json();sm('net-msg',d.ok,d.ok?'网络配置已保存并应用':(d.error||'保存失败'));}catch(e){sm('net-msg',false,'请求失败');}}\n"
-"var gr={version:1,rules:[]},gei=-1;\n"
-"async function loadRules(){try{var r=await fetch('/api/rules');gr=await r.json();renderRules();}catch(e){}}\n"
-"function renderRules(){var list=document.getElementById('rl');if(!gr.rules||gr.rules.length===0){list.innerHTML='<div style=\"color:#64748b;font-size:13px;padding:8px\">暂无规则</div>';return;}list.innerHTML=gr.rules.map(function(r,i){return '<div class=\"ri\"><div class=\"rh\"><div class=\"dot '+(r.enabled?'dok':'derr')+'\"></div><div class=\"rn\">'+(r.name||r.id)+'</div><div class=\"rm\">'+(r.channel||'can0')+' 0x'+(r.can_id||0).toString(16).toUpperCase()+' '+(r.signal_name||'-')+'</div><div class=\"ra\"><button class=\"btn btn-g\" style=\"padding:3px 7px;font-size:11px\" onclick=\"editRule('+i+')\">编辑</button><button class=\"btn btn-d\" style=\"padding:3px 7px;font-size:11px\" onclick=\"delRule('+i+')\">删除</button></div></div><div style=\"font-size:11px;color:#64748b\">Topic: '+((r.mqtt&&r.mqtt.topic_template)||'-')+'</div></div>';}).join('');}\n"
+"async function loadWifi(){try{var r=await fetch('/api/wifi'),d=await r.json();document.getElementById('wf-iface').value=d.wifi_iface||'wlan0';document.getElementById('wf-ssid').value=d.wifi_ssid||'';document.getElementById('wf-psk').value=d.wifi_psk||'';document.getElementById('wf-state').innerHTML=d.connected?'<span class=\"badge bok\">已连接</span>':'<span class=\"badge berr\">未连接</span>';document.getElementById('wf-current').textContent=d.current_ssid||'--';}catch(e){sm('wifi-msg',false,'请求失败');}}\n"
+"async function saveWifi(connectNow){var body={wifi_iface:document.getElementById('wf-iface').value,ssid:document.getElementById('wf-ssid').value,password:document.getElementById('wf-psk').value,connect:!!connectNow};try{var r=await fetch('/api/wifi',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}),d=await r.json();sm('wifi-msg',d.ok,d.ok?(connectNow?'WiFi配置已保存并开始连接':'WiFi配置已保存'):(d.error||'保存失败'));if(d.ok)loadWifi();}catch(e){sm('wifi-msg',false,'请求失败');}}\n"
+"async function disconnectWifi(){try{var r=await fetch('/api/wifi/disconnect',{method:'POST'}),d=await r.json();sm('wifi-msg',d.ok,d.ok?'已断开WiFi连接':(d.error||'断开失败'));if(d.ok)loadWifi();}catch(e){sm('wifi-msg',false,'请求失败');}}\n"
+"function escHtml(s){return String(s||'').replace(/[&<>\"']/g,function(c){return({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',\"'\":'&#39;'})[c]});}\n"
+"function pickWifi(ssid){document.getElementById('wf-ssid').value=ssid||'';}\n"
+"async function scanWifi(){var box=document.getElementById('wf-list');box.textContent='正在扫描...';try{var r=await fetch('/api/wifi/scan',{method:'POST'}),d=await r.json();if(!d.ok){box.textContent='扫描失败';sm('wifi-msg',false,d.error||'扫描失败');return;}var list=d.networks||[];if(!list.length){box.textContent='未发现WiFi';return;}box.innerHTML=list.map(function(n){var ssid=String(n.ssid||'');return '<div style=\"display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid #334155\"><span>'+escHtml(ssid)+'</span><button class=\"btn btn-g\" style=\"padding:4px 10px\" onclick=\"pickWifi('+JSON.stringify(ssid)+')\">使用</button></div>';}).join('');}catch(e){box.textContent='扫描失败';sm('wifi-msg',false,'请求失败');}}\n"
+"var gr={version:1,rules:[]},gei=-1,grView=[],grLoaded=false,grRenderTimer=null,grMsgKey='';\n"
+"function normRule(r){r=r||{};var m=r.match||{};var s=r.source||{};var d=r.decode||{};var q=r.mqtt||{};return{id:r.id||r.rule_id||'',name:r.name||r.id||'',enabled:r.enabled!==false,priority:r.priority!=null?r.priority:0,channel:r.channel||m.channel||'any',can_id:r.can_id!=null?r.can_id:(m.can_id||0),is_extended:r.is_extended!=null?r.is_extended:!!m.is_extended,match_any_id:r.match_any_id!=null?r.match_any_id:!!m.match_any_id,message_name:r.message_name||s.message_name||'',signal_name:r.signal_name||s.signal_name||'',decode:{start_bit:d.start_bit!=null?d.start_bit:0,bit_length:d.bit_length!=null?d.bit_length:8,byte_order:(d.byte_order==='big_endian'||d.byte_order===1)?1:0,is_signed:d.is_signed===true||d.signed===true,factor:d.factor!=null?d.factor:1,offset:d.offset!=null?d.offset:0,unit:d.unit||''},mqtt:{topic_template:q.topic_template||'',payload_mode:(q.payload_mode==='raw'||q.payload_mode===1)?1:0,qos:q.qos!=null?q.qos:0,retain:q.retain===true}};}\n"
+"function cloneRule(r){return JSON.parse(JSON.stringify(normRule(r)));}\n"
+"function ruleHex(v){return '0x'+((parseInt(v,10)||0)>>>0).toString(16).toUpperCase();}\n"
+"function ruleSort(a,b){var am=(a.message_name||'').toLowerCase(),bm=(b.message_name||'').toLowerCase();if(am<bm)return-1;if(am>bm)return 1;var as=(a.signal_name||'').toLowerCase(),bs=(b.signal_name||'').toLowerCase();if(as<bs)return-1;if(as>bs)return 1;return (parseInt(a.can_id,10)||0)-(parseInt(b.can_id,10)||0);}\n"
+"function syncRules(){gr.rules=(gr.rules||[]).map(normRule);gr.rules.sort(ruleSort);}\n"
+"async function loadRules(force){if(grLoaded&&!force){renderRules();return;}try{document.getElementById('rules-stat').textContent='加载规则中...';var r=await fetch('/api/rules');gr=await r.json();if(!gr||typeof gr!=='object')gr={version:1,rules:[]};if(!Array.isArray(gr.rules))gr.rules=[];grLoaded=true;syncRules();renderRules();}catch(e){document.getElementById('rules-stat').textContent='规则加载失败';}}\n"
+"function getRuleFiltered(){var key=(document.getElementById('rf-key').value||'').trim().toLowerCase();var ch=document.getElementById('rf-ch').value||'';var en=document.getElementById('rf-en').value||'';return (gr.rules||[]).filter(function(r){if(ch&&String(r.channel||'')!==ch)return false;if(en){var want=en==='true';if(!!r.enabled!==want)return false;}if(!key)return true;var text=[r.id,r.name,r.message_name,r.signal_name,r.channel,ruleHex(r.can_id),(r.mqtt&&r.mqtt.topic_template)||''].join(' ').toLowerCase();return text.indexOf(key)>=0;}).sort(ruleSort);}\n"
+"function queueRenderRules(){if(grRenderTimer)clearTimeout(grRenderTimer);grRenderTimer=setTimeout(function(){grMsgKey='';renderRules();},120);}\n"
+"function msgKeyOf(r){return (r.message_name||'未命名报文')+'|'+(r.channel||'any')+'|'+(r.can_id||0)+'|'+(r.is_extended?'1':'0');}\n"
+"function buildRuleGroups(list){var groups=[];var map={};list.forEach(function(r){var k=msgKeyOf(r);if(!map[k]){map[k]={key:k,message_name:r.message_name||'未命名报文',channel:r.channel||'any',can_id:r.can_id||0,is_extended:!!r.is_extended,enabled_count:0,total:0,rules:[]};groups.push(map[k]);}map[k].rules.push(r);map[k].total++;if(r.enabled)map[k].enabled_count++;});groups.sort(function(a,b){var am=(a.message_name||'').toLowerCase(),bm=(b.message_name||'').toLowerCase();if(am<bm)return-1;if(am>bm)return 1;return a.can_id-b.can_id;});return groups;}\n"
+"function selectRuleGroup(key){grMsgKey=key;renderRules();}\n"
+"function selectRuleGroupAt(i){var groups=buildRuleGroups(grView||[]);if(groups[i]){grMsgKey=groups[i].key;renderRules();}}\n"
+"function addRuleFromCurrent(){var groups=buildRuleGroups(grView||[]),g=null;for(var i=0;i<groups.length;i++){if(groups[i].key===grMsgKey){g=groups[i];break;}}addRule();if(!g)return;document.getElementById('re-msg').value=g.message_name||'';document.getElementById('re-ch').value=g.channel||'can0';document.getElementById('re-cid').value=ruleHex(g.can_id||0);document.getElementById('re-ext').value=g.is_extended?'true':'false';}\n"
+"function renderRules(){var body=document.getElementById('rlb'),msgList=document.getElementById('msg-list');if(!body||!msgList)return;syncRules();grView=getRuleFiltered();var groups=buildRuleGroups(grView);document.getElementById('rules-stat').textContent='报文 '+groups.length+' 组，信号 '+grView.length+' / 全部 '+(gr.rules||[]).length+' 条';document.getElementById('rules-msg-count').textContent=groups.length;document.getElementById('rules-sig-count').textContent=grView.length;document.getElementById('rules-cur-msg').textContent='--';if(!groups.length){msgList.innerHTML='<div class=\"signal-empty\">暂无匹配报文</div>';body.innerHTML='<div class=\"signal-empty\">暂无匹配信号</div>';document.getElementById('msg-stat').textContent='报文列表';document.getElementById('sig-title').textContent='信号列表';document.getElementById('sig-meta').textContent='请选择报文';grMsgKey='';return;}if(!grMsgKey||!groups.some(function(g){return g.key===grMsgKey;}))grMsgKey=groups[0].key;msgList.innerHTML=groups.map(function(g,i){var active=g.key===grMsgKey;return '<button class=\"btn '+(active?'btn-p':'btn-g')+'\" style=\"width:100%;text-align:left;display:block;margin:0;border-radius:0;border-bottom:1px solid #334155;padding:10px 12px\" onclick=\"selectRuleGroupAt('+i+')\"><div><b>'+escHtml(g.message_name)+'</b></div><div class=\"msg-meta\">'+escHtml(g.channel)+' · '+ruleHex(g.can_id)+' · '+(g.is_extended?'扩展帧':'标准帧')+'<br>'+g.enabled_count+'/'+g.total+' 启用</div></button>';}).join('');var group=groups.filter(function(g){return g.key===grMsgKey;})[0]||groups[0];document.getElementById('rules-cur-msg').textContent=group.message_name||'未命名';document.getElementById('msg-stat').textContent='报文列表 · '+groups.length+' 组';document.getElementById('sig-title').textContent=group.message_name||'未命名报文';document.getElementById('sig-meta').textContent=(group.channel||'any')+' · '+ruleHex(group.can_id)+' · '+(group.is_extended?'扩展帧':'标准帧')+' · '+group.rules.length+' 个信号';body.innerHTML=group.rules.map(function(r){var idx=(gr.rules||[]).indexOf(r),parts=[],topic=(r.mqtt&&r.mqtt.topic_template)||'-';parts.push('<div class=\"signal-card\" id=\"rule-row-'+idx+'\">');parts.push('<div class=\"signal-card-head\"><div class=\"signal-card-title\"><b>'+escHtml(r.signal_name||'-')+'</b><div class=\"muted\">'+escHtml(r.name||'')+' · 规则ID '+escHtml(r.id||'-')+'</div></div><div>'+(r.enabled?'<span class=\"badge bok\">启用</span>':'<span class=\"badge berr\">禁用</span>')+'</div></div>');parts.push('<div class=\"signal-grid\">');parts.push('<div class=\"signal-cell\"><span class=\"k\">位段</span><span class=\"v\">'+escHtml(r.decode.start_bit)+' / '+escHtml(r.decode.bit_length)+'</span></div>');parts.push('<div class=\"signal-cell\"><span class=\"k\">缩放</span><span class=\"v\">Factor '+escHtml(r.decode.factor)+' , Offset '+escHtml(r.decode.offset)+'</span></div>');parts.push('<div class=\"signal-cell\"><span class=\"k\">单位</span><span class=\"v\">'+escHtml(r.decode.unit||'-')+'</span></div>');parts.push('<div class=\"signal-cell\"><span class=\"k\">类型</span><span class=\"v\">'+(r.decode.is_signed?'有符号':'无符号')+' · '+(r.decode.byte_order===1?'大端':'小端')+'</span></div>');parts.push('<div class=\"signal-cell\"><span class=\"k\">MQTT Topic</span><span class=\"v mono\">'+escHtml(topic)+'</span></div>');parts.push('<div class=\"signal-cell\"><span class=\"k\">QoS / Retain</span><span class=\"v\">'+escHtml((r.mqtt&&r.mqtt.qos)||0)+' / '+((r.mqtt&&r.mqtt.retain)?'true':'false')+'</span></div>');parts.push('<div class=\"signal-cell\"><span class=\"k\">Payload 模式</span><span class=\"v\">'+escHtml((r.mqtt&&r.mqtt.payload_mode)||0)+'</span></div>');parts.push('<div class=\"signal-cell\"><span class=\"k\">通道 / CAN ID</span><span class=\"v\">'+escHtml(r.channel||'any')+' / '+ruleHex(r.can_id)+'</span></div>');parts.push('</div>');parts.push('<div class=\"signal-actions\"><button class=\"btn btn-g\" style=\"padding:6px 10px\" onclick=\"editRule('+idx+')\">编辑</button><button class=\"btn btn-d\" style=\"padding:6px 10px\" onclick=\"delRule('+idx+')\">删除</button></div>');parts.push('</div>');return parts.join('');}).join('');}\n"
+"function clearRuleFilter(){document.getElementById('rf-key').value='';document.getElementById('rf-ch').value='';document.getElementById('rf-en').value='';grMsgKey='';renderRules();}\n"
+"function setRuleField(obj,path,val){var p=path.split('.');var cur=obj;for(var i=0;i<p.length-1;i++){if(!cur[p[i]]||typeof cur[p[i]]!=='object')cur[p[i]]={};cur=cur[p[i]];}cur[p[p.length-1]]=val;}\n"
+"function parseRuleValue(path,val){if(path==='enabled'||path==='is_extended'||path==='match_any_id'||path==='mqtt.retain'||path==='decode.is_signed')return String(val)==='true';if(path==='can_id'){var s=String(val||'').trim();if(!s)return 0;return (s.indexOf('0x')===0||s.indexOf('0X')===0)?(parseInt(s,16)||0):(parseInt(s,10)||0);}if(path==='decode.start_bit'||path==='decode.bit_length'||path==='priority'||path==='mqtt.qos'||path==='mqtt.payload_mode'||path==='decode.byte_order')return parseInt(val,10)||0;if(path==='decode.factor'||path==='decode.offset')return parseFloat(val)||0;return String(val==null?'':val);}\n"
+"function ruleCellChange(i,el){if(!gr.rules||!gr.rules[i])return;var path=el.getAttribute('data-field');var val=parseRuleValue(path,el.value);setRuleField(gr.rules[i],path,val);gr.rules[i]=normRule(gr.rules[i]);var row=document.getElementById('rule-row-'+i);if(row)row.classList.add('active-row');}\n"
 "function addRule(){gei=-1;resetRe();document.getElementById('re-title').textContent='新建规则';document.getElementById('re-card').style.display='block';document.getElementById('re-card').scrollIntoView({behavior:'smooth'});}\n"
 "function editRule(i){gei=i;var r=gr.rules[i];document.getElementById('re-title').textContent='编辑规则';document.getElementById('re-id').value=r.id||'';document.getElementById('re-name').value=r.name||'';document.getElementById('re-ch').value=r.channel||'can0';document.getElementById('re-cid').value=r.can_id?'0x'+r.can_id.toString(16):'';document.getElementById('re-ext').value=r.is_extended?'true':'false';document.getElementById('re-any').value=r.match_any_id?'true':'false';document.getElementById('re-sig').value=r.signal_name||'';document.getElementById('re-msg').value=r.message_name||'';var dc=r.decode||{};document.getElementById('re-sb').value=dc.start_bit!=null?dc.start_bit:0;document.getElementById('re-bl').value=dc.bit_length!=null?dc.bit_length:8;document.getElementById('re-bo').value=dc.byte_order!=null?dc.byte_order:0;document.getElementById('re-sgn').value=dc.is_signed?'true':'false';document.getElementById('re-fac').value=dc.factor!=null?dc.factor:1;document.getElementById('re-off').value=dc.offset!=null?dc.offset:0;document.getElementById('re-unit').value=dc.unit||'';var mq=r.mqtt||{};document.getElementById('re-topic').value=mq.topic_template||'';document.getElementById('re-pm').value=mq.payload_mode!=null?mq.payload_mode:0;document.getElementById('re-qos').value=mq.qos!=null?mq.qos:0;document.getElementById('re-ret').value=mq.retain?'true':'false';document.getElementById('re-en').value=r.enabled!==false?'true':'false';document.getElementById('re-pri').value=r.priority!=null?r.priority:0;document.getElementById('re-card').style.display='block';document.getElementById('re-card').scrollIntoView({behavior:'smooth'});}\n"
 "function delRule(i){if(!confirm('删除规则\"'+(gr.rules[i].name||gr.rules[i].id)+'\"?'))return;gr.rules.splice(i,1);postRules();}\n"
 "function resetRe(){['re-id','re-name','re-sig','re-msg','re-unit','re-topic','re-cid'].forEach(function(id){document.getElementById(id).value='';});document.getElementById('re-ch').value='can0';document.getElementById('re-ext').value='false';document.getElementById('re-any').value='false';document.getElementById('re-sb').value=0;document.getElementById('re-bl').value=8;document.getElementById('re-bo').value=0;document.getElementById('re-sgn').value='false';document.getElementById('re-fac').value=1;document.getElementById('re-off').value=0;document.getElementById('re-pm').value=0;document.getElementById('re-qos').value=0;document.getElementById('re-ret').value='false';document.getElementById('re-en').value='true';document.getElementById('re-pri').value=0;}\n"
 "function cancelEdit(){document.getElementById('re-card').style.display='none';}\n"
-"function saveRule(){var cs=document.getElementById('re-cid').value.trim(),cid=(cs.startsWith('0x')||cs.startsWith('0X'))?parseInt(cs,16):parseInt(cs);var rule={id:document.getElementById('re-id').value.trim()||('r'+Date.now()),name:document.getElementById('re-name').value.trim(),enabled:document.getElementById('re-en').value==='true',priority:parseInt(document.getElementById('re-pri').value)||0,channel:document.getElementById('re-ch').value,can_id:isNaN(cid)?0:cid,is_extended:document.getElementById('re-ext').value==='true',match_any_id:document.getElementById('re-any').value==='true',signal_name:document.getElementById('re-sig').value.trim(),message_name:document.getElementById('re-msg').value.trim(),decode:{start_bit:parseInt(document.getElementById('re-sb').value)||0,bit_length:parseInt(document.getElementById('re-bl').value)||8,byte_order:parseInt(document.getElementById('re-bo').value),is_signed:document.getElementById('re-sgn').value==='true',factor:parseFloat(document.getElementById('re-fac').value)||1,offset:parseFloat(document.getElementById('re-off').value)||0,unit:document.getElementById('re-unit').value.trim()},mqtt:{topic_template:document.getElementById('re-topic').value.trim(),payload_mode:parseInt(document.getElementById('re-pm').value),qos:parseInt(document.getElementById('re-qos').value),retain:document.getElementById('re-ret').value==='true'}};if(gei>=0){gr.rules[gei]=rule;}else{gr.rules.push(rule);}postRules();}\n"
-"async function postRules(){try{var r=await fetch('/api/rules',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(gr)}),d=await r.json();if(d.ok){document.getElementById('re-card').style.display='none';loadRules();}else{document.getElementById('re-msg2').className='msg merr';document.getElementById('re-msg2').textContent='ERR: '+(d.error||'保存失败');}}catch(e){document.getElementById('re-msg2').className='msg merr';document.getElementById('re-msg2').textContent='ERR: 请求失败';}}\n"
+"function saveRule(){var cs=document.getElementById('re-cid').value.trim(),cid=(cs.startsWith('0x')||cs.startsWith('0X'))?parseInt(cs,16):parseInt(cs);var rule=normRule({id:document.getElementById('re-id').value.trim()||('r'+Date.now()),name:document.getElementById('re-name').value.trim(),enabled:document.getElementById('re-en').value==='true',priority:parseInt(document.getElementById('re-pri').value)||0,channel:document.getElementById('re-ch').value,can_id:isNaN(cid)?0:cid,is_extended:document.getElementById('re-ext').value==='true',match_any_id:document.getElementById('re-any').value==='true',signal_name:document.getElementById('re-sig').value.trim(),message_name:document.getElementById('re-msg').value.trim(),decode:{start_bit:parseInt(document.getElementById('re-sb').value)||0,bit_length:parseInt(document.getElementById('re-bl').value)||8,byte_order:parseInt(document.getElementById('re-bo').value),is_signed:document.getElementById('re-sgn').value==='true',factor:parseFloat(document.getElementById('re-fac').value)||1,offset:parseFloat(document.getElementById('re-off').value)||0,unit:document.getElementById('re-unit').value.trim()},mqtt:{topic_template:document.getElementById('re-topic').value.trim(),payload_mode:parseInt(document.getElementById('re-pm').value),qos:parseInt(document.getElementById('re-qos').value),retain:document.getElementById('re-ret').value==='true'}});if(gei>=0){gr.rules[gei]=rule;}else{gr.rules.push(rule);}postRules();}\n"
+"async function postRules(){syncRules();try{var r=await fetch('/api/rules',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(gr)}),d=await r.json();if(d.ok){document.getElementById('re-card').style.display='none';document.getElementById('re-msg2').className='msg mok';document.getElementById('re-msg2').textContent='OK: 规则已保存';grLoaded=false;loadRules(true);}else{document.getElementById('re-msg2').className='msg merr';document.getElementById('re-msg2').textContent='ERR: '+(d.error||'保存失败');}}catch(e){document.getElementById('re-msg2').className='msg merr';document.getElementById('re-msg2').textContent='ERR: 请求失败';}}\n"
+"function saveRulesTable(){postRules();}\n"
 "var gPaused=false,gTimer=null,gRows=[];\n"
 "function startMon(){if(gTimer)return;gTimer=setInterval(fetchCan,1500);fetchCan();}\n"
 "function togglePause(){gPaused=!gPaused;document.getElementById('btn-pause').textContent=gPaused?'继续':'暂停';}\n"
@@ -445,8 +576,8 @@ static const char HTML_PAGE[] =
 "if(newRules.length===0){document.getElementById('xl-msg').className='msg merr';document.getElementById('xl-msg').style.display='block';document.getElementById('xl-msg').textContent='未读取到任何规则行，请检查格式';return;}" \
 "if(!confirm('将从 Excel 导入 '+newRules.length+' 条规则，将与现有规则合并（相同ID会覆盖），确认？'))return;" \
 "var existing=gr.rules||[];var map={};existing.forEach(function(r){map[r.id]=r;});" \
-"newRules.forEach(function(r){map[r.id]=r;});" \
-"gr.rules=Object.values(map);gr.version=(gr.version||1)+1;" \
+"newRules.forEach(function(r){map[r.id]=normRule(r);});" \
+"gr.rules=Object.values(map).map(normRule);gr.version=(gr.version||1)+1;syncRules();renderRules();" \
 "var msg=document.getElementById('xl-msg');" \
 "msg.style.display='block';msg.className='msg';msg.textContent='正在推送 '+newRules.length+' 条规则到设备...';" \
 "postRules();inp.value='';" \
@@ -575,6 +706,8 @@ static int path_starts(const char *full_url, const char *prefix)
 {
     return strncmp(full_url, prefix, strlen(prefix)) == 0;
 }
+
+static void json_escape(const char *src, char *dst, int dst_size);
 
 /* JSON helper: append "key":value to a growing buffer */
 static int jappend(char *buf, int sz, int pos, const char *fmt, ...)
@@ -925,6 +1058,195 @@ static void handle_post_network(int fd, const char *body, int body_len)
         log_info("HTTP: 网络配置已保存: %s", saved);
     }
     send_json(fd, "{\"ok\":true}");
+}
+
+static bool wifi_http_is_connected(void)
+{
+    char cmd[256];
+    const char *iface = g_app_config.wifi_iface[0] ? g_app_config.wifi_iface : "wlan0";
+    snprintf(cmd, sizeof(cmd),
+             "ip addr show %s | grep 'inet ' | awk '{print $2}' | cut -d'/' -f1",
+             iface);
+    FILE *fp = popen(cmd, "r");
+    if (!fp) return false;
+
+    char ip[64] = {0};
+    bool connected = false;
+    if (fgets(ip, sizeof(ip), fp) != NULL) {
+        char *newline = strchr(ip, '\n');
+        if (newline) *newline = '\0';
+        if (ip[0] && strcmp(ip, "0.0.0.0") != 0) connected = true;
+    }
+    pclose(fp);
+    return connected;
+}
+
+static const char *wifi_http_get_connected_ssid(void)
+{
+    static char ssid[128];
+    ssid[0] = '\0';
+
+    char cmd[256];
+    const char *iface = g_app_config.wifi_iface[0] ? g_app_config.wifi_iface : "wlan0";
+    snprintf(cmd, sizeof(cmd),
+             "iw dev %s link | grep 'SSID:' | awk '{print $2}'",
+             iface);
+    FILE *fp = popen(cmd, "r");
+    if (!fp) return ssid;
+    if (fgets(ssid, sizeof(ssid), fp) != NULL) {
+        char *newline = strchr(ssid, '\n');
+        if (newline) *newline = '\0';
+    }
+    pclose(fp);
+    return ssid;
+}
+
+/* --- /api/wifi GET --- */
+static void handle_get_wifi(int fd)
+{
+    bool connected = wifi_http_is_connected();
+    const char *current_ssid = wifi_http_get_connected_ssid();
+    char buf[1024];
+    snprintf(buf, sizeof(buf),
+        "{"
+        "\"wifi_iface\":\"%s\","
+        "\"wifi_ssid\":\"%s\","
+        "\"wifi_psk\":\"%s\","
+        "\"connected\":%s,"
+        "\"current_ssid\":\"%s\""
+        "}",
+        g_app_config.wifi_iface,
+        g_app_config.wifi_ssid,
+        g_app_config.wifi_psk,
+        connected ? "true" : "false",
+        (current_ssid && current_ssid[0]) ? current_ssid : "");
+    send_json(fd, buf);
+}
+
+/* --- /api/wifi POST --- */
+static void handle_post_wifi(int fd, const char *body, int body_len)
+{
+    if (!body || body_len <= 0) { send_json_error(fd, 400, "empty body"); return; }
+
+    char *json = (char *)malloc((size_t)body_len + 1);
+    if (!json) { send_json_error(fd, 500, "out of memory"); return; }
+    memcpy(json, body, (size_t)body_len);
+    json[body_len] = '\0';
+
+#define JGET_STR(key, field, maxlen) do { \
+    const char *_p = strstr(json, "\"" key "\":\""); \
+    if (_p) { _p += strlen("\"" key "\":\""); const char *_e = strchr(_p, '"'); \
+    if (_e) { int _l = (int)(_e-_p); if(_l>=(maxlen))_l=(maxlen)-1; \
+    strncpy(field, _p, (size_t)_l); field[_l]='\0'; } } } while(0)
+#define JGET_BOOL(key, field) do { \
+    const char *_p = strstr(json, "\"" key "\":"); \
+    if (_p) { _p += strlen("\"" key "\":"); field = (strncmp(_p,"true",4)==0); } } while(0)
+
+    char iface[sizeof(g_app_config.wifi_iface)] = {0};
+    char ssid[sizeof(g_app_config.wifi_ssid)] = {0};
+    char psk[sizeof(g_app_config.wifi_psk)] = {0};
+    bool do_connect = false;
+
+    JGET_STR("wifi_iface", iface, sizeof(iface));
+    JGET_STR("ssid", ssid, sizeof(ssid));
+    JGET_STR("password", psk, sizeof(psk));
+    JGET_BOOL("connect", do_connect);
+
+#undef JGET_STR
+#undef JGET_BOOL
+
+    free(json);
+
+    if (iface[0]) {
+        strncpy(g_app_config.wifi_iface, iface, sizeof(g_app_config.wifi_iface) - 1);
+        g_app_config.wifi_iface[sizeof(g_app_config.wifi_iface) - 1] = '\0';
+    }
+    strncpy(g_app_config.wifi_ssid, ssid, sizeof(g_app_config.wifi_ssid) - 1);
+    g_app_config.wifi_ssid[sizeof(g_app_config.wifi_ssid) - 1] = '\0';
+    strncpy(g_app_config.wifi_psk, psk, sizeof(g_app_config.wifi_psk) - 1);
+    g_app_config.wifi_psk[sizeof(g_app_config.wifi_psk) - 1] = '\0';
+
+    char saved_cfg[256] = {0};
+    char saved_net[256] = {0};
+    int ret_cfg = app_config_save_best(saved_cfg, sizeof(saved_cfg));
+    int ret_net = app_config_save_network_best(saved_net, sizeof(saved_net));
+    if (ret_cfg != 0 || ret_net != 0) {
+        send_json_error(fd, 500, "save failed");
+        return;
+    }
+
+    bool connected = wifi_http_is_connected();
+    int connect_ret = 0;
+    if (do_connect && ssid[0]) {
+        connect_ret = wifi_manager_connect(ssid, psk);
+        /* Give DHCP / wpa_supplicant a brief moment, then query actual state. */
+        usleep(500000);
+        connected = wifi_http_is_connected();
+    }
+
+    char resp[512];
+    snprintf(resp, sizeof(resp),
+             "{\"ok\":true,\"connected\":%s,\"connect_requested\":%s,\"connect_result\":%d}",
+             connected ? "true" : "false",
+             do_connect ? "true" : "false",
+             connect_ret);
+    send_json(fd, resp);
+}
+
+/* --- /api/wifi/disconnect POST --- */
+static void handle_post_wifi_disconnect(int fd)
+{
+    int ret = wifi_manager_disconnect();
+    if (ret != 0) {
+        send_json_error(fd, 500, "disconnect failed");
+        return;
+    }
+    send_json(fd, "{\"ok\":true}");
+}
+
+/* --- /api/wifi/scan POST --- */
+static void handle_post_wifi_scan(int fd)
+{
+    const char *iface = g_app_config.wifi_iface[0] ? g_app_config.wifi_iface : "wlan0";
+    char cmd[128];
+    snprintf(cmd, sizeof(cmd), "iw dev %s scan | grep 'SSID:' | cut -d: -f2", iface);
+
+    FILE *fp = popen(cmd, "r");
+    if (!fp) {
+        send_json_error(fd, 500, "scan failed");
+        return;
+    }
+
+    char *buf = (char *)malloc(16 * 1024);
+    if (!buf) {
+        pclose(fp);
+        send_json_error(fd, 500, "out of memory");
+        return;
+    }
+
+    int pos = 0;
+    pos += snprintf(buf + pos, 16 * 1024 - pos, "{\"ok\":true,\"networks\":[");
+    char line[256];
+    int first = 1;
+    while (fgets(line, sizeof(line), fp) != NULL) {
+        line[strcspn(line, "\r\n")] = '\0';
+        char *ssid = line;
+        while (*ssid == ' ' || *ssid == '\t') ssid++;
+        if (!ssid[0]) continue;
+
+        char esc[512];
+        json_escape(ssid, esc, sizeof(esc));
+        pos += snprintf(buf + pos, 16 * 1024 - pos,
+                        "%s{\"ssid\":\"%s\"}",
+                        first ? "" : ",",
+                        esc);
+        first = 0;
+        if (pos > 16 * 1024 - 256) break;
+    }
+    pclose(fp);
+    pos += snprintf(buf + pos, 16 * 1024 - pos, "]}");
+    send_json(fd, buf);
+    free(buf);
 }
 
 static void handle_get_rules(int fd)
@@ -1701,6 +2023,19 @@ static void handle_connection(int fd)
     }
     else if (path_eq(path, "/api/network") && strcmp(method, "POST") == 0) {
         handle_post_network(fd, body, body_len);
+    }
+    /* API: WiFi 配置 */
+    else if (path_eq(path, "/api/wifi") && strcmp(method, "GET") == 0) {
+        handle_get_wifi(fd);
+    }
+    else if (path_eq(path, "/api/wifi") && strcmp(method, "POST") == 0) {
+        handle_post_wifi(fd, body, body_len);
+    }
+    else if (path_eq(path, "/api/wifi/scan") && strcmp(method, "POST") == 0) {
+        handle_post_wifi_scan(fd);
+    }
+    else if (path_eq(path, "/api/wifi/disconnect") && strcmp(method, "POST") == 0) {
+        handle_post_wifi_disconnect(fd);
     }
     /* API: 文件管理 */
     else if (path_starts(path, "/api/files/list") && strcmp(method, "GET") == 0) {

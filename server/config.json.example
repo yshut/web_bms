@@ -1,7 +1,7 @@
 {
   "_comment": "服务器配置文件 - 部署时请复制为 config.json 并修改相应配置。默认推荐连接外部 MQTT broker。若服务运行在 WSL 且开发板经 Windows 访问，请将 public_host 配成 Windows 主机局域网 IP，并在 Windows 上做端口转发。",
   
-  "public_host": "192.168.100.1",
+  "public_host": "cloud.yshut.cn",
   
   "qt_client": {
     "_comment": "QT客户端连接配置（当服务器作为客户端连接QT时使用）",
@@ -92,4 +92,3 @@
     "db_path": "./uploads/state.sqlite3"
   }
 }
-
