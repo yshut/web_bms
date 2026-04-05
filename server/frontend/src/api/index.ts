@@ -10,9 +10,24 @@ const api: AxiosInstance = axios.create({
   },
 });
 
+function getCookie(name: string) {
+  const all = `; ${document.cookie}`;
+  const parts = all.split(`; ${name}=`);
+  if (parts.length < 2) return '';
+  return decodeURIComponent(parts.pop()?.split(';').shift() || '');
+}
+
 // Request interceptor
 api.interceptors.request.use(
   (config) => {
+    const method = String(config.method || 'get').toUpperCase();
+    if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) {
+      const token = getCookie('app_lvgl_csrf');
+      if (token) {
+        config.headers = config.headers || {};
+        config.headers['X-CSRF-Token'] = token;
+      }
+    }
     return config;
   },
   (error) => {

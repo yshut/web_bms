@@ -194,6 +194,7 @@ AUTH_LOCKOUT_SECONDS = int(_env_or_json('AUTH_LOCKOUT_SECONDS', 'auth.lockout_se
 AUTH_AUDIT_LOG_PATH = str(_env_or_json('AUTH_AUDIT_LOG_PATH', 'auth.audit_log_path', os.path.join(SERVER_DIR, 'uploads', 'auth_audit.log')))
 AUTH_COOKIE_SECURE = _as_bool(_env_or_json('AUTH_COOKIE_SECURE', 'auth.cookie_secure', False), False)
 AUTH_COOKIE_NAME = str(_env_or_json('AUTH_COOKIE_NAME', 'auth.cookie_name', 'app_lvgl_session'))
+AUTH_CSRF_COOKIE_NAME = str(_env_or_json('AUTH_CSRF_COOKIE_NAME', 'auth.csrf_cookie_name', 'app_lvgl_csrf'))
 TRUST_PROXY = _as_bool(_env_or_json('TRUST_PROXY', 'auth.trust_proxy', False), False)
 TRUST_PROXY_HOPS = int(_env_or_json('TRUST_PROXY_HOPS', 'auth.trust_proxy_hops', 1))
 

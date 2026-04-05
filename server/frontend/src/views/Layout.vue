@@ -74,7 +74,14 @@ const currentPageTitle = computed(() => {
 
 async function logout() {
   try {
-    await fetch('/api/auth/logout', { method: 'POST' });
+    const token = document.cookie
+      .split('; ')
+      .find((item) => item.startsWith('app_lvgl_csrf='))
+      ?.split('=')[1];
+    await fetch('/api/auth/logout', {
+      method: 'POST',
+      headers: token ? { 'X-CSRF-Token': decodeURIComponent(token) } : {},
+    });
     window.location.href = '/login';
   } catch (error) {
     ElMessage.error('退出失败');

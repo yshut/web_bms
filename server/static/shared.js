@@ -1,4 +1,32 @@
 (function () {
+  function getCookie(name) {
+    try {
+      const all = "; " + document.cookie;
+      const parts = all.split("; " + String(name || "") + "=");
+      if (parts.length < 2) return "";
+      return decodeURIComponent(parts.pop().split(";").shift() || "");
+    } catch {
+      return "";
+    }
+  }
+
+  const originalFetch = window.fetch ? window.fetch.bind(window) : null;
+  if (originalFetch) {
+    window.fetch = function patchedFetch(input, init) {
+      const nextInit = init ? Object.assign({}, init) : {};
+      const method = String((nextInit.method || "GET")).toUpperCase();
+      if (["POST", "PUT", "PATCH", "DELETE"].includes(method)) {
+        const headers = new Headers(nextInit.headers || {});
+        if (!headers.has("X-CSRF-Token")) {
+          const token = getCookie("app_lvgl_csrf");
+          if (token) headers.set("X-CSRF-Token", token);
+        }
+        nextInit.headers = headers;
+      }
+      return originalFetch(input, nextInit);
+    };
+  }
+
   function el(tag, attrs, children) {
     const n = document.createElement(tag);
     if (attrs) {
@@ -187,4 +215,3 @@
     insertHeader();
   }
 })();
-

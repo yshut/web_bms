@@ -13,6 +13,7 @@ import socket
 import subprocess
 import hashlib
 import hmac
+import secrets
 from datetime import timedelta
 from flask import Flask, request, jsonify, send_from_directory, Response, stream_with_context, session, redirect, url_for
 import re
@@ -1255,6 +1256,7 @@ app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
 
 _AUTH_SESSION_KEY = 'auth_user'
 _AUTH_ROLE_SESSION_KEY = 'auth_role'
+_AUTH_CSRF_SESSION_KEY = 'auth_csrf_token'
 _AUTH_FAILURES = {}
 _AUTH_PUBLIC_PATHS = {
     '/login',
@@ -1279,6 +1281,21 @@ def _current_auth_role() -> str:
         return ''
     role = str(session.get(_AUTH_ROLE_SESSION_KEY, '') or '').strip().lower()
     return role or 'admin'
+
+
+def _csrf_cookie_name() -> str:
+    return str(getattr(cfg, 'AUTH_CSRF_COOKIE_NAME', 'app_lvgl_csrf') or 'app_lvgl_csrf')
+
+
+def _ensure_csrf_token() -> str:
+    if not _is_authenticated():
+        return ''
+    token = str(session.get(_AUTH_CSRF_SESSION_KEY, '') or '').strip()
+    if token:
+        return token
+    token = secrets.token_urlsafe(32)
+    session[_AUTH_CSRF_SESSION_KEY] = token
+    return token
 
 
 def _is_write_request() -> bool:
@@ -1407,6 +1424,20 @@ def _is_public_request_path(path: str) -> bool:
     return False
 
 
+def _csrf_request_valid() -> bool:
+    expected = _ensure_csrf_token()
+    if not expected:
+        return False
+    provided = str(request.headers.get('X-CSRF-Token', '') or '').strip()
+    if not provided and request.is_json:
+        body = request.get_json(silent=True) or {}
+        if isinstance(body, dict):
+            provided = str(body.get('_csrf') or '').strip()
+    if not provided:
+        provided = str(request.form.get('_csrf', '') or request.args.get('_csrf', '') or '').strip()
+    return bool(provided) and hmac.compare_digest(provided, expected)
+
+
 def _login_redirect_response():
     target = str(request.full_path or request.path or '/').strip() or '/'
     if target.endswith('?'):
@@ -1426,6 +1457,11 @@ def require_login():
                 'ok': False,
                 'error': 'admin privileges required',
                 'role': _current_auth_role(),
+            }), 403
+        if _is_write_request() and not _is_public_request_path(request.path) and not _csrf_request_valid():
+            return jsonify({
+                'ok': False,
+                'error': 'invalid csrf token',
             }), 403
         return None
     if request.path.startswith('/api/'):
@@ -1458,6 +1494,7 @@ def auth_status():
         'role': _current_auth_role() if _is_authenticated() else None,
         'viewer_enabled': _viewer_account_enabled(),
         'lockout_remaining': remaining,
+        'csrf_cookie_name': _csrf_cookie_name(),
     })
 
 
@@ -1489,6 +1526,7 @@ def auth_login():
             'username': username,
             'role': role,
             'next': str(body.get('next') or '/').strip() or '/',
+            'csrf_token': _ensure_csrf_token(),
         })
     remaining = _register_auth_failure(client_key, now_ts)
     _append_auth_audit('login', username, False, detail='bad_credentials')
@@ -1505,7 +1543,31 @@ def auth_logout():
     _append_auth_audit('logout', str(session.get(_AUTH_SESSION_KEY) or ''), True, role=_current_auth_role())
     session.pop(_AUTH_SESSION_KEY, None)
     session.pop(_AUTH_ROLE_SESSION_KEY, None)
+    session.pop(_AUTH_CSRF_SESSION_KEY, None)
     return jsonify({'ok': True})
+
+
+@app.after_request
+def sync_auth_cookies(resp):
+    try:
+        if not _auth_enabled():
+            return resp
+        secure = bool(getattr(cfg, 'AUTH_COOKIE_SECURE', False))
+        cookie_name = _csrf_cookie_name()
+        if _is_authenticated():
+            resp.set_cookie(
+                cookie_name,
+                _ensure_csrf_token(),
+                httponly=False,
+                secure=secure,
+                samesite='Lax',
+                path='/',
+            )
+        else:
+            resp.delete_cookie(cookie_name, path='/', samesite='Lax')
+    except Exception:
+        pass
+    return resp
 
 
 @app.route('/')

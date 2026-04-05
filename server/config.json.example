@@ -29,6 +29,7 @@
     "audit_log_path": "./uploads/auth_audit.log",
     "cookie_secure": true,
     "cookie_name": "app_lvgl_session",
+    "csrf_cookie_name": "app_lvgl_csrf",
     "trust_proxy": true,
     "trust_proxy_hops": 1
   },
