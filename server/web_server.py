@@ -18,6 +18,7 @@ from flask import Flask, request, jsonify, send_from_directory, Response, stream
 import re
 from typing import Optional, Tuple
 from urllib.parse import quote
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 # 支持作为包或脚本两种方式运行
 try:
@@ -144,9 +145,14 @@ app = Flask(
     static_folder=os.path.join(SERVER_DIR, 'static'),
     static_url_path='/static'
 )
+if bool(getattr(cfg, 'TRUST_PROXY', False)):
+    _proxy_hops = max(1, int(getattr(cfg, 'TRUST_PROXY_HOPS', 1)))
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=_proxy_hops, x_proto=_proxy_hops, x_host=_proxy_hops, x_port=_proxy_hops)  # type: ignore[assignment]
 app.secret_key = getattr(cfg, 'AUTH_SECRET_KEY', 'app-lvgl-auth-20260405')
 app.config['SESSION_COOKIE_HTTPONLY'] = True
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+app.config['SESSION_COOKIE_SECURE'] = bool(getattr(cfg, 'AUTH_COOKIE_SECURE', False))
+app.config['SESSION_COOKIE_NAME'] = str(getattr(cfg, 'AUTH_COOKIE_NAME', 'app_lvgl_session') or 'app_lvgl_session')
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(days=7)
 
 _rules_db = RulesDB(getattr(cfg, 'RULES_DB_PATH', os.path.join(SERVER_DIR, 'uploads', 'rules.sqlite3')))
