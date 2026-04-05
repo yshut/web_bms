@@ -1872,23 +1872,9 @@ def api_can_scan():
 def api_can_configure():
     return jsonify(qt_request({"cmd": "can_configure"}))
 
-@app.route('/api/can/start', methods=['POST'])
-def api_can_start():
-    return jsonify(qt_request({"cmd": "can_start"}))
-
-@app.route('/api/can/stop', methods=['POST'])
-def api_can_stop():
-    return jsonify(qt_request({"cmd": "can_stop"}))
-
-@app.route('/api/can/clear', methods=['POST'])
-def api_can_clear():
-    return jsonify(qt_request({"cmd": "can_clear"}))
-
-@app.route('/api/can/status', methods=['GET'])
-def api_can_status():
-    """获取CAN监控和录制状态 — 优先 MQTT can_get_status，备用设备 HTTP"""
-    # 优先通过 MQTT 查询（设备始终在线时此路径最快）
-    result = qt_request({"cmd": "can_get_status"}, timeout=3.0)
+def _query_can_status(device_id: Optional[str] = None) -> dict:
+    """获取 CAN 监控和录制状态，尽量返回统一结构。"""
+    result = qt_request({"cmd": "can_get_status"}, timeout=3.0, device_id=device_id)
     if result and result.get("ok") and result.get("data"):
         d = result["data"]
         data = {
@@ -1900,8 +1886,7 @@ def api_can_status():
             "can1_bitrate":     int(d.get("can1_bitrate", 500000)),
             "device_reachable": True,
         }
-        return jsonify({"ok": True, "data": data})
-    # 备用：直连设备 HTTP /api/status
+        return {"ok": True, "data": data}
     ok, j = _device_proxy_json(DEVICE_DEFAULT_IP, '/api/status', 'GET', timeout=3)
     if ok and j:
         data = {
@@ -1913,8 +1898,40 @@ def api_can_status():
             "can1_bitrate":     int(j.get("can1_bitrate", 500000)),
             "device_reachable": True,
         }
-        return jsonify({"ok": True, "data": data})
-    return jsonify({"ok": False, "error": "device unreachable"})
+        return {"ok": True, "data": data}
+    return {"ok": False, "error": "device unreachable"}
+
+@app.route('/api/can/start', methods=['POST'])
+def api_can_start():
+    device_id = _get_requested_device_id()
+    result = qt_request({"cmd": "can_start"}, device_id=device_id)
+    status = _query_can_status(device_id=device_id)
+    if isinstance(result, dict):
+        result["status"] = status.get("data", {})
+    return jsonify(result if isinstance(result, dict) else {"ok": False, "error": "can_start failed", "status": status.get("data", {})})
+
+@app.route('/api/can/stop', methods=['POST'])
+def api_can_stop():
+    device_id = _get_requested_device_id()
+    result = qt_request({"cmd": "can_stop"}, device_id=device_id)
+    status = _query_can_status(device_id=device_id)
+    if isinstance(result, dict):
+        result["status"] = status.get("data", {})
+    return jsonify(result if isinstance(result, dict) else {"ok": False, "error": "can_stop failed", "status": status.get("data", {})})
+
+@app.route('/api/can/clear', methods=['POST'])
+def api_can_clear():
+    device_id = _get_requested_device_id()
+    result = qt_request({"cmd": "can_clear"}, device_id=device_id)
+    status = _query_can_status(device_id=device_id)
+    if isinstance(result, dict):
+        result["status"] = status.get("data", {})
+    return jsonify(result if isinstance(result, dict) else {"ok": False, "error": "can_clear failed", "status": status.get("data", {})})
+
+@app.route('/api/can/status', methods=['GET'])
+def api_can_status():
+    device_id = _get_requested_device_id()
+    return jsonify(_query_can_status(device_id=device_id))
 
 @app.route('/api/can/record/start', methods=['POST'])
 def api_can_record_start():
@@ -4024,7 +4041,38 @@ def device_remote_config():
     content = _serialize_kv_config(updated, ordered_keys).encode('utf-8')
     resp = _remote_fs_write(target_path, content, device_id=device_id)
     ok = bool(isinstance(resp, dict) and resp.get('ok'))
-    return jsonify({'ok': ok, 'saved_path': target_path, 'restart_required': True, 'can_restarted': False, 'device': resp})
+    return jsonify({
+        'ok': ok,
+        'saved_path': target_path,
+        'restart_required': True,
+        'can_restarted': False,
+        'device': resp,
+        'config': {
+            'transport_mode': updated.get('transport_mode', 'mqtt'),
+            'mqtt_host': updated.get('mqtt_host', _DEVICE_CONFIG_DEFAULTS['mqtt_host']),
+            'mqtt_port': _to_int(updated.get('mqtt_port'), 1883),
+            'mqtt_topic_prefix': updated.get('mqtt_topic_prefix', _DEVICE_CONFIG_DEFAULTS['mqtt_topic_prefix']),
+            'mqtt_qos': _to_int(updated.get('mqtt_qos'), 1),
+            'mqtt_client_id': updated.get('mqtt_client_id', ''),
+            'mqtt_keepalive': _to_int(updated.get('mqtt_keepalive_s', updated.get('mqtt_keepalive', 30)), 30),
+            'mqtt_username': updated.get('mqtt_username', ''),
+            'mqtt_password': updated.get('mqtt_password', ''),
+            'mqtt_use_tls': _to_bool(updated.get('mqtt_use_tls', False)),
+            'ws_host': updated.get('ws_host', _DEVICE_CONFIG_DEFAULTS['ws_host']),
+            'ws_port': _to_int(updated.get('ws_port'), 5052),
+            'ws_path': updated.get('ws_path', '/ws'),
+            'ws_use_ssl': _to_bool(updated.get('ws_use_ssl', False)),
+            'ws_reconnect_interval_ms': _to_int(updated.get('ws_reconnect_interval_ms'), 4000),
+            'ws_keepalive_interval_s': _to_int(updated.get('ws_keepalive_interval_s', updated.get('ws_keepalive', 20)), 20),
+            'can0_bitrate': _to_int(updated.get('can0_bitrate'), 500000),
+            'can1_bitrate': _to_int(updated.get('can1_bitrate'), 500000),
+            'can_record_dir': updated.get('can_record_dir', _DEVICE_CONFIG_DEFAULTS['can_record_dir']),
+            'can_record_max_mb': _to_int(updated.get('can_record_max_mb'), 40),
+            'can_record_flush_ms': _to_int(updated.get('can_record_flush_ms'), 200),
+            'source': source,
+            'path': target_path,
+        },
+    })
 
 
 @app.route('/api/device/remote/network', methods=['GET', 'POST'])
@@ -4060,7 +4108,23 @@ def device_remote_network():
     content = _serialize_kv_config(updated, ordered_keys).encode('utf-8')
     resp = _remote_fs_write(target_path, content, device_id=device_id)
     ok = bool(isinstance(resp, dict) and resp.get('ok'))
-    return jsonify({'ok': ok, 'saved_path': target_path, 'restart_required': True, 'applied': False, 'device': resp})
+    return jsonify({
+        'ok': ok,
+        'saved_path': target_path,
+        'restart_required': True,
+        'applied': False,
+        'device': resp,
+        'network': {
+            'net_iface': updated.get('iface', _DEVICE_NETWORK_DEFAULTS['iface']),
+            'net_use_dhcp': _to_bool(updated.get('dhcp', True)),
+            'net_ip': updated.get('ip', _DEVICE_NETWORK_DEFAULTS['ip']),
+            'net_netmask': updated.get('netmask', _DEVICE_NETWORK_DEFAULTS['netmask']),
+            'net_gateway': updated.get('gateway', _DEVICE_NETWORK_DEFAULTS['gateway']),
+            'wifi_iface': updated.get('wifi_iface', _DEVICE_NETWORK_DEFAULTS['wifi_iface']),
+            'source': source,
+            'path': target_path,
+        },
+    })
 
 
 @app.route('/api/device/remote/wifi', methods=['GET', 'POST'])
@@ -4184,9 +4248,14 @@ def device_remote_wifi_disconnect():
     device_id = _get_requested_device_id()
     device_ip = _normalize_device_ip(request.args.get('device', DEVICE_DEFAULT_IP))
     ok, j = _device_proxy_json(device_ip, '/api/wifi/disconnect', 'POST', b'', 'application/json', timeout=8)
-    if ok and isinstance(j, dict):
+    if not (ok and isinstance(j, dict)):
+        j = qt_request({"cmd": "wifi_disconnect"}, timeout=8.0, device_id=device_id)
+    status_ok, status_payload = _device_proxy_json(device_ip, '/api/wifi', 'GET', timeout=5)
+    if status_ok and isinstance(status_payload, dict):
+        if isinstance(j, dict):
+            j.setdefault('status', status_payload)
         return jsonify(j)
-    return jsonify(qt_request({"cmd": "wifi_disconnect"}, timeout=8.0, device_id=device_id))
+    return jsonify(j if isinstance(j, dict) else {"ok": False, "error": "wifi_disconnect failed"})
 
 
 @app.route('/api/device/remote/rules', methods=['GET', 'POST'])

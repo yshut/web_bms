@@ -164,6 +164,12 @@ const lastUpdatedText = computed(() => {
   return new Date(lastUpdated.value).toLocaleTimeString();
 });
 
+function applyCanStatus(result: any) {
+  const payload = result?.status || result?.data || {};
+  if (!payload || typeof payload !== 'object') return;
+  running.value = !!(payload.running ?? payload.is_running);
+}
+
 function frameBytes(row: any): number[] {
   if (Array.isArray(row?.data)) return row.data;
   if (typeof row?.data === 'string') {
@@ -225,6 +231,11 @@ async function refreshFrames() {
   }
 }
 
+async function syncCanStatus() {
+  const result: any = await canApi.getStatus(activeDeviceId.value || undefined);
+  applyCanStatus(result);
+}
+
 function stopPolling() {
   if (timer != null) {
     window.clearInterval(timer);
@@ -240,9 +251,9 @@ function startPolling() {
 }
 
 async function startMonitor() {
-  const result: any = await canApi.start();
+  const result: any = await canApi.start(activeDeviceId.value || undefined);
   if (result?.ok) {
-    running.value = true;
+    applyCanStatus(result);
     ElMessage.success('CAN 监控已启动');
     await refreshFrames();
     startPolling();
@@ -251,22 +262,26 @@ async function startMonitor() {
 
 async function stopMonitor() {
   stopPolling();
-  const result: any = await canApi.stop();
+  const result: any = await canApi.stop(activeDeviceId.value || undefined);
   if (result?.ok) {
-    running.value = false;
+    applyCanStatus(result);
     ElMessage.success('CAN 监控已停止');
   }
 }
 
 async function clearFrames() {
   frames.value = [];
-  await canApi.clearCache();
+  await canApi.clearCache(activeDeviceId.value || undefined);
+  await refreshFrames();
 }
 
 async function onDeviceChange(value: string) {
   selectedDeviceId.value = value || '';
   await syncRoute(selectedDeviceId.value);
-  await refreshFrames();
+  await Promise.all([
+    syncCanStatus(),
+    refreshFrames(),
+  ]);
 }
 
 watch(autoRefresh, (enabled) => {
@@ -277,7 +292,10 @@ watch(autoRefresh, (enabled) => {
 onMounted(async () => {
   selectedDeviceId.value = String(route.query.device_id || systemStore.deviceId || '').trim();
   await loadDevices();
-  await refreshFrames();
+  await Promise.all([
+    syncCanStatus(),
+    refreshFrames(),
+  ]);
   if (autoRefresh.value) startPolling();
 });
 

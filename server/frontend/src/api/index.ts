@@ -60,13 +60,15 @@ export const statusApi = {
 export const canApi = {
   scan: () => api.post('/can/scan'),
   configure: () => api.post('/can/configure'),
-  start: () => api.post('/can/start'),
-  stop: () => api.post('/can/stop'),
-  clear: () => api.post('/can/clear'),
+  start: (deviceId?: string) => api.post('/can/start', {}, { params: deviceId ? { device_id: deviceId } : undefined }),
+  stop: (deviceId?: string) => api.post('/can/stop', {}, { params: deviceId ? { device_id: deviceId } : undefined }),
+  clear: (deviceId?: string) => api.post('/can/clear', {}, { params: deviceId ? { device_id: deviceId } : undefined }),
   setBitrates: (can1: number, can2: number) => api.post('/can/set_bitrates', { can1, can2 }),
   sendFrame: (text: string) => api.post('/can/send', { text }),
   setForward: (enabled: boolean) => api.post('/can/forward', { enabled }),
   setServer: (host: string, port: number) => api.post('/can/server', { host, port }),
+  getStatus: (deviceId?: string) =>
+    api.get('/can/status', { params: deviceId ? { device_id: deviceId } : undefined }),
   getFrames: (limit = 50, deviceId?: string) =>
     api.get('/can/frames', {
       params: {
@@ -75,7 +77,7 @@ export const canApi = {
       },
     }),
   getLiveData: () => api.get('/can/live_data'),
-  clearCache: () => api.post('/can/cache/clear'),
+  clearCache: (deviceId?: string) => api.post('/can/cache/clear', {}, { params: deviceId ? { device_id: deviceId } : undefined }),
   getCacheStatus: () => api.get('/can/cache/status'),
 };
 
