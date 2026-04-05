@@ -933,8 +933,12 @@ function clearMon() { document.getElementById('mon-box').innerHTML='<div class="
 async function pollMon() {
   var filter = document.getElementById('mon-filter').value.trim().toUpperCase();
   try {
-    var r = await api('can_frames?limit=50'), frames = await r.json();
-    if(!Array.isArray(frames)) frames = frames.frames||frames.data||[];
+    var r = await api('can_frames?limit=50'), payload = await r.json(), frames = [];
+    if(Array.isArray(payload)) frames = payload;
+    else if(payload && Array.isArray(payload.frames)) frames = payload.frames;
+    else if(payload && payload.data && Array.isArray(payload.data.frames)) frames = payload.data.frames;
+    else if(payload && payload.data && Array.isArray(payload.data)) frames = payload.data;
+    if(!Array.isArray(frames)) frames = [];
     var box = document.getElementById('mon-box');
     var newCount = 0;
     frames.forEach(function(f){

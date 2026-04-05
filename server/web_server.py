@@ -513,7 +513,7 @@ def _remote_fs_read(path: str, device_id: Optional[str] = None):
         }
     except Exception as exc:
         merged = dict(resp) if isinstance(resp, dict) else {'ok': False}
-        merged['error'] = merged.get('error') or str(exc)
+        merged['error'] = str(exc)
         merged['stream_error'] = str(exc)
         return False, merged
 
@@ -549,14 +549,14 @@ def _remote_fs_json(cmd: str, payload: Optional[dict] = None, timeout: float = 8
     return False, {'ok': False, 'error': 'remote fs request failed'}
 
 
-def _remote_fs_stream(path: str, chunk_size: int = 131072, device_id: Optional[str] = None):
+def _remote_fs_stream(path: str, chunk_size: int = 24576, device_id: Optional[str] = None):
     offset = 0
-    chunk_size = max(16384, min(int(chunk_size or 131072), 262144))
+    chunk_size = max(8192, min(int(chunk_size or 24576), 65536))
     while True:
         ok, payload = _remote_fs_json(
             'fs_read_range',
             {'path': path, 'offset': offset, 'length': chunk_size},
-            timeout=max(10.0, getattr(cfg, 'SOCKET_TIMEOUT', 3.0)),
+            timeout=max(15.0, getattr(cfg, 'SOCKET_TIMEOUT', 3.0)),
             device_id=device_id,
         )
         if not ok:
@@ -1626,20 +1626,135 @@ def api_can_server():
     port = int(data.get('port', 4001))
     return jsonify(qt_request({"cmd": "can_set_server", "host": host, "port": port}))
 
+
+def _parse_can_frame_line(line: str, fallback_ts: Optional[float] = None, fallback_iface: str = 'can1') -> Optional[dict]:
+    text = str(line or '').strip()
+    if not text:
+        return None
+
+    line_rest = text
+    if re.match(r'^\[\d{2}:\d{2}:\d{2}\.\d+\]', line_rest):
+        line_rest = re.sub(r'^\[\d{2}:\d{2}:\d{2}\.\d+\]\s*', '', line_rest)
+    else:
+        line_rest = re.sub(r'^\d{2}:\d{2}:\d{2}\s*', '', line_rest)
+
+    id_match = re.search(r'ID:(?:0x)?([0-9A-Fa-f]+)', line_rest)
+    if not id_match:
+        return None
+    try:
+        can_id = int(id_match.group(1), 16)
+    except Exception:
+        return None
+
+    iface = fallback_iface
+    iface_match = re.search(r'\bCAN(\d+)\b', line_rest, re.IGNORECASE)
+    if iface_match:
+        iface = f"can{iface_match.group(1)}"
+    else:
+        alt_iface = re.search(r'\bcan(\d+)\b', line_rest, re.IGNORECASE)
+        if alt_iface:
+            iface = f"can{alt_iface.group(1)}"
+
+    data = []
+    dev_data_match = re.search(r'数据:((?:[0-9A-Fa-f]{2}\s*)+)', line_rest)
+    if dev_data_match:
+        tokens = dev_data_match.group(1).strip().split()
+    else:
+        bracket_match = re.search(r'\[([^\]]*)\]', line_rest)
+        tokens = bracket_match.group(1).strip().split() if bracket_match and bracket_match.group(1).strip() else []
+    for token in tokens:
+        try:
+            if len(token) <= 2:
+                data.append(int(token, 16))
+        except Exception:
+            continue
+
+    return {
+        "id": can_id,
+        "data": data,
+        "iface": iface,
+        "interface": iface,
+        "timestamp": fallback_ts,
+        "line": text,
+    }
+
+
+def _normalize_can_frame_items(items, limit: int = 50) -> list:
+    frames = []
+    for item in items or []:
+        if isinstance(item, dict) and isinstance(item.get('id'), int) and isinstance(item.get('data'), list):
+            frame = dict(item)
+            iface = frame.get('iface') or frame.get('interface')
+            if not iface and isinstance(frame.get('channel'), int):
+                iface = f"can{int(frame.get('channel'))}"
+            if iface:
+                frame['iface'] = iface
+                frame['interface'] = iface
+            frames.append(frame)
+            continue
+
+        if isinstance(item, dict):
+            line = item.get('line') or item.get('frame') or ''
+            ts = item.get('timestamp')
+            iface = ''
+            if isinstance(item.get('channel'), int):
+                iface = f"can{int(item.get('channel'))}"
+            parsed = _parse_can_frame_line(line, fallback_ts=ts, fallback_iface=iface or 'can1')
+            if parsed:
+                if ts is not None:
+                    parsed['timestamp'] = ts
+                if item.get('seq') is not None:
+                    parsed['seq'] = item.get('seq')
+                frames.append(parsed)
+            continue
+
+        if isinstance(item, str):
+            parsed = _parse_can_frame_line(item)
+            if parsed:
+                frames.append(parsed)
+
+    if len(frames) > limit:
+        frames = frames[-limit:]
+    return frames
+
+
 @app.route('/api/can/frames', methods=['GET'])
 def api_can_frames():
-    # ????????????????? CAN ??
     limit = int(request.args.get('limit', 50))
     device_id = _get_requested_device_id()
     resp = qt_request({"cmd": "can_recent_frames", "limit": limit}, timeout=3.0, device_id=device_id)
-    # ??????????????? data.frames
     if not resp:
-        return jsonify({"ok": False, "error": "no response"})
+        resp = {"ok": False, "error": "no response"}
     if resp.get('ok') and isinstance(resp.get('data'), dict) and 'frames' in resp['data']:
-        return jsonify(resp)
-    # ?????????? frames ??
+        frames = _normalize_can_frame_items(resp['data'].get('frames'), limit=limit)
+        return jsonify({"ok": True, "data": {"frames": frames}, "source": "device_cmd"})
     if isinstance(resp.get('frames'), list):
-        return jsonify({"ok": True, "data": {"frames": resp.get('frames')}})
+        frames = _normalize_can_frame_items(resp.get('frames'), limit=limit)
+        return jsonify({"ok": True, "data": {"frames": frames}, "source": "device_cmd"})
+
+    try:
+        info = _get_mqtt_device_info(device_id)
+        events = info.get('events') if isinstance(info, dict) else {}
+        can_event = events.get('can_frames') if isinstance(events, dict) else {}
+        cached = []
+        if isinstance(can_event, dict):
+            if isinstance(can_event.get('frames'), list):
+                cached = can_event.get('frames') or []
+            elif isinstance(can_event.get('lines'), list):
+                cached = can_event.get('lines') or []
+        if not cached and _mqtt_hub:
+            raw_items = _mqtt_hub.get_can_data(limit=limit)
+            cached = [it.get('frame') for it in (raw_items or []) if isinstance(it, dict) and it.get('frame')]
+        frames = _normalize_can_frame_items(cached, limit=limit)
+        if frames:
+            return jsonify({
+                "ok": True,
+                "data": {"frames": frames},
+                "source": "mqtt_cache",
+                "fallback_error": resp.get('error'),
+            })
+    except Exception:
+        pass
     return jsonify(resp)
 
 
