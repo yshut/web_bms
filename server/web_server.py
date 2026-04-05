@@ -29,6 +29,7 @@ except Exception:
     from path_config import BASE_DIR  # type: ignore
 
 SERVER_DIR = os.path.dirname(os.path.abspath(__file__))
+FRONTEND_DIST_DIR = os.path.join(SERVER_DIR, 'static', 'console')
 SERVER_UI_BUILD = 'ui-debug-20260405-01'
 SERVER_PROCESS_STARTED_TS = time.time()
 
@@ -113,6 +114,12 @@ except Exception:
     sys.path.append(os.path.dirname(__file__))
     from local_mosquitto_broker import LocalMosquittoBroker  # type: ignore
 
+try:
+    from .rules_db import RulesDB  # type: ignore
+except Exception:
+    sys.path.append(os.path.dirname(__file__))
+    from rules_db import RulesDB  # type: ignore
+
 # DBC实时解析服务
 try:
     from .dbc_service import DBCService  # type: ignore
@@ -133,6 +140,10 @@ app = Flask(
     static_folder=os.path.join(SERVER_DIR, 'static'),
     static_url_path='/static'
 )
+
+_rules_db = RulesDB(getattr(cfg, 'RULES_DB_PATH', os.path.join(SERVER_DIR, 'uploads', 'rules.sqlite3')))
+_rules_db.start()
+atexit.register(_rules_db.close)
 
 # DBC目录
 DBC_DIR = os.path.join(SERVER_DIR, 'uploads', 'dbc')
@@ -1235,6 +1246,46 @@ def index():
     resp.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
     resp.headers['Pragma'] = 'no-cache'
     return resp
+
+
+def _frontend_console_response():
+    index_path = os.path.join(FRONTEND_DIST_DIR, 'index.html')
+    if os.path.exists(index_path):
+        resp = send_from_directory(FRONTEND_DIST_DIR, 'index.html')
+        resp.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+        resp.headers['Pragma'] = 'no-cache'
+        return resp
+    html = """
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Console Not Built</title>
+  <style>
+    body{margin:0;font-family:Segoe UI,sans-serif;background:#0f172a;color:#e2e8f0;display:grid;place-items:center;min-height:100vh}
+    .box{max-width:720px;padding:24px 28px;border:1px solid #334155;border-radius:14px;background:#111827}
+    h1{margin:0 0 12px;font-size:24px} p{color:#94a3b8;line-height:1.7} code{color:#67e8f9}
+  </style>
+</head>
+<body>
+  <div class="box">
+    <h1>前端控制台尚未构建</h1>
+    <p>请在 <code>server/frontend</code> 执行 <code>npm install</code> 和 <code>npm run build</code>，构建产物会输出到 <code>server/static/console</code>。</p>
+    <p>构建完成后访问 <code>/console/</code> 或 <code>/console/#/rules-v2</code>。</p>
+  </div>
+</body>
+</html>
+"""
+    return Response(html, mimetype='text/html; charset=utf-8')
+
+
+@app.route('/console/')
+@app.route('/console/<path:subpath>')
+def console_spa(subpath: str = ''):
+    if subpath and os.path.exists(os.path.join(FRONTEND_DIST_DIR, subpath)):
+        return send_from_directory(FRONTEND_DIST_DIR, subpath)
+    return _frontend_console_response()
 
 @app.route('/test')
 def test_page():
@@ -3781,6 +3832,7 @@ def device_remote_rules():
                 data.setdefault('source', 'device')
                 data.setdefault('path', target_path)
                 data.setdefault('device_id', device_id)
+                _rules_db.upsert_rules(device_id, data, source=str(data.get('source') or 'device'), path=str(data.get('path') or target_path))
                 return jsonify(data)
             except Exception as exc:
                 return jsonify({
@@ -3809,7 +3861,49 @@ def device_remote_rules():
     content = json.dumps(body, ensure_ascii=False, indent=2).encode('utf-8')
     resp = _remote_fs_write(target_path, content, device_id=device_id)
     ok = bool(isinstance(resp, dict) and resp.get('ok'))
+    if ok:
+        body.setdefault('version', 1)
+        body.setdefault('rules', [])
+        _rules_db.upsert_rules(device_id, body, source='device_write', path=target_path)
     return jsonify({'ok': ok, 'saved_path': target_path, 'rule_count': len(body.get('rules', [])), 'restart_required': True, 'device': resp})
+
+
+@app.route('/api/device/remote/rules/query', methods=['GET'])
+def device_remote_rules_query():
+    device_id = _get_requested_device_id()
+    q = str(request.args.get('q', '') or '').strip()
+    iface = str(request.args.get('iface', '') or '').strip()
+    enabled_raw = str(request.args.get('enabled', '') or '').strip().lower()
+    enabled = None
+    if enabled_raw in ('true', 'false'):
+        enabled = enabled_raw == 'true'
+    frame = str(request.args.get('frame', '') or '').strip().lower()
+    page = _to_int(request.args.get('page'), 1)
+    page_size = _to_int(request.args.get('page_size'), 50)
+    result = _rules_db.query_rules(
+        device_id=device_id,
+        q=q,
+        iface=iface,
+        enabled=enabled,
+        frame=frame,
+        page=page,
+        page_size=page_size,
+    )
+    stats = _rules_db.stats(device_id)
+    snapshot = _rules_db.get_snapshot(device_id) or {}
+    return jsonify({
+        'ok': True,
+        'device_id': device_id,
+        'items': result.get('items', []),
+        'total': result.get('total', 0),
+        'page': result.get('page', page),
+        'page_size': result.get('page_size', page_size),
+        'stats': stats,
+        'version': snapshot.get('version', 1),
+        'source': snapshot.get('source', 'db'),
+        'path': snapshot.get('path', ''),
+        'updated_at': snapshot.get('updated_at'),
+    })
 
 
 _CAN_CONFIG_DEFAULTS = {
@@ -4093,6 +4187,7 @@ def api_rules_import_excel():
         resp = _remote_fs_write(target_path, json_str.encode('utf-8'), device_id=device_id)
         ok = bool(isinstance(resp, dict) and resp.get('ok'))
         if ok:
+            _rules_db.upsert_rules(device_id, rules_obj, source='excel_import', path=target_path)
             return jsonify({
                 "ok": True,
                 "rule_count": rule_count,
@@ -4105,6 +4200,7 @@ def api_rules_import_excel():
             save_path = os.path.join(SERVER_DIR, 'uploads', 'can_mqtt_rules.json')
             with open(save_path, 'w', encoding='utf-8') as sf:
                 json.dump(rules_obj, sf, ensure_ascii=False, indent=2)
+            _rules_db.upsert_rules(device_id, rules_obj, source='excel_import_cached', path=save_path)
             return jsonify({
                 "ok": True,
                 "rule_count": rule_count,
@@ -4113,6 +4209,7 @@ def api_rules_import_excel():
                 "message": f"已解析 {rule_count} 条规则，设备不可达，规则已保存到服务端（设备上线后可重新推送）"
             })
     else:
+        _rules_db.upsert_rules(_get_requested_device_id(), rules_obj, source='excel_preview', path='preview')
         return jsonify({
             "ok": True,
             "rule_count": rule_count,
@@ -4184,6 +4281,8 @@ def api_rules_push_local():
         target_path = payload['path']
     resp = _remote_fs_write(target_path, json.dumps(rules_obj, ensure_ascii=False, indent=2).encode('utf-8'), device_id=device_id)
     ok = bool(isinstance(resp, dict) and resp.get('ok'))
+    if ok:
+        _rules_db.upsert_rules(device_id, rules_obj, source='push_local', path=target_path)
     return jsonify({"ok": ok, "device_response": resp,
                     "rule_count": len(rules_obj.get("rules", [])),
                     "saved_path": target_path})

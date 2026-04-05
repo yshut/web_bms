@@ -6,6 +6,7 @@ import { ElementPlusResolver } from 'unplugin-vue-components/resolvers';
 import path from 'path';
 
 export default defineConfig({
+  base: '/console/',
   plugins: [
     vue(),
     AutoImport({
@@ -38,7 +39,7 @@ export default defineConfig({
     },
   },
   build: {
-    outDir: '../backend/static',
+    outDir: '../static/console',
     emptyOutDir: true,
     rollupOptions: {
       output: {

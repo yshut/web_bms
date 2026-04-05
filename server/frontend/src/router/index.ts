@@ -1,4 +1,5 @@
-import { createRouter, createWebHistory, RouteRecordRaw } from 'vue-router';
+import { createRouter, createWebHistory } from 'vue-router';
+import type { RouteRecordRaw } from 'vue-router';
 
 const routes: RouteRecordRaw[] = [
   {
@@ -31,14 +32,19 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/Devices.vue'),
         meta: { title: '设备管理', icon: 'Connection' },
       },
+      {
+        path: '/rules-v2',
+        name: 'RulesV2',
+        component: () => import('@/views/Rules.vue'),
+        meta: { title: '规则管理', icon: 'Document' },
+      },
     ],
   },
 ];
 
 const router = createRouter({
-  history: createWebHistory(),
+  history: createWebHistory('/console/'),
   routes,
 });
 
 export default router;
-

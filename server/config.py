@@ -167,6 +167,20 @@ def _default_state_db_path() -> str:
 
 STATE_DB_PATH = str(_env_or_json('STATE_DB_PATH', 'state.db_path', _default_state_db_path()))
 
+
+def _default_rules_db_path() -> str:
+    if os.name == 'nt':
+        base = (
+            os.getenv('LOCALAPPDATA')
+            or os.getenv('TEMP')
+            or os.path.expanduser('~')
+        )
+        return os.path.join(base, 'app_lvgl', 'rules.sqlite3')
+    return os.path.join(os.path.dirname(__file__), 'uploads', 'rules.sqlite3')
+
+
+RULES_DB_PATH = str(_env_or_json('RULES_DB_PATH', 'rules.db_path', _default_rules_db_path()))
+
 # 打印配置信息（启动时）
 def print_config():
     """打印当前配置（用于启动时确认）"""

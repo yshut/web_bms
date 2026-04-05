@@ -1,4 +1,5 @@
-import axios, { AxiosInstance } from 'axios';
+import axios from 'axios';
+import type { AxiosInstance } from 'axios';
 import { ElMessage } from 'element-plus';
 
 const api: AxiosInstance = axios.create({
@@ -88,5 +89,27 @@ export const wsApi = {
   getClients: () => api.get('/ws/clients'),
   clearHistory: () => api.post('/ws/history/clear'),
   removeHistory: (ids: string[]) => api.post('/ws/history/remove', { ids }),
+};
+
+export const rulesApi = {
+  query: (params: {
+    device_id?: string;
+    q?: string;
+    iface?: string;
+    enabled?: string;
+    frame?: string;
+    page?: number;
+    page_size?: number;
+  }) => api.get('/device/remote/rules/query', { params }),
+  importExcel: (file: File, push = false, deviceId?: string) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    return api.post(`/rules/import_excel?push=${push ? 1 : 0}${deviceId ? `&device_id=${encodeURIComponent(deviceId)}` : ''}`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+  },
+  exportExcelUrl: (deviceId?: string) =>
+    `/api/rules/export_excel${deviceId ? `?device_id=${encodeURIComponent(deviceId)}` : ''}`,
+  templateUrl: '/api/rules/template',
 };
 
