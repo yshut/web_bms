@@ -3250,14 +3250,28 @@ def api_uds_list():
     if ok_remote:
         files = []
         for item in (remote_data.get('files') or []):
-            name = str(item or '').strip()
+            name = ''
+            path = ''
+            size = 0
+            mtime = 0
+            if isinstance(item, dict):
+                name = str(item.get('name') or item.get('filename') or item.get('path') or '').strip()
+                path = str(item.get('path') or '').strip()
+                size = _to_int(item.get('size'), 0)
+                mtime = _to_int(item.get('mtime', item.get('ts')), 0)
+            else:
+                name = str(item or '').strip()
             if not name:
                 continue
+            ext = os.path.splitext(name)[1].lower()
+            if ext not in exts:
+                continue
+            final_path = path or posixpath.join(base, name)
             files.append({
                 "name": os.path.basename(name),
-                "path": posixpath.join(base, name),
-                "size": 0,
-                "mtime": 0,
+                "path": final_path,
+                "size": size,
+                "mtime": mtime,
                 "source": "device_mqtt",
             })
         return jsonify({"ok": True, "files": files, "data": {"files": files}})
@@ -4184,6 +4198,7 @@ def device_remote_rules_query():
     frame = str(request.args.get('frame', '') or '').strip().lower()
     page = _to_int(request.args.get('page'), 1)
     page_size = _to_int(request.args.get('page_size'), 50)
+    snapshot = _rules_db.get_snapshot(device_id) or {}
     result = _rules_db.query_rules(
         device_id=device_id,
         q=q,
@@ -4193,8 +4208,30 @@ def device_remote_rules_query():
         page=page,
         page_size=page_size,
     )
+    if not snapshot and result.get('total', 0) <= 0:
+        ok, payload = _remote_fs_read_best(_DEVICE_RULES_PATHS, device_id=device_id)
+        if ok:
+            target_path = payload.get('path') or _DEVICE_RULES_PATHS[0]
+            try:
+                body = json.loads(payload['content'].decode('utf-8', errors='ignore') or '{}')
+                if not isinstance(body, dict):
+                    body = {'version': 1, 'rules': []}
+            except Exception:
+                body = {'version': 1, 'rules': []}
+            body.setdefault('version', 1)
+            body.setdefault('rules', [])
+            _rules_db.upsert_rules(device_id, body, source='device_query_refresh', path=target_path)
+            result = _rules_db.query_rules(
+                device_id=device_id,
+                q=q,
+                iface=iface,
+                enabled=enabled,
+                frame=frame,
+                page=page,
+                page_size=page_size,
+            )
+            snapshot = _rules_db.get_snapshot(device_id) or {}
     stats = _rules_db.stats(device_id)
-    snapshot = _rules_db.get_snapshot(device_id) or {}
     return jsonify({
         'ok': True,
         'device_id': device_id,

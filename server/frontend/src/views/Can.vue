@@ -233,7 +233,6 @@ async function onDeviceChange(value: string) {
 }
 
 watch(autoRefresh, (enabled) => {
-  if (!running.value) return;
   if (enabled) startPolling();
   else stopPolling();
 });
@@ -242,6 +241,7 @@ onMounted(async () => {
   selectedDeviceId.value = String(route.query.device_id || systemStore.deviceId || '').trim();
   await loadDevices();
   await refreshFrames();
+  if (autoRefresh.value) startPolling();
 });
 
 onBeforeUnmount(() => {

@@ -194,7 +194,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
 import { ElMessage } from 'element-plus';
 import { useRoute, useRouter } from 'vue-router';
 import { deviceApi, remoteConfigApi } from '@/api';
@@ -264,6 +264,7 @@ const wifiForm = reactive({
 
 const wifiStatus = reactive<Record<string, any>>({});
 const wifiNetworks = ref<any[]>([]);
+let wifiTimer: number | null = null;
 
 const deviceOptions = computed(() => {
   const merged = [...deviceMeta.devices, ...deviceMeta.history];
@@ -273,10 +274,23 @@ const deviceOptions = computed(() => {
 const activeDeviceId = computed(() => selectedDeviceId.value.trim() || '');
 
 const wifiStatusText = computed(() => {
+  if (wifiStatus.error && !wifiStatus.connected && !wifiStatus.associated) return `获取失败: ${wifiStatus.error}`;
   if (wifiStatus.connected) return '已连接';
   if (wifiStatus.associated) return '已关联未取 IP';
   return '未连接';
 });
+
+function normalizeWifiPayload(input: Record<string, any>) {
+  const source = (input?.data && typeof input.data === 'object') ? input.data : input;
+  const normalized = { ...(source || {}) } as Record<string, any>;
+  normalized.wifi_iface = normalized.wifi_iface || normalized.iface || networkForm.wifi_iface || 'wlan0';
+  normalized.wifi_ssid = normalized.wifi_ssid || normalized.saved_ssid || normalized.ssid || '';
+  normalized.wifi_psk = normalized.wifi_psk || normalized.password || '';
+  normalized.current_ssid = normalized.current_ssid || normalized.ssid || normalized.connected_ssid || '';
+  normalized.current_ip = normalized.current_ip || normalized.ip || normalized.wifi_ip || '';
+  normalized.gateway = normalized.gateway || normalized.gw || '';
+  return normalized;
+}
 
 async function syncRoute(deviceId: string) {
   const query = { ...route.query } as Record<string, string>;
@@ -296,10 +310,12 @@ async function loadDevices() {
 }
 
 function applyWifiStatus(result: Record<string, any>) {
+  const normalized = normalizeWifiPayload(result || {});
   Object.keys(wifiStatus).forEach((key) => delete wifiStatus[key]);
-  Object.assign(wifiStatus, result || {});
-  wifiForm.wifi_iface = String(result?.wifi_iface || networkForm.wifi_iface || 'wlan0');
-  if (result?.wifi_ssid) wifiForm.ssid = String(result.wifi_ssid);
+  Object.assign(wifiStatus, normalized);
+  wifiForm.wifi_iface = String(normalized.wifi_iface || networkForm.wifi_iface || 'wlan0');
+  if (normalized.wifi_ssid) wifiForm.ssid = String(normalized.wifi_ssid);
+  if (normalized.wifi_psk) wifiForm.password = String(normalized.wifi_psk);
 }
 
 async function reloadAll() {
@@ -403,7 +419,7 @@ async function scanWifi() {
   try {
     const result: any = await remoteConfigApi.scanWifi(activeDeviceId.value || undefined);
     if (result?.ok) {
-      wifiNetworks.value = result.networks || [];
+      wifiNetworks.value = result.networks || result.data?.networks || [];
       ElMessage.success(`扫描完成，发现 ${wifiNetworks.value.length} 个网络`);
     }
   } finally {
@@ -424,6 +440,25 @@ async function disconnectWifi() {
   }
 }
 
+function stopWifiPolling() {
+  if (wifiTimer != null) {
+    window.clearInterval(wifiTimer);
+    wifiTimer = null;
+  }
+}
+
+function startWifiPolling() {
+  stopWifiPolling();
+  wifiTimer = window.setInterval(async () => {
+    try {
+      const wifi: any = await remoteConfigApi.getWifi(activeDeviceId.value || undefined);
+      applyWifiStatus(wifi || {});
+    } catch {
+      // Keep the last known status instead of spamming the UI with transient fetch errors.
+    }
+  }, 5000);
+}
+
 function pickWifi(ssid: string) {
   wifiForm.ssid = ssid || '';
 }
@@ -432,6 +467,11 @@ onMounted(async () => {
   selectedDeviceId.value = String(route.query.device_id || systemStore.deviceId || '').trim();
   await loadDevices();
   await reloadAll();
+  startWifiPolling();
+});
+
+onBeforeUnmount(() => {
+  stopWifiPolling();
 });
 </script>
 

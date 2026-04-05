@@ -50,16 +50,48 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { bmsApi } from '@/api';
 
 const loading = ref(false);
 const stats = ref<Record<string, any>>({});
-const signals = ref<Record<string, any>>({});
+const signals = ref<any[]>([]);
 const messages = ref<Record<string, any[]>>({});
 const alerts = ref<any[]>([]);
+let reloadTimer: number | null = null;
 
-const signalRows = computed(() => Object.values(signals.value || {}));
+const signalRows = computed(() => Array.isArray(signals.value) ? signals.value : Object.values(signals.value || {}));
+
+function normalizeSignalRows(value: any): any[] {
+  const rows = Array.isArray(value) ? value : Object.values(value || {});
+  return rows.map((row: any, index: number) => ({
+    ...row,
+    signal_name: row?.signal_name || row?.name || `signal_${index + 1}`,
+    value: row?.value ?? row?.val ?? '-',
+    unit: row?.unit || '',
+    channel: row?.channel || row?.iface || '-',
+  }));
+}
+
+function normalizeMessageGroups(value: any): Record<string, any[]> {
+  const groups = (value && typeof value === 'object') ? value : {};
+  return Object.fromEntries(
+    Object.entries(groups).map(([name, rows]) => [
+      name,
+      normalizeSignalRows(Array.isArray(rows) ? rows : []),
+    ]),
+  );
+}
+
+function normalizeAlerts(value: any): any[] {
+  const rows = Array.isArray(value) ? value : [];
+  return rows.map((row: any, index: number) => ({
+    ...row,
+    signal_name: row?.signal_name || row?.name || `alert_${index + 1}`,
+    level: row?.level || row?.severity || '-',
+    message: row?.message || row?.desc || row?.description || '-',
+  }));
+}
 
 async function reload() {
   loading.value = true;
@@ -71,15 +103,25 @@ async function reload() {
       bmsApi.alerts(100),
     ]) as any[];
     stats.value = statsResp?.data || {};
-    signals.value = signalsResp?.data || {};
-    messages.value = messagesResp?.data || {};
-    alerts.value = alertsResp?.data || [];
+    signals.value = normalizeSignalRows(signalsResp?.data || []);
+    messages.value = normalizeMessageGroups(messagesResp?.data || {});
+    alerts.value = normalizeAlerts(alertsResp?.data || []);
   } finally {
     loading.value = false;
   }
 }
 
-onMounted(reload);
+onMounted(async () => {
+  await reload();
+  reloadTimer = window.setInterval(reload, 3000);
+});
+
+onBeforeUnmount(() => {
+  if (reloadTimer != null) {
+    window.clearInterval(reloadTimer);
+    reloadTimer = null;
+  }
+});
 </script>
 
 <style scoped>

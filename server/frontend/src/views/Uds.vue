@@ -81,7 +81,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue';
+import { onBeforeUnmount, onMounted, reactive, ref } from 'vue';
 import { ElMessage } from 'element-plus';
 import { udsApi } from '@/api';
 
@@ -92,6 +92,7 @@ const currentFile = ref('-');
 const logs = ref<string[]>([]);
 const firmwareFiles = ref<any[]>([]);
 const fileInput = ref<HTMLInputElement | null>(null);
+let reloadTimer: number | null = null;
 const config = reactive({
   iface: 'can0',
   bitrate: 500000,
@@ -102,7 +103,7 @@ const config = reactive({
 
 function formatBytes(value: number | string) {
   const num = Number(value ?? 0);
-  if (!num) return '0 B';
+  if (!num) return '-';
   if (num < 1024) return `${num} B`;
   if (num < 1024 * 1024) return `${(num / 1024).toFixed(1)} KB`;
   return `${(num / 1024 / 1024).toFixed(1)} MB`;
@@ -176,7 +177,14 @@ async function stop() {
 
 onMounted(async () => {
   await reload();
-  window.setInterval(reload, 3000);
+  reloadTimer = window.setInterval(reload, 3000);
+});
+
+onBeforeUnmount(() => {
+  if (reloadTimer != null) {
+    window.clearInterval(reloadTimer);
+    reloadTimer = null;
+  }
 });
 </script>
 
