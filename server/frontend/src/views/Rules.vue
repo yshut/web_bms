@@ -1,63 +1,89 @@
 <template>
   <div class="rules-page">
-    <el-card shadow="hover" class="toolbar-card">
-      <div class="toolbar">
-        <el-select
-          v-model="selectedDeviceId"
-          clearable
-          filterable
-          placeholder="选择设备"
-          class="device-select"
-          @change="onDeviceChange"
-        >
-          <el-option
-            v-for="device in deviceOptions"
-            :key="device"
-            :label="device"
-            :value="device"
-          />
-        </el-select>
-        <el-input
-          v-model="filters.q"
-          placeholder="规则名 / 报文 / 信号 / Topic"
-          clearable
-          class="grow"
-          @keyup.enter="reload"
-        />
-        <el-select v-model="filters.iface" clearable placeholder="接口" style="width: 120px">
-          <el-option label="can0" value="can0" />
-          <el-option label="can1" value="can1" />
-          <el-option label="any" value="any" />
-        </el-select>
-        <el-select v-model="filters.enabled" clearable placeholder="状态" style="width: 120px">
-          <el-option label="启用" value="true" />
-          <el-option label="禁用" value="false" />
-        </el-select>
-        <el-select v-model="filters.frame" clearable placeholder="帧类型" style="width: 140px">
-          <el-option label="标准帧" value="std" />
-          <el-option label="扩展帧" value="ext" />
-          <el-option label="ANY ID" value="any_id" />
-        </el-select>
-        <el-button type="primary" @click="reload">查询</el-button>
-        <el-button :loading="loadingSync" @click="syncRemoteRules">同步设备规则</el-button>
-        <el-button @click="resetFilters">重置</el-button>
+    <section class="hero-panel">
+      <div class="hero-copy">
+        <p class="eyebrow">Rules Control</p>
+        <h1>把筛选条件、同步动作和规则规模放在一个清晰的控制面板里。</h1>
+        <p class="hero-desc">
+          先确定设备、状态和帧范围，再进入分组后的规则表，避免长工具栏把关键操作淹没。
+        </p>
       </div>
 
-      <div class="device-bar">
-        <el-tag type="info">当前设备: {{ activeDeviceId || '未指定，使用服务端默认设备' }}</el-tag>
-        <el-tag :type="deviceMeta.devices.length ? 'success' : 'warning'">在线 {{ deviceMeta.devices.length }}</el-tag>
-        <el-tag type="info">历史 {{ deviceMeta.history.length }}</el-tag>
-        <span class="meta-text">来源 {{ sourceLabel }}</span>
-        <span class="meta-text">版本 {{ version }}</span>
-        <span class="meta-text">更新时间 {{ updatedAtText }}</span>
+      <div class="hero-side">
+        <div class="toolbar-card">
+          <div class="toolbar">
+            <el-select
+              v-model="selectedDeviceId"
+              clearable
+              filterable
+              placeholder="选择设备"
+              class="device-select"
+              @change="onDeviceChange"
+            >
+              <el-option
+                v-for="device in deviceOptions"
+                :key="device"
+                :label="device"
+                :value="device"
+              />
+            </el-select>
+            <el-input
+              v-model="filters.q"
+              placeholder="规则名 / 报文 / 信号 / Topic"
+              clearable
+              class="grow"
+              @keyup.enter="reload"
+            />
+            <el-select v-model="filters.iface" clearable placeholder="接口" class="compact-select">
+              <el-option label="can0" value="can0" />
+              <el-option label="can1" value="can1" />
+              <el-option label="any" value="any" />
+            </el-select>
+            <el-select v-model="filters.enabled" clearable placeholder="状态" class="compact-select">
+              <el-option label="启用" value="true" />
+              <el-option label="禁用" value="false" />
+            </el-select>
+            <el-select v-model="filters.frame" clearable placeholder="帧类型" class="frame-select">
+              <el-option label="标准帧" value="std" />
+              <el-option label="扩展帧" value="ext" />
+              <el-option label="ANY ID" value="any_id" />
+            </el-select>
+          </div>
+
+          <div class="toolbar toolbar--actions">
+            <el-button type="primary" @click="reload">查询</el-button>
+            <el-button :loading="loadingSync" @click="syncRemoteRules">同步设备规则</el-button>
+            <el-button @click="resetFilters">重置</el-button>
+          </div>
+        </div>
+
+        <div class="device-bar">
+          <div class="meta-chip">
+            <span>当前设备</span>
+            <strong>{{ activeDeviceId || '使用服务端默认设备' }}</strong>
+          </div>
+          <div class="meta-chip">
+            <span>在线 / 历史</span>
+            <strong>{{ deviceMeta.devices.length }} / {{ deviceMeta.history.length }}</strong>
+          </div>
+          <div class="meta-chip">
+            <span>来源</span>
+            <strong>{{ sourceLabel }}</strong>
+          </div>
+          <div class="meta-chip">
+            <span>版本 / 更新时间</span>
+            <strong>{{ version }}</strong>
+            <p>{{ updatedAtText }}</p>
+          </div>
+        </div>
       </div>
-    </el-card>
+    </section>
 
     <div class="stats">
-      <el-card shadow="hover"><div class="stat"><span>总数</span><b>{{ stats.total }}</b></div></el-card>
-      <el-card shadow="hover"><div class="stat"><span>启用</span><b>{{ stats.enabled }}</b></div></el-card>
-      <el-card shadow="hover"><div class="stat"><span>禁用</span><b>{{ stats.disabled }}</b></div></el-card>
-      <el-card shadow="hover"><div class="stat"><span>ANY</span><b>{{ stats.any_match }}</b></div></el-card>
+      <el-card shadow="hover"><div class="stat"><span>总数</span><b>{{ stats.total }}</b><p>当前筛选命中的规则数</p></div></el-card>
+      <el-card shadow="hover"><div class="stat"><span>启用</span><b>{{ stats.enabled }}</b><p>处于启用状态的规则</p></div></el-card>
+      <el-card shadow="hover"><div class="stat"><span>禁用</span><b>{{ stats.disabled }}</b><p>已关闭但仍保留的规则</p></div></el-card>
+      <el-card shadow="hover"><div class="stat"><span>ANY</span><b>{{ stats.any_match }}</b><p>使用 ANY ID 的匹配规则</p></div></el-card>
     </div>
 
     <el-card shadow="hover">
@@ -481,17 +507,79 @@ onBeforeUnmount(() => {
 <style scoped>
 .rules-page {
   display: grid;
-  gap: 16px;
+  gap: 20px;
 }
 
-.toolbar-card :deep(.el-card__body) {
-  padding: 16px;
+.hero-panel {
+  display: flex;
+  gap: 20px;
+  flex-wrap: wrap;
+  padding: 28px;
+  border-radius: var(--app-radius-lg);
+  border: 1px solid rgba(136, 176, 255, 0.14);
+  background:
+    linear-gradient(135deg, rgba(14, 30, 50, 0.95), rgba(8, 17, 29, 0.92)),
+    radial-gradient(circle at top right, rgba(74, 198, 255, 0.14), transparent 32%);
+  box-shadow: var(--app-shadow);
+}
+
+.hero-copy {
+  flex: 1;
+  min-width: 320px;
+}
+
+.hero-side {
+  flex: 1;
+  min-width: 340px;
+  display: grid;
+  gap: 14px;
+}
+
+.eyebrow {
+  margin: 0 0 10px;
+  color: #72a2cf;
+  font-size: 12px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+}
+
+.hero-copy h1 {
+  margin: 0;
+  max-width: 12em;
+  color: #f3f8ff;
+  font-size: clamp(30px, 3.6vw, 46px);
+  line-height: 1.08;
+}
+
+.hero-desc,
+.meta-text,
+.stat p {
+  color: #96a8c4;
+}
+
+.hero-desc {
+  margin-top: 16px;
+  max-width: 42rem;
+  line-height: 1.8;
+}
+
+.toolbar-card {
+  padding: 18px;
+  border-radius: var(--app-radius-md);
+  border: 1px solid rgba(136, 176, 255, 0.12);
+  background: linear-gradient(180deg, rgba(14, 28, 47, 0.8), rgba(8, 18, 31, 0.76));
+  box-shadow: var(--app-shadow);
 }
 
 .toolbar {
   display: flex;
   gap: 12px;
+  align-items: center;
   flex-wrap: wrap;
+}
+
+.toolbar--actions {
+  margin-top: 14px;
 }
 
 .grow {
@@ -503,38 +591,70 @@ onBeforeUnmount(() => {
   width: 260px;
 }
 
-.device-bar {
-  display: flex;
-  gap: 12px;
-  flex-wrap: wrap;
-  align-items: center;
-  margin-top: 12px;
+.compact-select {
+  width: 120px;
 }
 
-.meta-text {
-  color: #606266;
+.frame-select {
+  width: 140px;
+}
+
+.device-bar {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.meta-chip {
+  padding: 16px;
+  border-radius: var(--app-radius-md);
+  border: 1px solid rgba(136, 176, 255, 0.12);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.meta-chip span,
+.stat span {
+  color: #7e95b8;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.meta-chip strong {
+  display: block;
+  margin-top: 10px;
+  color: #f2f7ff;
+  font-size: 18px;
+  line-height: 1.3;
+  word-break: break-all;
+}
+
+.meta-chip p {
+  margin-top: 8px;
+  color: #90a4c2;
   font-size: 13px;
 }
 
 .stats {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 12px;
+  gap: 14px;
 }
 
 .stat {
   display: grid;
-  gap: 8px;
-}
-
-.stat span {
-  color: #909399;
-  font-size: 12px;
+  gap: 10px;
 }
 
 .stat b {
+  color: #f2f7ff;
   font-size: 28px;
   line-height: 1;
+}
+
+.stat p {
+  font-size: 13px;
+  line-height: 1.5;
 }
 
 .table-head {
@@ -633,7 +753,8 @@ onBeforeUnmount(() => {
   }
 
   .table-head,
-  .excel-box {
+  .excel-box,
+  .device-bar {
     flex-direction: column;
     align-items: stretch;
   }
@@ -645,9 +766,15 @@ onBeforeUnmount(() => {
   }
 
   .device-select,
-  .grow {
+  .grow,
+  .compact-select,
+  .frame-select {
     width: 100%;
     min-width: 0;
+  }
+
+  .device-bar {
+    grid-template-columns: 1fr;
   }
 }
 </style>
