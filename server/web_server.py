@@ -3267,6 +3267,11 @@ def api_uds_list():
             if ext not in exts:
                 continue
             final_path = path or posixpath.join(base, name)
+            if not size and final_path:
+                ok_stat, stat_data = _remote_fs_json('fs_stat', {'path': final_path}, timeout=6.0, device_id=device_id)
+                if ok_stat and isinstance(stat_data, dict):
+                    size = _to_int(stat_data.get('size'), size)
+                    mtime = _to_int(stat_data.get('mtime', stat_data.get('ts')), mtime)
             files.append({
                 "name": os.path.basename(name),
                 "path": final_path,
@@ -4064,11 +4069,63 @@ def device_remote_wifi():
     device_ip = _normalize_device_ip(request.args.get('device', DEVICE_DEFAULT_IP))
 
     if request.method == 'GET':
+        net_cfg, _net_path, _net_source = _load_remote_config_map(
+            _DEVICE_NET_CONFIG_PATHS,
+            _DEVICE_NETWORK_DEFAULTS,
+            device_id=device_id,
+            allow_legacy=False,
+        )
+        app_cfg, _app_path, _app_source = _load_remote_config_map(
+            _DEVICE_WS_CONFIG_PATHS,
+            _DEVICE_CONFIG_DEFAULTS,
+            device_id=device_id,
+            allow_legacy=True,
+        )
+        merged = {
+            'ok': True,
+            'wifi_iface': net_cfg.get('wifi_iface', _DEVICE_NETWORK_DEFAULTS['wifi_iface']),
+            'wifi_ssid': app_cfg.get('wifi_ssid', ''),
+            'wifi_psk': app_cfg.get('wifi_psk', ''),
+            'connected': False,
+            'associated': False,
+            'has_ip': False,
+            'gateway_reachable': False,
+            'cloud_reachable': False,
+            'auto_reconnect_enabled': False,
+            'current_ssid': '',
+            'current_ip': '',
+            'gateway': net_cfg.get('gateway', net_cfg.get('net_gateway', '')),
+            'source': 'config_cache',
+        }
         ok, j = _device_proxy_json(device_ip, '/api/wifi', 'GET', timeout=5)
         if ok and isinstance(j, dict):
-            return jsonify(j)
+            merged.update(j)
+            merged['source'] = 'device_http'
+            return jsonify(merged)
         resp = qt_request({"cmd": "wifi_status"}, timeout=5.0, device_id=device_id)
-        return jsonify(resp if isinstance(resp, dict) else {"ok": False, "error": "wifi status failed", "http": j})
+        if isinstance(resp, dict):
+            data = resp.get('data') if isinstance(resp.get('data'), dict) else resp
+            if isinstance(data, dict):
+                merged.update(data)
+                current_ssid = str(data.get('current_ssid') or data.get('wifi_ssid') or data.get('ssid') or '').strip()
+                current_ip = str(data.get('current_ip') or data.get('ip') or '').strip()
+                merged['current_ssid'] = current_ssid or merged.get('current_ssid') or merged.get('wifi_ssid') or ''
+                merged['current_ip'] = current_ip
+                merged['connected'] = _to_bool(data.get('connected', False))
+                merged['associated'] = _to_bool(data.get('associated', merged['connected']))
+                merged['has_ip'] = _to_bool(data.get('has_ip', bool(current_ip)))
+                merged['gateway'] = str(data.get('gateway', merged.get('gateway', '')) or '')
+                merged['gateway_reachable'] = _to_bool(data.get('gateway_reachable', False))
+                merged['cloud_reachable'] = _to_bool(data.get('cloud_reachable', False))
+                merged['auto_reconnect_enabled'] = _to_bool(data.get('auto_reconnect_enabled', False))
+                if current_ssid and not merged.get('wifi_ssid'):
+                    merged['wifi_ssid'] = current_ssid
+                merged['source'] = 'device_mqtt'
+                return jsonify(merged)
+        merged['ok'] = False
+        merged['error'] = (resp.get('error') if isinstance(resp, dict) else '') or 'wifi status failed'
+        merged['http'] = j
+        return jsonify(merged)
 
     body = request.get_json(silent=True) or {}
     if not isinstance(body, dict):

@@ -169,7 +169,7 @@ function goUp() {
 }
 
 function enterDir(row: any) {
-  listDir(joinPath(currentPath.value, row.name));
+  listDir(row.path || joinPath(currentPath.value, row.name));
 }
 
 async function mkdirDialog() {
@@ -190,7 +190,7 @@ async function mkdirDialog() {
 
 async function renamePath(row: any) {
   try {
-    const path = joinPath(currentPath.value, row.name);
+    const path = row.path || joinPath(currentPath.value, row.name);
     const { value } = await ElMessageBox.prompt('重命名为', '重命名', {
       inputValue: row.name,
       confirmButtonText: '保存',
@@ -208,9 +208,12 @@ async function renamePath(row: any) {
 
 async function removePath(row: any) {
   try {
-    const path = joinPath(currentPath.value, row.name);
+    const path = row.path || joinPath(currentPath.value, row.name);
     await ElMessageBox.confirm(`确认删除 ${row.name} ?`, '删除确认', {
       type: 'warning',
+      confirmButtonText: '删除',
+      cancelButtonText: '取消',
+      distinguishCancelAndClose: true,
     });
     const result: any = await filesApi.remove(path, activeDeviceId.value || undefined);
     if (result?.ok !== false) {
@@ -223,7 +226,7 @@ async function removePath(row: any) {
 }
 
 function download(row: any) {
-  window.open(filesApi.downloadUrl(joinPath(currentPath.value, row.name), activeDeviceId.value || undefined), '_blank');
+  window.open(filesApi.downloadUrl(row.path || joinPath(currentPath.value, row.name), activeDeviceId.value || undefined), '_blank');
 }
 
 function pickUpload() {
