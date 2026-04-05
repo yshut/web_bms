@@ -4503,6 +4503,52 @@ def api_bms_messages():
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
+@app.route('/api/bms/stream', methods=['GET'])
+def api_bms_stream():
+    if not _bms_collector:
+        return jsonify({"ok": False, "error": "BMS collector not initialized"}), 503
+
+    def _signature(rows, stats):
+        signal_sig = "|".join(
+            f"{row.get('signal_name','')}:{row.get('value','')}:{row.get('ts',0)}"
+            for row in rows
+        )
+        return f"{signal_sig}#{stats.get('max_ts', 0)}#{stats.get('total_records', 0)}"
+
+    @stream_with_context
+    def generate():
+        last_sig = None
+        while True:
+            try:
+                rows = _bms_collector.query_latest_values()
+                stats = _bms_collector.get_stats()
+                sig = _signature(rows, stats)
+                if sig != last_sig:
+                    payload = json.dumps({
+                        "signals": rows,
+                        "stats": stats,
+                    }, ensure_ascii=False)
+                    yield f"data: {payload}\n\n"
+                    last_sig = sig
+                else:
+                    yield ": keepalive\n\n"
+            except GeneratorExit:
+                break
+            except Exception as e:
+                err = json.dumps({"error": str(e)}, ensure_ascii=False)
+                yield f"event: error\ndata: {err}\n\n"
+            time.sleep(0.2)
+
+    return Response(
+        generate(),
+        mimetype='text/event-stream',
+        headers={
+            'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0',
+            'X-Accel-Buffering': 'no',
+            'Connection': 'keep-alive',
+        }
+    )
+
 @app.route('/api/bms/export', methods=['GET'])
 def api_bms_export():
     if not _bms_collector:

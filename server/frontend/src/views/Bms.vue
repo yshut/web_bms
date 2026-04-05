@@ -5,6 +5,7 @@
         <el-button type="primary" :loading="loading" @click="reload">刷新</el-button>
         <el-button :href="bmsApi.exportUrl" tag="a">导出 CSV</el-button>
         <span class="meta">最后更新 {{ lastUpdatedText }}</span>
+        <span class="meta">实时流 {{ streamConnected ? '已连接' : '重连中' }}</span>
       </div>
     </el-card>
 
@@ -66,10 +67,12 @@ const lastUpdated = ref(0);
 const signalTableKey = ref(0);
 const messageTableKey = ref(0);
 const alertTableKey = ref(0);
+const streamConnected = ref(false);
 let pendingReload = false;
 let reloadInFlight = false;
 let lastSignature = '';
 let reloadTimer: number | null = null;
+let eventSource: EventSource | null = null;
 
 const signalRows = computed(() => {
   const rows = Array.isArray(signals.value) ? signals.value : Object.values(signals.value || {});
@@ -93,6 +96,7 @@ function normalizeSignalRows(value: any): any[] {
   return rows.map((row: any, index: number) => ({
     ...row,
     signal_name: row?.signal_name || row?.name || `signal_${index + 1}`,
+    msg_name: row?.msg_name || row?.message_name || row?.message || 'unknown',
     value: row?.value ?? row?.val ?? '-',
     unit: row?.unit || '',
     channel: row?.channel || row?.iface || '-',
@@ -114,6 +118,20 @@ function normalizeMessageGroups(value: any): Record<string, any[]> {
         const bTs = Number(b[1]?.[0]?.ts || 0);
         return bTs - aTs;
       }),
+  );
+}
+
+function buildMessageGroupsFromSignals(rows: any[]): Record<string, any[]> {
+  const groups: Record<string, any[]> = {};
+  for (const row of rows) {
+    const name = String(row?.msg_name || 'unknown');
+    if (!groups[name]) groups[name] = [];
+    groups[name].push(row);
+  }
+  return Object.fromEntries(
+    Object.entries(groups)
+      .map(([name, groupRows]) => [name, [...groupRows].sort((a, b) => Number(b?.ts || 0) - Number(a?.ts || 0))])
+      .sort((a, b) => Number(b[1]?.[0]?.ts || 0) - Number(a[1]?.[0]?.ts || 0)),
   );
 }
 
@@ -146,6 +164,29 @@ function buildSignature(nextSignals: any[], nextMessages: Record<string, any[]>,
   return `${signalPart}#${messagePart}#${alertPart}`;
 }
 
+function applySnapshot(nextStats: Record<string, any>, nextSignals: any[], nextAlerts: any[]) {
+  const nextMessages = buildMessageGroupsFromSignals(nextSignals);
+  const signature = buildSignature(nextSignals, nextMessages, nextAlerts);
+  stats.value = nextStats;
+  signals.value = nextSignals;
+  messages.value = nextMessages;
+  alerts.value = nextAlerts;
+  lastUpdated.value = Date.now();
+  if (signature !== lastSignature) {
+    signalTableKey.value += 1;
+    messageTableKey.value += 1;
+    alertTableKey.value += 1;
+    lastSignature = signature;
+  }
+}
+
+async function refreshAlerts() {
+  const stamp = Date.now();
+  const alertsResp: any = await bmsApi.alerts(100, stamp);
+  const nextAlerts = normalizeAlerts(alertsResp?.data || alertsResp || []);
+  applySnapshot(stats.value, signalRows.value, nextAlerts);
+}
+
 async function reload() {
   if (reloadInFlight) {
     pendingReload = true;
@@ -156,30 +197,16 @@ async function reload() {
     loading.value = true;
   }
   try {
-    const [statsResp, signalsResp, messagesResp, alertsResp] = await Promise.all([
-      bmsApi.stats(),
-      bmsApi.signals(),
-      bmsApi.messages(),
-      bmsApi.alerts(100),
+    const stamp = Date.now();
+    const [statsResp, signalsResp, alertsResp] = await Promise.all([
+      bmsApi.stats(stamp),
+      bmsApi.signals(stamp),
+      bmsApi.alerts(100, stamp),
     ]) as any[];
     const nextStats = statsResp?.data || {};
     const nextSignals = normalizeSignalRows(signalsResp?.data || signalsResp || []);
-    const nextMessages = normalizeMessageGroups(messagesResp?.data || messagesResp || {});
     const nextAlerts = normalizeAlerts(alertsResp?.data || alertsResp || []);
-    const signature = buildSignature(nextSignals, nextMessages, nextAlerts);
-
-    stats.value = nextStats;
-    signals.value = nextSignals;
-    messages.value = nextMessages;
-    alerts.value = nextAlerts;
-    lastUpdated.value = Date.now();
-
-    if (signature !== lastSignature) {
-      signalTableKey.value += 1;
-      messageTableKey.value += 1;
-      alertTableKey.value += 1;
-      lastSignature = signature;
-    }
+    applySnapshot(nextStats, nextSignals, nextAlerts);
   } finally {
     loading.value = false;
     reloadInFlight = false;
@@ -190,12 +217,42 @@ async function reload() {
   }
 }
 
+function connectStream() {
+  if (eventSource) {
+    eventSource.close();
+    eventSource = null;
+  }
+  eventSource = new EventSource('/api/bms/stream');
+  eventSource.onopen = () => {
+    streamConnected.value = true;
+  };
+  eventSource.onmessage = (event) => {
+    try {
+      const payload = JSON.parse(event.data || '{}');
+      const nextStats = payload?.stats || stats.value || {};
+      const nextSignals = normalizeSignalRows(payload?.signals || []);
+      applySnapshot(nextStats, nextSignals, alerts.value);
+      streamConnected.value = true;
+    } catch (_err) {
+      streamConnected.value = false;
+    }
+  };
+  eventSource.onerror = () => {
+    streamConnected.value = false;
+  };
+}
+
 onMounted(async () => {
   await reload();
-  reloadTimer = window.setInterval(reload, 3000);
+  connectStream();
+  reloadTimer = window.setInterval(refreshAlerts, 5000);
 });
 
 onBeforeUnmount(() => {
+  if (eventSource) {
+    eventSource.close();
+    eventSource = null;
+  }
   if (reloadTimer != null) {
     window.clearInterval(reloadTimer);
     reloadTimer = null;

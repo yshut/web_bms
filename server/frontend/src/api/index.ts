@@ -159,10 +159,10 @@ export const filesApi = {
 };
 
 export const bmsApi = {
-  stats: () => api.get('/bms/stats'),
-  signals: () => api.get('/bms/signals'),
-  messages: () => api.get('/bms/messages'),
-  alerts: (limit = 100) => api.get('/bms/alerts', { params: { limit } }),
+  stats: (ts?: number) => api.get('/bms/stats', { params: ts ? { _: ts } : undefined }),
+  signals: (ts?: number) => api.get('/bms/signals', { params: ts ? { _: ts } : undefined }),
+  messages: (ts?: number) => api.get('/bms/messages', { params: ts ? { _: ts } : undefined }),
+  alerts: (limit = 100, ts?: number) => api.get('/bms/alerts', { params: { limit, ...(ts ? { _: ts } : {}) } }),
   exportUrl: '/api/bms/export',
 };
 
