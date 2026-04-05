@@ -181,6 +181,11 @@ def _default_rules_db_path() -> str:
 
 RULES_DB_PATH = str(_env_or_json('RULES_DB_PATH', 'rules.db_path', _default_rules_db_path()))
 
+AUTH_ENABLE = _as_bool(_env_or_json('AUTH_ENABLE', 'auth.enable', True), True)
+AUTH_USERNAME = str(_env_or_json('AUTH_USERNAME', 'auth.username', 'admin'))
+AUTH_PASSWORD = str(_env_or_json('AUTH_PASSWORD', 'auth.password', 'yst123456.'))
+AUTH_SECRET_KEY = str(_env_or_json('AUTH_SECRET_KEY', 'auth.secret_key', 'app-lvgl-auth-20260405'))
+
 # 打印配置信息（启动时）
 def print_config():
     """打印当前配置（用于启动时确认）"""
@@ -206,4 +211,5 @@ def print_config():
     print(f"MQTT over WS:    {MQTT_WS_URL or '(not configured)'}")
     print(f"MQTT Topic前缀:  {MQTT_TOPIC_PREFIX}")
     print(f"通信超时:        {SOCKET_TIMEOUT}秒")
+    print(f"登录认证:        {'yes' if AUTH_ENABLE else 'no'}")
     print("="*60 + "\n") 

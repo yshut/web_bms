@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>登录</title>
+  <style>
+    :root{--bg:#0b1220;--panel:#111827;--line:#243041;--text:#e5eefc;--muted:#90a3bf;--acc:#2563eb;--err:#ef4444}
+    *{box-sizing:border-box}
+    html,body{height:100%;margin:0;font-family:Segoe UI,Arial,sans-serif;background:
+      radial-gradient(circle at top,#16315f 0,#0b1220 45%,#070c16 100%);color:var(--text)}
+    body{display:grid;place-items:center;padding:24px}
+    .card{width:min(420px,100%);padding:28px;border:1px solid var(--line);border-radius:18px;background:rgba(17,24,39,.92);box-shadow:0 20px 60px rgba(0,0,0,.35)}
+    h1{margin:0 0 8px;font-size:28px}
+    p{margin:0 0 20px;color:var(--muted);line-height:1.7}
+    label{display:block;margin:0 0 6px;color:var(--muted);font-size:13px}
+    input{width:100%;padding:12px 14px;margin:0 0 16px;border:1px solid var(--line);border-radius:10px;background:#0f172a;color:var(--text);font-size:15px}
+    input:focus{outline:none;border-color:#4f8cff}
+    button{width:100%;padding:12px 14px;border:none;border-radius:10px;background:var(--acc);color:#fff;font-size:15px;font-weight:600;cursor:pointer}
+    button:disabled{opacity:.6;cursor:default}
+    .msg{min-height:22px;margin-top:14px;font-size:14px;color:var(--err)}
+    .hint{margin-top:16px;padding:12px 14px;border:1px solid #22314a;border-radius:12px;background:#0d1627;color:var(--muted);font-size:13px}
+    .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;color:var(--text)}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>系统登录</h1>
+    <p>登录后可访问设备配置、CAN 监控、规则管理和控制台页面。</p>
+    <form id="login-form">
+      <label for="username">用户名</label>
+      <input id="username" name="username" autocomplete="username" value="admin">
+      <label for="password">密码</label>
+      <input id="password" name="password" type="password" autocomplete="current-password" value="yst123456.">
+      <button id="submit-btn" type="submit">登录</button>
+      <div class="msg" id="msg"></div>
+    </form>
+    <div class="hint">
+      默认账号：<span class="mono">admin</span><br>
+      默认密码：<span class="mono">yst123456.</span>
+    </div>
+  </div>
+  <script>
+    (function () {
+      var form = document.getElementById('login-form');
+      var msg = document.getElementById('msg');
+      var button = document.getElementById('submit-btn');
+      var params = new URLSearchParams(window.location.search);
+      var next = params.get('next') || '/';
+
+      form.addEventListener('submit', async function (event) {
+        event.preventDefault();
+        msg.textContent = '';
+        button.disabled = true;
+        try {
+          var resp = await fetch('/api/auth/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              username: document.getElementById('username').value.trim(),
+              password: document.getElementById('password').value,
+              next: next
+            })
+          });
+          var data = await resp.json();
+          if (!resp.ok || !data.ok) {
+            msg.textContent = data.error || '登录失败';
+            return;
+          }
+          window.location.href = data.next || '/';
+        } catch (err) {
+          msg.textContent = '请求失败';
+        } finally {
+          button.disabled = false;
+        }
+      });
+    })();
+  </script>
+</body>
+</html>

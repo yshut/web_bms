@@ -11,9 +11,11 @@ import signal
 import posixpath
 import socket
 import subprocess
-from flask import Flask, request, jsonify, send_from_directory, Response, stream_with_context
+from datetime import timedelta
+from flask import Flask, request, jsonify, send_from_directory, Response, stream_with_context, session, redirect, url_for
 import re
 from typing import Optional, Tuple
+from urllib.parse import quote
 
 # 支持作为包或脚本两种方式运行
 try:
@@ -140,6 +142,10 @@ app = Flask(
     static_folder=os.path.join(SERVER_DIR, 'static'),
     static_url_path='/static'
 )
+app.secret_key = getattr(cfg, 'AUTH_SECRET_KEY', 'app-lvgl-auth-20260405')
+app.config['SESSION_COOKIE_HTTPONLY'] = True
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(days=7)
 
 _rules_db = RulesDB(getattr(cfg, 'RULES_DB_PATH', os.path.join(SERVER_DIR, 'uploads', 'rules.sqlite3')))
 _rules_db.start()
@@ -1238,6 +1244,99 @@ def _parse_can_line_generic(line: str):
 
 # 禁用静态缓存，确保按钮更新立即可见
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
+
+_AUTH_SESSION_KEY = 'auth_user'
+_AUTH_PUBLIC_PATHS = {
+    '/login',
+    '/api/auth/login',
+    '/api/auth/logout',
+    '/api/auth/status',
+}
+
+
+def _auth_enabled() -> bool:
+    return bool(getattr(cfg, 'AUTH_ENABLE', True))
+
+
+def _is_authenticated() -> bool:
+    if not _auth_enabled():
+        return True
+    return bool(str(session.get(_AUTH_SESSION_KEY, '') or '').strip())
+
+
+def _is_public_request_path(path: str) -> bool:
+    path = str(path or '').strip() or '/'
+    if path in _AUTH_PUBLIC_PATHS:
+        return True
+    if path.startswith('/static/') and path.endswith('/login.html'):
+        return True
+    return False
+
+
+def _login_redirect_response():
+    target = str(request.full_path or request.path or '/').strip() or '/'
+    if target.endswith('?'):
+        target = target[:-1]
+    return redirect(f"{url_for('login_page')}?next={quote(target, safe='/?=&')}")
+
+
+@app.before_request
+def require_login():
+    if not _auth_enabled():
+        return None
+    if _is_public_request_path(request.path):
+        return None
+    if _is_authenticated():
+        return None
+    if request.path.startswith('/api/'):
+        return jsonify({
+            'ok': False,
+            'error': 'authentication required',
+            'login_url': url_for('login_page'),
+        }), 401
+    return _login_redirect_response()
+
+
+@app.route('/login')
+def login_page():
+    if _is_authenticated():
+        next_url = str(request.args.get('next') or '/').strip() or '/'
+        return redirect(next_url)
+    resp = send_from_directory(app.static_folder, 'login.html')
+    resp.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+    resp.headers['Pragma'] = 'no-cache'
+    return resp
+
+
+@app.route('/api/auth/status', methods=['GET'])
+def auth_status():
+    return jsonify({
+        'ok': True,
+        'authenticated': _is_authenticated(),
+        'username': session.get(_AUTH_SESSION_KEY) if _is_authenticated() else None,
+    })
+
+
+@app.route('/api/auth/login', methods=['POST'])
+def auth_login():
+    body = request.get_json(silent=True) or {}
+    username = str(body.get('username') or '').strip()
+    password = str(body.get('password') or '')
+    if username == getattr(cfg, 'AUTH_USERNAME', 'admin') and password == getattr(cfg, 'AUTH_PASSWORD', 'yst123456.'):
+        session.permanent = True
+        session[_AUTH_SESSION_KEY] = username
+        return jsonify({
+            'ok': True,
+            'username': username,
+            'next': str(body.get('next') or '/').strip() or '/',
+        })
+    return jsonify({'ok': False, 'error': '用户名或密码错误'}), 401
+
+
+@app.route('/api/auth/logout', methods=['POST'])
+def auth_logout():
+    session.pop(_AUTH_SESSION_KEY, None)
+    return jsonify({'ok': True})
 
 
 @app.route('/')

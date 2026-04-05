@@ -37,6 +37,7 @@
           <span v-if="systemStore.deviceId" class="device-info">
             设备: {{ systemStore.deviceId }}
           </span>
+          <el-button size="small" @click="logout">退出</el-button>
         </div>
       </el-header>
 
@@ -51,6 +52,7 @@
 import { computed } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useSystemStore } from '@/stores/system';
+import { ElMessage } from 'element-plus';
 
 const route = useRoute();
 const router = useRouter();
@@ -65,6 +67,15 @@ const activeMenu = computed(() => route.path);
 const currentPageTitle = computed(() => {
   return route.meta?.title as string || '控制台';
 });
+
+async function logout() {
+  try {
+    await fetch('/api/auth/logout', { method: 'POST' });
+    window.location.href = '/login';
+  } catch (error) {
+    ElMessage.error('退出失败');
+  }
+}
 </script>
 
 <style scoped>
@@ -123,4 +134,3 @@ const currentPageTitle = computed(() => {
   overflow-y: auto;
 }
 </style>
-
