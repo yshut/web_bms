@@ -91,6 +91,10 @@ export const wsApi = {
   removeHistory: (ids: string[]) => api.post('/ws/history/remove', { ids }),
 };
 
+export const deviceApi = {
+  list: () => api.get('/device/list'),
+};
+
 export const rulesApi = {
   query: (params: {
     device_id?: string;
@@ -108,6 +112,8 @@ export const rulesApi = {
       headers: { 'Content-Type': 'multipart/form-data' },
     });
   },
+  pushLocal: (deviceId?: string) =>
+    api.post(`/rules/push_local${deviceId ? `?device_id=${encodeURIComponent(deviceId)}` : ''}`),
   exportExcelUrl: (deviceId?: string) =>
     `/api/rules/export_excel${deviceId ? `?device_id=${encodeURIComponent(deviceId)}` : ''}`,
   templateUrl: '/api/rules/template',
