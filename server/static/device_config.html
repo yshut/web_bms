@@ -85,6 +85,7 @@ table tr:hover td{background:#1e293b55}
   <button class="active" onclick="sw('hw',this)">硬件监控</button>
   <button onclick="sw('sys',this)">系统配置</button>
   <button onclick="sw('net',this)">网络配置</button>
+  <button onclick="sw('wifi',this)">WiFi 配置</button>
   <button onclick="sw('can',this)">CAN 配置</button>
   <button onclick="sw('rules',this)">CAN-MQTT 规则</button>
   <button onclick="sw('mon',this)">CAN 监控</button>
@@ -149,6 +150,12 @@ table tr:hover td{background:#1e293b55}
       <div><label class="lbl">用户名</label><input id="m-user"></div>
       <div><label class="lbl">密码</label><input id="m-pass" type="password"></div>
     </div>
+    <div class="row">
+      <div><label class="lbl">TLS</label>
+        <select id="m-tls"><option value="false">关闭</option><option value="true">开启</option></select>
+      </div>
+      <div></div>
+    </div>
   </div>
   <div class="card">
     <h3>WebSocket 配置</h3>
@@ -156,7 +163,16 @@ table tr:hover td{background:#1e293b55}
       <div><label class="lbl">服务器地址</label><input id="w-host" placeholder="cloud.yshut.cn"></div>
       <div><label class="lbl">端口</label><input id="w-port" type="number" value="5052"></div>
     </div>
-    <div class="row w1"><div><label class="lbl">路径</label><input id="w-path" value="/ws"></div></div>
+    <div class="row">
+      <div><label class="lbl">路径</label><input id="w-path" value="/ws"></div>
+      <div><label class="lbl">SSL</label>
+        <select id="w-ssl"><option value="false">关闭</option><option value="true">开启</option></select>
+      </div>
+    </div>
+    <div class="row">
+      <div><label class="lbl">重连间隔 (ms)</label><input id="w-rm" type="number" value="4000"></div>
+      <div><label class="lbl">Keepalive (s)</label><input id="w-ka" type="number" value="20"></div>
+    </div>
   </div>
   <button class="btn btn-p" onclick="saveSys()">保存（重启后生效）</button>
   <button class="btn btn-s" onclick="loadSys()" style="margin-left:8px">重新加载</button>
@@ -183,11 +199,48 @@ table tr:hover td{background:#1e293b55}
       </div>
       <div class="row w1"><div><label class="lbl">默认网关</label><input id="n-gw" placeholder="192.168.100.1"></div></div>
     </div>
+    <div class="row w1"><div><label class="lbl">WiFi 接口</label><input id="n-wifi-iface" value="wlan0"></div></div>
   </div>
   <button class="btn btn-p" onclick="saveNet()">保存并应用</button>
   <button class="btn btn-s" onclick="loadNet()" style="margin-left:8px">重新加载</button>
   <div class="msg" id="net-msg"></div>
   <p style="color:var(--warn);font-size:12px;margin-top:8px">应用网络配置后，设备可能会短暂离线；如果修改了设备 IP，请确保设备仍能连接到当前服务器和 MQTT Broker。</p>
+</div>
+
+<!-- ===== WiFi 配置 ===== -->
+<div id="tab-wifi" class="tab">
+  <div class="card">
+    <h3>连接状态</h3>
+    <div class="info-grid">
+      <span class="ik">链路</span><span class="iv" id="wf-state">--</span>
+      <span class="ik">当前 SSID</span><span class="iv" id="wf-current">--</span>
+      <span class="ik">当前 IP</span><span class="iv" id="wf-ip">--</span>
+      <span class="ik">网关</span><span class="iv" id="wf-gw">--</span>
+      <span class="ik">云端可达</span><span class="iv" id="wf-cloud">--</span>
+    </div>
+  </div>
+  <div class="card">
+    <h3>WiFi 参数</h3>
+    <div class="row">
+      <div><label class="lbl">接口</label><input id="wf-iface" value="wlan0"></div>
+      <div><label class="lbl">SSID</label><input id="wf-ssid" placeholder="输入 WiFi 名称"></div>
+    </div>
+    <div class="row w1">
+      <div><label class="lbl">密码</label><input id="wf-psk" type="password" placeholder="开放网络可留空"></div>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn btn-p" onclick="saveWifi(false)">保存配置</button>
+      <button class="btn btn-p" onclick="saveWifi(true)">保存并连接</button>
+      <button class="btn btn-s" onclick="disconnectWifi()">断开连接</button>
+      <button class="btn btn-s" onclick="scanWifi()">扫描网络</button>
+      <button class="btn btn-s" onclick="loadWifi()">重新加载</button>
+    </div>
+    <div class="msg" id="wifi-msg"></div>
+  </div>
+  <div class="card">
+    <h3>扫描结果</h3>
+    <div id="wf-list" style="font-size:13px;color:var(--txt2)">点击“扫描网络”获取附近 WiFi</div>
+  </div>
 </div>
 
 <!-- ===== CAN 配置 ===== -->
@@ -235,6 +288,7 @@ table tr:hover td{background:#1e293b55}
       <div><label class="lbl">录制目录</label><input id="c-rdir" value="/mnt/SDCARD/can_records"></div>
       <div><label class="lbl">单文件最大 (MB)</label><input id="c-rmb" type="number" value="40"></div>
     </div>
+    <div class="row w1"><div><label class="lbl">刷盘间隔 (ms)</label><input id="c-rflush" type="number" value="200"></div></div>
   </div>
   <button class="btn btn-p" onclick="saveCan()">保存</button>
   <button class="btn btn-s" onclick="loadSys()" style="margin-left:8px">重新加载</button>
@@ -346,6 +400,7 @@ table tr:hover td{background:#1e293b55}
 
 <script>
 var gDeviceId = '';
+var gDeviceIp = '';
 var gMonTimer = null, gMonRows = [], gMonRunning = false;
 var gr = {version:1, rules:[]}, gei = -1;
 var gApiMap = {
@@ -353,6 +408,9 @@ var gApiMap = {
   hardware: '/api/device/remote/hardware',
   config: '/api/device/remote/config',
   network: '/api/device/remote/network',
+  wifi: '/api/device/remote/wifi',
+  wifi_scan: '/api/device/remote/wifi/scan',
+  wifi_disconnect: '/api/device/remote/wifi/disconnect',
   rules: '/api/device/remote/rules',
   can_frames: '/api/can/frames'
 };
@@ -361,6 +419,7 @@ function api(path, opts) {
   var url = gApiMap[path] || path;
   if(url.charAt(0) !== '/') url = '/api/device/remote/' + path;
   if(gDeviceId) url += (url.indexOf('?') >= 0 ? '&' : '?') + 'device_id=' + encodeURIComponent(gDeviceId);
+  if(gDeviceIp) url += (url.indexOf('?') >= 0 ? '&' : '?') + 'device=' + encodeURIComponent(gDeviceIp);
   return fetch(url, opts || {});
 }
 
@@ -398,6 +457,7 @@ async function loadBuildInfo() {
 function onDeviceChange() {
   var sel = document.getElementById('device-id');
   gDeviceId = (sel && sel.value || '').trim();
+  gDeviceIp = '';
 }
 
 async function refreshDeviceList(preferredId) {
@@ -465,6 +525,7 @@ function sw(n, b) {
   if(n==='hw') loadHw();
   if(n==='sys'||n==='can') loadSys();
   if(n==='net') loadNet();
+  if(n==='wifi') loadWifi();
   if(n==='rules') loadRules();
   if(n==='mon') startMon();
 }
@@ -492,6 +553,7 @@ async function connectDevice() {
     if (d.connected || d.ok) {
       document.getElementById('conn-dot').style.background = 'var(--ok)';
       document.getElementById('conn-label').textContent = 'Connected';
+      if(d.device_ip) gDeviceIp = d.device_ip;
       document.getElementById('dev-info').innerHTML =
         '<b>ID:</b> '+(d.device_id||gDeviceId||'--')+
         ' &nbsp; <b>Uptime:</b> '+fu(d.uptime_seconds||0)+
@@ -552,6 +614,7 @@ async function loadHw() {
     networkList.forEach(function(n){
       nh += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">';
       var connected = typeof n.is_connected === 'boolean' ? n.is_connected : !!n.connected;
+      if(!gDeviceIp && connected && (n.ip_address || n.ip)) gDeviceIp = n.ip_address || n.ip;
       nh += '<span class="status-dot '+(connected?'dok':'derr')+'"></span>';
       nh += '<b>'+n.interface+'</b> '+(n.ip_address||n.ip||'无IP');
       nh += ' <span style="color:var(--txt2)">'+(connected?'已连接':'未连接')+'</span></div>';
@@ -586,15 +649,20 @@ async function loadSys() {
     document.getElementById('m-ka').value = d.mqtt_keepalive || 60;
     document.getElementById('m-user').value = d.mqtt_username || '';
     document.getElementById('m-pass').value = d.mqtt_password || '';
+    document.getElementById('m-tls').value = d.mqtt_use_tls ? 'true' : 'false';
     document.getElementById('w-host').value = d.ws_host || '';
     document.getElementById('w-port').value = d.ws_port || 5052;
     document.getElementById('w-path').value = d.ws_path || '/ws';
+    document.getElementById('w-ssl').value = d.ws_use_ssl ? 'true' : 'false';
+    document.getElementById('w-rm').value = d.ws_reconnect_interval_ms || 4000;
+    document.getElementById('w-ka').value = d.ws_keepalive_interval_s || 20;
     document.getElementById('c0-baud').value = String(d.can0_bitrate || 500000);
     document.getElementById('c1-baud').value = String(d.can1_bitrate || 500000);
     document.getElementById('c0-auto').value = d.can0_bitrate === 0 ? 'true' : 'false';
     document.getElementById('c1-auto').value = d.can1_bitrate === 0 ? 'true' : 'false';
     document.getElementById('c-rdir').value = d.can_record_dir || '';
     document.getElementById('c-rmb').value = d.can_record_max_mb || 40;
+    document.getElementById('c-rflush').value = d.can_record_flush_ms || 200;
   } catch(e) {}
 }
 
@@ -610,9 +678,13 @@ async function saveSys() {
     mqtt_keepalive: parseInt(document.getElementById('m-ka').value)||60,
     mqtt_username: document.getElementById('m-user').value,
     mqtt_password: document.getElementById('m-pass').value,
+    mqtt_use_tls: document.getElementById('m-tls').value === 'true',
     ws_host: document.getElementById('w-host').value,
     ws_port: parseInt(document.getElementById('w-port').value)||5052,
-    ws_path: document.getElementById('w-path').value
+    ws_path: document.getElementById('w-path').value,
+    ws_use_ssl: document.getElementById('w-ssl').value === 'true',
+    ws_reconnect_interval_ms: parseInt(document.getElementById('w-rm').value)||4000,
+    ws_keepalive_interval_s: parseInt(document.getElementById('w-ka').value)||20
   };
   try {
     var r = await api('config', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
@@ -628,7 +700,8 @@ async function saveCan() {
     can0_bitrate: a0 ? 0 : parseInt(document.getElementById('c0-baud').value),
     can1_bitrate: a1 ? 0 : parseInt(document.getElementById('c1-baud').value),
     can_record_dir: document.getElementById('c-rdir').value,
-    can_record_max_mb: parseInt(document.getElementById('c-rmb').value) || 40
+    can_record_max_mb: parseInt(document.getElementById('c-rmb').value) || 40,
+    can_record_flush_ms: parseInt(document.getElementById('c-rflush').value) || 200
   };
   try {
     var r = await api('config', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
@@ -648,6 +721,7 @@ async function loadNet() {
     document.getElementById('n-ip').value = d.net_ip || '';
     document.getElementById('n-mask').value = d.net_netmask || '';
     document.getElementById('n-gw').value = d.net_gateway || '';
+    document.getElementById('n-wifi-iface').value = d.wifi_iface || 'wlan0';
     tDhcp();
   } catch(e) {}
 }
@@ -660,7 +734,8 @@ async function saveNet() {
     net_use_dhcp: dh,
     net_ip: document.getElementById('n-ip').value,
     net_netmask: document.getElementById('n-mask').value,
-    net_gateway: document.getElementById('n-gw').value
+    net_gateway: document.getElementById('n-gw').value,
+    wifi_iface: document.getElementById('n-wifi-iface').value
   };
   try {
     var r = await api('network', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
@@ -668,6 +743,93 @@ async function saveNet() {
     sm('net-msg', d.ok, d.ok ? '网络配置已保存并应用' : (d.error || '保存失败'));
   } catch(e) {
     sm('net-msg', false, '请求失败');
+  }
+}
+
+async function loadWifi() {
+  try {
+    var r = await api('wifi'), d = await r.json();
+    document.getElementById('wf-iface').value = d.wifi_iface || 'wlan0';
+    document.getElementById('wf-ssid').value = d.wifi_ssid || '';
+    document.getElementById('wf-psk').value = d.wifi_psk || '';
+    document.getElementById('wf-state').innerHTML =
+      d.connected ? '<span class="badge bok">已连接</span>' :
+      (d.associated ? '<span class="badge bwarn">已关联未取 IP</span>' : '<span class="badge berr">未连接</span>');
+    document.getElementById('wf-current').textContent = d.current_ssid || d.ssid || '--';
+    document.getElementById('wf-ip').textContent = d.current_ip || '--';
+    document.getElementById('wf-gw').textContent = d.gateway || '--';
+    document.getElementById('wf-cloud').innerHTML =
+      d.cloud_reachable ? '<span class="badge bok">可达</span>' : '<span class="badge berr">不可达</span>';
+    if(!gDeviceIp && d.current_ip) gDeviceIp = d.current_ip;
+  } catch(e) {
+    sm('wifi-msg', false, '请求失败');
+  }
+}
+
+async function saveWifi(connectNow) {
+  var body = {
+    wifi_iface: document.getElementById('wf-iface').value,
+    ssid: document.getElementById('wf-ssid').value,
+    password: document.getElementById('wf-psk').value,
+    connect: !!connectNow
+  };
+  try {
+    var r = await api('wifi', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+    var d = await r.json();
+    sm('wifi-msg', d.ok, d.ok ? (connectNow ? 'WiFi 配置已保存并发起连接' : 'WiFi 配置已保存') : (d.error || '保存失败'));
+    if(d.ok) loadWifi();
+  } catch(e) {
+    sm('wifi-msg', false, '请求失败');
+  }
+}
+
+async function disconnectWifi() {
+  try {
+    var r = await api('wifi_disconnect', {method:'POST'});
+    var d = await r.json();
+    sm('wifi-msg', d.ok, d.ok ? '已断开 WiFi' : (d.error || '断开失败'));
+    if(d.ok) loadWifi();
+  } catch(e) {
+    sm('wifi-msg', false, '请求失败');
+  }
+}
+
+function pickWifi(ssid) {
+  document.getElementById('wf-ssid').value = ssid || '';
+}
+
+async function scanWifi() {
+  var box = document.getElementById('wf-list');
+  box.textContent = '正在扫描...';
+  try {
+    var r = await api('wifi_scan', {method:'POST'});
+    var d = await r.json();
+    var list = d.networks || [];
+    if(!d.ok) {
+      box.textContent = '扫描失败';
+      sm('wifi-msg', false, d.error || '扫描失败');
+      return;
+    }
+    if(!list.length) {
+      box.textContent = '未发现 WiFi';
+      return;
+    }
+    box.innerHTML = list.map(function(n, idx){
+      var ssid = String((n && n.ssid) || '');
+      return '<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid #334155">' +
+        '<span>' + escH(ssid) + '</span>' +
+        '<button class="btn btn-s" style="padding:4px 10px" data-idx="' + idx + '">使用</button>' +
+      '</div>';
+    }).join('');
+    box.querySelectorAll('button[data-idx]').forEach(function(btn){
+      btn.onclick = function(){
+        var idx = parseInt(btn.getAttribute('data-idx'), 10) || 0;
+        pickWifi(String((list[idx] && list[idx].ssid) || ''));
+      };
+    });
+  } catch(e) {
+    box.textContent = '扫描失败';
+    sm('wifi-msg', false, '请求失败');
   }
 }
 

@@ -396,6 +396,9 @@ _DEVICE_CONFIG_DEFAULTS = {
     'ws_host': 'cloud.yshut.cn',
     'ws_port': '5052',
     'ws_path': '/ws',
+    'ws_use_ssl': 'false',
+    'ws_reconnect_interval_ms': '4000',
+    'ws_keepalive_interval_s': '20',
     'mqtt_host': 'cloud.yshut.cn',
     'mqtt_port': '1883',
     'mqtt_topic_prefix': 'app_lvgl',
@@ -404,10 +407,12 @@ _DEVICE_CONFIG_DEFAULTS = {
     'mqtt_keepalive_s': '30',
     'mqtt_username': '',
     'mqtt_password': '',
+    'mqtt_use_tls': 'false',
     'can0_bitrate': '500000',
     'can1_bitrate': '500000',
     'can_record_dir': '/mnt/SDCARD/can_records',
     'can_record_max_mb': '40',
+    'can_record_flush_ms': '200',
 }
 _DEVICE_NETWORK_DEFAULTS = {
     'iface': 'auto',
@@ -3590,13 +3595,18 @@ def device_remote_config():
             'mqtt_keepalive': _to_int(current.get('mqtt_keepalive_s', current.get('mqtt_keepalive', 30)), 30),
             'mqtt_username': current.get('mqtt_username', ''),
             'mqtt_password': current.get('mqtt_password', ''),
+            'mqtt_use_tls': _to_bool(current.get('mqtt_use_tls', False)),
             'ws_host': current.get('ws_host', _DEVICE_CONFIG_DEFAULTS['ws_host']),
             'ws_port': _to_int(current.get('ws_port'), 5052),
             'ws_path': current.get('ws_path', '/ws'),
+            'ws_use_ssl': _to_bool(current.get('ws_use_ssl', False)),
+            'ws_reconnect_interval_ms': _to_int(current.get('ws_reconnect_interval_ms'), 4000),
+            'ws_keepalive_interval_s': _to_int(current.get('ws_keepalive_interval_s', current.get('ws_keepalive', 20)), 20),
             'can0_bitrate': _to_int(current.get('can0_bitrate'), 500000),
             'can1_bitrate': _to_int(current.get('can1_bitrate'), 500000),
             'can_record_dir': current.get('can_record_dir', _DEVICE_CONFIG_DEFAULTS['can_record_dir']),
             'can_record_max_mb': _to_int(current.get('can_record_max_mb'), 40),
+            'can_record_flush_ms': _to_int(current.get('can_record_flush_ms'), 200),
             'source': source,
             'path': target_path,
         })
@@ -3616,18 +3626,26 @@ def device_remote_config():
     updated['mqtt_username'] = str(body.get('mqtt_username', updated.get('mqtt_username', '')) or '')
     if 'mqtt_password' in body:
         updated['mqtt_password'] = str(body.get('mqtt_password') or '')
+    updated['mqtt_use_tls'] = 'true' if _to_bool(body.get('mqtt_use_tls', updated.get('mqtt_use_tls', False))) else 'false'
     updated['ws_host'] = str(body.get('ws_host', updated.get('ws_host', _DEVICE_CONFIG_DEFAULTS['ws_host'])) or _DEVICE_CONFIG_DEFAULTS['ws_host'])
     updated['ws_port'] = str(_to_int(body.get('ws_port', updated.get('ws_port', 5052)), 5052))
     updated['ws_path'] = str(body.get('ws_path', updated.get('ws_path', '/ws')) or '/ws')
+    updated['ws_use_ssl'] = 'true' if _to_bool(body.get('ws_use_ssl', updated.get('ws_use_ssl', False))) else 'false'
+    updated['ws_reconnect_interval_ms'] = str(max(100, _to_int(body.get('ws_reconnect_interval_ms', updated.get('ws_reconnect_interval_ms', 4000)), 4000)))
+    updated['ws_keepalive_interval_s'] = str(max(1, _to_int(body.get('ws_keepalive_interval_s', updated.get('ws_keepalive_interval_s', 20)), 20)))
     updated['can0_bitrate'] = str(_to_int(body.get('can0_bitrate', updated.get('can0_bitrate', 500000)), 500000))
     updated['can1_bitrate'] = str(_to_int(body.get('can1_bitrate', updated.get('can1_bitrate', 500000)), 500000))
     updated['can_record_dir'] = str(body.get('can_record_dir', updated.get('can_record_dir', _DEVICE_CONFIG_DEFAULTS['can_record_dir'])) or _DEVICE_CONFIG_DEFAULTS['can_record_dir'])
     updated['can_record_max_mb'] = str(max(1, _to_int(body.get('can_record_max_mb', updated.get('can_record_max_mb', 40)), 40)))
+    updated['can_record_flush_ms'] = str(max(1, _to_int(body.get('can_record_flush_ms', updated.get('can_record_flush_ms', 200)), 200)))
 
     ordered_keys = [
-        'transport_mode', 'ws_host', 'ws_port', 'ws_path', 'mqtt_host', 'mqtt_port',
-        'mqtt_client_id', 'mqtt_username', 'mqtt_password', 'mqtt_keepalive_s', 'mqtt_qos',
-        'mqtt_topic_prefix', 'can0_bitrate', 'can1_bitrate', 'can_record_dir', 'can_record_max_mb'
+        'transport_mode', 'ws_host', 'ws_port', 'ws_path', 'ws_use_ssl',
+        'ws_reconnect_interval_ms', 'ws_keepalive_interval_s',
+        'mqtt_host', 'mqtt_port', 'mqtt_client_id', 'mqtt_username', 'mqtt_password',
+        'mqtt_keepalive_s', 'mqtt_qos', 'mqtt_topic_prefix', 'mqtt_use_tls',
+        'can0_bitrate', 'can1_bitrate', 'can_record_dir', 'can_record_max_mb',
+        'can_record_flush_ms'
     ]
     content = _serialize_kv_config(updated, ordered_keys).encode('utf-8')
     resp = _remote_fs_write(target_path, content, device_id=device_id)
@@ -3647,6 +3665,7 @@ def device_remote_network():
             'net_ip': current.get('ip', current.get('net_ip', _DEVICE_NETWORK_DEFAULTS['ip'])),
             'net_netmask': current.get('netmask', current.get('net_netmask', _DEVICE_NETWORK_DEFAULTS['netmask'])),
             'net_gateway': current.get('gateway', current.get('net_gateway', _DEVICE_NETWORK_DEFAULTS['gateway'])),
+            'wifi_iface': current.get('wifi_iface', _DEVICE_NETWORK_DEFAULTS['wifi_iface']),
             'source': source,
             'path': target_path,
         })
@@ -3661,14 +3680,87 @@ def device_remote_network():
     updated['ip'] = str(body.get('net_ip', updated.get('ip', updated.get('net_ip', _DEVICE_NETWORK_DEFAULTS['ip']))) or _DEVICE_NETWORK_DEFAULTS['ip'])
     updated['netmask'] = str(body.get('net_netmask', updated.get('netmask', updated.get('net_netmask', _DEVICE_NETWORK_DEFAULTS['netmask']))) or _DEVICE_NETWORK_DEFAULTS['netmask'])
     updated['gateway'] = str(body.get('net_gateway', updated.get('gateway', updated.get('net_gateway', _DEVICE_NETWORK_DEFAULTS['gateway']))) or _DEVICE_NETWORK_DEFAULTS['gateway'])
-    if 'wifi_iface' not in updated:
-        updated['wifi_iface'] = _DEVICE_NETWORK_DEFAULTS['wifi_iface']
+    updated['wifi_iface'] = str(body.get('wifi_iface', updated.get('wifi_iface', _DEVICE_NETWORK_DEFAULTS['wifi_iface'])) or _DEVICE_NETWORK_DEFAULTS['wifi_iface'])
 
     ordered_keys = ['dhcp', 'ip', 'netmask', 'gateway', 'iface', 'wifi_iface']
     content = _serialize_kv_config(updated, ordered_keys).encode('utf-8')
     resp = _remote_fs_write(target_path, content, device_id=device_id)
     ok = bool(isinstance(resp, dict) and resp.get('ok'))
     return jsonify({'ok': ok, 'saved_path': target_path, 'restart_required': True, 'applied': False, 'device': resp})
+
+
+@app.route('/api/device/remote/wifi', methods=['GET', 'POST'])
+def device_remote_wifi():
+    device_id = _get_requested_device_id()
+    device_ip = _normalize_device_ip(request.args.get('device', DEVICE_DEFAULT_IP))
+
+    if request.method == 'GET':
+        ok, j = _device_proxy_json(device_ip, '/api/wifi', 'GET', timeout=5)
+        if ok and isinstance(j, dict):
+            return jsonify(j)
+        resp = qt_request({"cmd": "wifi_status"}, timeout=5.0, device_id=device_id)
+        return jsonify(resp if isinstance(resp, dict) else {"ok": False, "error": "wifi status failed", "http": j})
+
+    body = request.get_json(silent=True) or {}
+    if not isinstance(body, dict):
+        return jsonify({'ok': False, 'error': 'invalid body'}), 400
+
+    iface = str(body.get('wifi_iface') or '').strip()
+    ssid = str(body.get('ssid') or '').strip()
+    password = str(body.get('password') or '')
+    do_connect = _to_bool(body.get('connect', False))
+
+    http_body = json.dumps({
+        "wifi_iface": iface,
+        "ssid": ssid,
+        "password": password,
+        "connect": bool(do_connect),
+    }).encode('utf-8')
+    ok, j = _device_proxy_json(device_ip, '/api/wifi', 'POST', http_body, 'application/json', timeout=15)
+    if ok and isinstance(j, dict):
+        return jsonify(j)
+
+    config_resp = qt_request({
+        "cmd": "wifi_connect",
+        "ssid": ssid,
+        "password": password,
+    }, timeout=15.0, device_id=device_id) if do_connect and ssid else {"ok": True, "connect_requested": False}
+
+    if iface:
+        current, target_path, _source = _load_remote_config_map(_DEVICE_NET_CONFIG_PATHS, _DEVICE_NETWORK_DEFAULTS, device_id=device_id, allow_legacy=False)
+        updated = dict(current)
+        updated['wifi_iface'] = iface
+        content = _serialize_kv_config(updated, ['dhcp', 'ip', 'netmask', 'gateway', 'iface', 'wifi_iface']).encode('utf-8')
+        fs_resp = _remote_fs_write(target_path, content, device_id=device_id)
+        if not (isinstance(fs_resp, dict) and fs_resp.get('ok')):
+            return jsonify({'ok': False, 'error': 'wifi iface save failed', 'device': fs_resp})
+
+    status_resp = qt_request({"cmd": "wifi_status"}, timeout=5.0, device_id=device_id)
+    result = status_resp if isinstance(status_resp, dict) else {"ok": False, "error": "wifi status failed"}
+    if isinstance(result, dict):
+        result.setdefault('connect_result', config_resp)
+        result.setdefault('connect_requested', bool(do_connect and ssid))
+    return jsonify(result)
+
+
+@app.route('/api/device/remote/wifi/scan', methods=['POST'])
+def device_remote_wifi_scan():
+    device_id = _get_requested_device_id()
+    device_ip = _normalize_device_ip(request.args.get('device', DEVICE_DEFAULT_IP))
+    ok, j = _device_proxy_json(device_ip, '/api/wifi/scan', 'POST', b'', 'application/json', timeout=10)
+    if ok and isinstance(j, dict):
+        return jsonify(j)
+    return jsonify(qt_request({"cmd": "wifi_scan"}, timeout=10.0, device_id=device_id))
+
+
+@app.route('/api/device/remote/wifi/disconnect', methods=['POST'])
+def device_remote_wifi_disconnect():
+    device_id = _get_requested_device_id()
+    device_ip = _normalize_device_ip(request.args.get('device', DEVICE_DEFAULT_IP))
+    ok, j = _device_proxy_json(device_ip, '/api/wifi/disconnect', 'POST', b'', 'application/json', timeout=8)
+    if ok and isinstance(j, dict):
+        return jsonify(j)
+    return jsonify(qt_request({"cmd": "wifi_disconnect"}, timeout=8.0, device_id=device_id))
 
 
 @app.route('/api/device/remote/rules', methods=['GET', 'POST'])
@@ -3745,6 +3837,7 @@ def device_can_config():
                 "can1_bitrate": _to_int(current.get("can1_bitrate"), _CAN_CONFIG_DEFAULTS["can1_bitrate"]),
                 "can_record_dir": current.get("can_record_dir", _CAN_CONFIG_DEFAULTS["can_record_dir"]),
                 "can_record_max_mb": _to_int(current.get("can_record_max_mb"), _CAN_CONFIG_DEFAULTS["can_record_max_mb"]),
+                "can_record_flush_ms": _to_int(current.get("can_record_flush_ms"), _DEVICE_CONFIG_DEFAULTS["can_record_flush_ms"]),
             }
             try:
                 if _state_store:
@@ -3761,6 +3854,7 @@ def device_can_config():
                 "can1_bitrate":     int(j.get("can1_bitrate") or _CAN_CONFIG_DEFAULTS["can1_bitrate"]),
                 "can_record_dir":   j.get("can_record_dir",   _CAN_CONFIG_DEFAULTS["can_record_dir"]),
                 "can_record_max_mb":int(j.get("can_record_max_mb") or _CAN_CONFIG_DEFAULTS["can_record_max_mb"]),
+                "can_record_flush_ms": int(j.get("can_record_flush_ms") or _DEVICE_CONFIG_DEFAULTS["can_record_flush_ms"]),
             }
             try:
                 if _state_store:
@@ -3787,6 +3881,7 @@ def device_can_config():
         "can1_bitrate":     int(data.get("can1_bitrate") or _CAN_CONFIG_DEFAULTS["can1_bitrate"]),
         "can_record_dir":   str(data.get("can_record_dir",   _CAN_CONFIG_DEFAULTS["can_record_dir"])),
         "can_record_max_mb":int(data.get("can_record_max_mb") or _CAN_CONFIG_DEFAULTS["can_record_max_mb"]),
+        "can_record_flush_ms": int(data.get("can_record_flush_ms") or _DEVICE_CONFIG_DEFAULTS["can_record_flush_ms"]),
     }
     current, target_path, _source = _load_remote_config_map(_DEVICE_WS_CONFIG_PATHS, _DEVICE_CONFIG_DEFAULTS, device_id=device_id, allow_legacy=True)
     updated = dict(current)
@@ -3794,10 +3889,14 @@ def device_can_config():
     updated['can1_bitrate'] = str(cfg['can1_bitrate'])
     updated['can_record_dir'] = cfg['can_record_dir']
     updated['can_record_max_mb'] = str(cfg['can_record_max_mb'])
+    updated['can_record_flush_ms'] = str(cfg['can_record_flush_ms'])
     ordered_keys = [
-        'transport_mode', 'ws_host', 'ws_port', 'ws_path', 'mqtt_host', 'mqtt_port',
-        'mqtt_client_id', 'mqtt_username', 'mqtt_password', 'mqtt_keepalive_s', 'mqtt_qos',
-        'mqtt_topic_prefix', 'can0_bitrate', 'can1_bitrate', 'can_record_dir', 'can_record_max_mb'
+        'transport_mode', 'ws_host', 'ws_port', 'ws_path', 'ws_use_ssl',
+        'ws_reconnect_interval_ms', 'ws_keepalive_interval_s',
+        'mqtt_host', 'mqtt_port', 'mqtt_client_id', 'mqtt_username', 'mqtt_password',
+        'mqtt_keepalive_s', 'mqtt_qos', 'mqtt_topic_prefix', 'mqtt_use_tls',
+        'can0_bitrate', 'can1_bitrate', 'can_record_dir', 'can_record_max_mb',
+        'can_record_flush_ms'
     ]
     content = _serialize_kv_config(updated, ordered_keys).encode('utf-8')
     remote_resp = _remote_fs_write(target_path, content, device_id=device_id)
