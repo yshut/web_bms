@@ -14,7 +14,7 @@
     "host": "127.0.0.1",
     "port": 1883,
     "ws_port": 9001,
-    "ws_url": "ws://192.168.100.1:9001",
+    "ws_url": "ws://cloud.yshut.cn:9001",
     "embedded_broker": false,
     "embedded_bind_host": "0.0.0.0",
     "embedded_port": 1883,

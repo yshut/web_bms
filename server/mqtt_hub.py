@@ -42,6 +42,8 @@ class MQTTHub:
         self._startup_error: Optional[str] = None
         self._device_id: Optional[str] = None
         self._last_events: Dict[str, dict] = {}
+        self._device_events: Dict[str, Dict[str, dict]] = {}
+        self._device_states: Dict[str, bool] = {}
         self._history_ids: Set[str] = set()
         self._pending: Dict[str, dict] = {}
         self._id = 0
@@ -123,22 +125,36 @@ class MQTTHub:
         except Exception:
             pass
 
-    def info(self) -> dict:
+    def info(self, device_id: Optional[str] = None) -> dict:
         last_can_ts = None
+        selected_id = str(device_id or self._device_id or "").strip() or None
         try:
             with self._lock:
                 if self._can_data_cache:
                     last_can_ts = self._can_data_cache[-1].get("timestamp")
+                selected_events = dict(self._device_events.get(selected_id, {})) if selected_id else dict(self._last_events)
+                device_states = dict(self._device_states)
+                history = sorted(self._history_ids)
+                current_device_id = self._device_id
         except Exception:
             last_can_ts = None
+            selected_events = dict(self._last_events)
+            device_states = {}
+            history = list(self._history_ids)
+            current_device_id = self._device_id
+
+        online_devices = sorted([did for did, online in device_states.items() if online])
+        connected = bool(device_states.get(selected_id, False)) if selected_id else bool(self._device_connected)
+        resolved_device_id = selected_id or current_device_id
+
         return {
-            "connected": bool(self._device_connected),
+            "connected": connected,
             "broker_connected": bool(self._connected),
             "client_addr": None,
-            "device_id": self._device_id,
-            "events": dict(self._last_events),
-            "devices": [self._device_id] if (self._device_connected and self._device_id) else [],
-            "history": list(self._history_ids),
+            "device_id": resolved_device_id,
+            "events": selected_events,
+            "devices": online_devices,
+            "history": history,
             "last_can_ts": last_can_ts,
         }
 
@@ -160,10 +176,17 @@ class MQTTHub:
 
     def _emit_event(self, event_name: str, data, device_id: Optional[str] = None) -> None:
         try:
+            normalized = self._normalize_event_data(data)
             if device_id:
+                # Any valid payload from a device implies that device is online.
+                # The config page queries status by device_id, so this state must
+                # be updated even when the device only publishes CAN/hardware data.
                 self._device_id = str(device_id)
                 self._history_ids.add(self._device_id)
-            self._last_events[event_name] = self._normalize_event_data(data)
+                self._device_states[self._device_id] = True
+                self._device_connected = True
+                self._device_events.setdefault(self._device_id, {})[event_name] = normalized
+            self._last_events[event_name] = normalized
             self._persist_event(event_name)
             if self._event_callback:
                 self._event_callback({"event": event_name, "data": data})
@@ -504,6 +527,12 @@ class MQTTHub:
             def on_disconnect(_client, _userdata, rc):
                 self._connected = False
                 self._device_connected = False
+                try:
+                    with self._lock:
+                        for did in list(self._device_states.keys()):
+                            self._device_states[did] = False
+                except Exception:
+                    pass
                 if self._event_callback:
                     try:
                         self._event_callback({

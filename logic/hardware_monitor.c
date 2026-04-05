@@ -8,6 +8,7 @@
 #include "remote_transport.h"
 #include "../utils/logger.h"
 #include "../utils/app_config.h"
+#include "../utils/net_manager.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -566,6 +567,11 @@ static void* monitor_thread_func(void *arg)
         }
         
         if (g_hw_ctx.config.enable_network_monitor) {
+            char active_iface[sizeof(g_hw_ctx.eth_status.interface)] = {0};
+            if (net_manager_get_active_interface(active_iface, sizeof(active_iface)) == 0 && active_iface[0]) {
+                strncpy(g_hw_ctx.eth_status.interface, active_iface, sizeof(g_hw_ctx.eth_status.interface) - 1);
+                g_hw_ctx.eth_status.interface[sizeof(g_hw_ctx.eth_status.interface) - 1] = '\0';
+            }
             update_network_status(g_hw_ctx.eth_status.interface, &g_hw_ctx.eth_status);
         }
         

@@ -256,10 +256,13 @@ static const char HTML_PAGE[] =
 "\n"
 "<div id=\"tab-wifi\" class=\"tab\">\n"
 "<div class=\"card\"><h2>WiFi状态</h2>\n"
-"<div class=\"g2\">\n"
-"<div class=\"sc\"><div class=\"sv\" id=\"wf-state\">--</div><div class=\"sl\">连接状态</div></div>\n"
+"<div class=\"hero-grid\">\n"
+"<div class=\"sc\"><div class=\"sv\" id=\"wf-state\">--</div><div class=\"sl\">WiFi链路</div></div>\n"
 "<div class=\"sc\"><div class=\"sv\" id=\"wf-current\" style=\"font-size:14px;word-break:break-all\">--</div><div class=\"sl\">当前SSID</div></div>\n"
+"<div class=\"sc\"><div class=\"sv\" id=\"wf-ip\" style=\"font-size:14px;word-break:break-all\">--</div><div class=\"sl\">当前IP</div></div>\n"
+"<div class=\"sc\"><div class=\"sv\" id=\"wf-cloud\">--</div><div class=\"sl\">云端可达</div></div>\n"
 "</div>\n"
+"<div class=\"subtle\" id=\"wf-meta\">--</div>\n"
 "</div>\n"
 "<div class=\"card\"><h2>WiFi配置</h2>\n"
 "<div class=\"fr\">\n"
@@ -494,9 +497,9 @@ static const char HTML_PAGE[] =
 "function tDhcp(){var dh=document.getElementById('n-dhcp').value==='true';document.getElementById('n-static').style.display=dh?'none':'block';}\n"
 "async function loadNet(){try{var r=await fetch('/api/network'),d=await r.json();document.getElementById('n-iface').value=d.net_iface||'eth0';document.getElementById('n-dhcp').value=d.net_use_dhcp?'true':'false';document.getElementById('n-ip').value=d.net_ip||'';document.getElementById('n-mask').value=d.net_netmask||'';document.getElementById('n-gw').value=d.net_gateway||'';document.getElementById('n-dns1').value=d.net_dns1||'';document.getElementById('n-dns2').value=d.net_dns2||'';tDhcp();}catch(e){}}\n"
 "async function saveNet(){var dh=document.getElementById('n-dhcp').value==='true';var body={net_iface:document.getElementById('n-iface').value,net_use_dhcp:dh,net_ip:document.getElementById('n-ip').value,net_netmask:document.getElementById('n-mask').value,net_gateway:document.getElementById('n-gw').value,net_dns1:document.getElementById('n-dns1').value,net_dns2:document.getElementById('n-dns2').value,apply:true};try{var r=await fetch('/api/network',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}),d=await r.json();sm('net-msg',d.ok,d.ok?'网络配置已保存并应用':(d.error||'保存失败'));}catch(e){sm('net-msg',false,'请求失败');}}\n"
-"async function loadWifi(){try{var r=await fetch('/api/wifi'),d=await r.json();document.getElementById('wf-iface').value=d.wifi_iface||'wlan0';document.getElementById('wf-ssid').value=d.wifi_ssid||'';document.getElementById('wf-psk').value=d.wifi_psk||'';document.getElementById('wf-state').innerHTML=d.connected?'<span class=\"badge bok\">已连接</span>':'<span class=\"badge berr\">未连接</span>';document.getElementById('wf-current').textContent=d.current_ssid||'--';}catch(e){sm('wifi-msg',false,'请求失败');}}\n"
-"async function saveWifi(connectNow){var body={wifi_iface:document.getElementById('wf-iface').value,ssid:document.getElementById('wf-ssid').value,password:document.getElementById('wf-psk').value,connect:!!connectNow};try{var r=await fetch('/api/wifi',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}),d=await r.json();sm('wifi-msg',d.ok,d.ok?(connectNow?'WiFi配置已保存并开始连接':'WiFi配置已保存'):(d.error||'保存失败'));if(d.ok)loadWifi();}catch(e){sm('wifi-msg',false,'请求失败');}}\n"
-"async function disconnectWifi(){try{var r=await fetch('/api/wifi/disconnect',{method:'POST'}),d=await r.json();sm('wifi-msg',d.ok,d.ok?'已断开WiFi连接':(d.error||'断开失败'));if(d.ok)loadWifi();}catch(e){sm('wifi-msg',false,'请求失败');}}\n"
+"async function loadWifi(){try{var r=await fetch('/api/wifi'),d=await r.json(),state='未关联',cloud='--',meta=[];document.getElementById('wf-iface').value=d.wifi_iface||'wlan0';document.getElementById('wf-ssid').value=d.wifi_ssid||'';document.getElementById('wf-psk').value=d.wifi_psk||'';if(d.associated&&d.has_ip)state='<span class=\"badge bok\">已接入网络</span>';else if(d.associated)state='<span class=\"badge\" style=\"background:#78350f;color:#fcd34d\">已关联未取IP</span>';else state='<span class=\"badge berr\">未连接</span>';if(d.cloud_reachable)cloud='<span class=\"badge bok\">可达</span>';else if(d.associated&&d.has_ip)cloud='<span class=\"badge\" style=\"background:#450a0a;color:#fca5a5\">不可达</span>';document.getElementById('wf-state').innerHTML=state;document.getElementById('wf-current').textContent=d.current_ssid||'--';document.getElementById('wf-ip').textContent=d.current_ip||'--';document.getElementById('wf-cloud').innerHTML=cloud;meta.push('接口 '+(d.wifi_iface||'wlan0'));meta.push('网关 '+(d.gateway||'--'));meta.push('网关探测 '+(d.gateway_reachable?'成功':'失败'));meta.push('自动重连 '+(d.auto_reconnect_enabled?'已启用':'已暂停'));document.getElementById('wf-meta').textContent=meta.join(' · ');}catch(e){sm('wifi-msg',false,'请求失败');}}\n"
+"async function saveWifi(connectNow){var body={wifi_iface:document.getElementById('wf-iface').value,ssid:document.getElementById('wf-ssid').value,password:document.getElementById('wf-psk').value,connect:!!connectNow};try{var r=await fetch('/api/wifi',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}),d=await r.json();sm('wifi-msg',d.ok,d.ok?(connectNow?'WiFi配置已保存，正在连接并启用自动重连':'WiFi配置已保存，已启用自动重连'):(d.error||'保存失败'));if(d.ok)loadWifi();}catch(e){sm('wifi-msg',false,'请求失败');}}\n"
+"async function disconnectWifi(){try{var r=await fetch('/api/wifi/disconnect',{method:'POST'}),d=await r.json();sm('wifi-msg',d.ok,d.ok?'已断开WiFi，并暂停自动重连':(d.error||'断开失败'));if(d.ok)loadWifi();}catch(e){sm('wifi-msg',false,'请求失败');}}\n"
 "function escHtml(s){return String(s||'').replace(/[&<>\"']/g,function(c){return({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',\"'\":'&#39;'})[c]});}\n"
 "function pickWifi(ssid){document.getElementById('wf-ssid').value=ssid||'';}\n"
 "async function scanWifi(){var box=document.getElementById('wf-list');box.textContent='正在扫描...';try{var r=await fetch('/api/wifi/scan',{method:'POST'}),d=await r.json();if(!d.ok){box.textContent='扫描失败';sm('wifi-msg',false,d.error||'扫描失败');return;}var list=d.networks||[];if(!list.length){box.textContent='未发现WiFi';return;}box.innerHTML=list.map(function(n){var ssid=String(n.ssid||'');return '<div style=\"display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid #334155\"><span>'+escHtml(ssid)+'</span><button class=\"btn btn-g\" style=\"padding:4px 10px\" onclick=\"pickWifi('+JSON.stringify(ssid)+')\">使用</button></div>';}).join('');}catch(e){box.textContent='扫描失败';sm('wifi-msg',false,'请求失败');}}\n"
@@ -1060,66 +1063,41 @@ static void handle_post_network(int fd, const char *body, int body_len)
     send_json(fd, "{\"ok\":true}");
 }
 
-static bool wifi_http_is_connected(void)
-{
-    char cmd[256];
-    const char *iface = g_app_config.wifi_iface[0] ? g_app_config.wifi_iface : "wlan0";
-    snprintf(cmd, sizeof(cmd),
-             "ip addr show %s | grep 'inet ' | awk '{print $2}' | cut -d'/' -f1",
-             iface);
-    FILE *fp = popen(cmd, "r");
-    if (!fp) return false;
-
-    char ip[64] = {0};
-    bool connected = false;
-    if (fgets(ip, sizeof(ip), fp) != NULL) {
-        char *newline = strchr(ip, '\n');
-        if (newline) *newline = '\0';
-        if (ip[0] && strcmp(ip, "0.0.0.0") != 0) connected = true;
-    }
-    pclose(fp);
-    return connected;
-}
-
-static const char *wifi_http_get_connected_ssid(void)
-{
-    static char ssid[128];
-    ssid[0] = '\0';
-
-    char cmd[256];
-    const char *iface = g_app_config.wifi_iface[0] ? g_app_config.wifi_iface : "wlan0";
-    snprintf(cmd, sizeof(cmd),
-             "iw dev %s link | grep 'SSID:' | awk '{print $2}'",
-             iface);
-    FILE *fp = popen(cmd, "r");
-    if (!fp) return ssid;
-    if (fgets(ssid, sizeof(ssid), fp) != NULL) {
-        char *newline = strchr(ssid, '\n');
-        if (newline) *newline = '\0';
-    }
-    pclose(fp);
-    return ssid;
-}
-
 /* --- /api/wifi GET --- */
 static void handle_get_wifi(int fd)
 {
-    bool connected = wifi_http_is_connected();
-    const char *current_ssid = wifi_http_get_connected_ssid();
-    char buf[1024];
+    wifi_runtime_status_t status;
+    char buf[1600];
+
+    memset(&status, 0, sizeof(status));
+    wifi_manager_get_status(&status);
     snprintf(buf, sizeof(buf),
         "{"
         "\"wifi_iface\":\"%s\","
         "\"wifi_ssid\":\"%s\","
         "\"wifi_psk\":\"%s\","
         "\"connected\":%s,"
-        "\"current_ssid\":\"%s\""
+        "\"associated\":%s,"
+        "\"has_ip\":%s,"
+        "\"gateway_reachable\":%s,"
+        "\"cloud_reachable\":%s,"
+        "\"auto_reconnect_enabled\":%s,"
+        "\"current_ssid\":\"%s\","
+        "\"current_ip\":\"%s\","
+        "\"gateway\":\"%s\""
         "}",
-        g_app_config.wifi_iface,
+        status.iface[0] ? status.iface : g_app_config.wifi_iface,
         g_app_config.wifi_ssid,
         g_app_config.wifi_psk,
-        connected ? "true" : "false",
-        (current_ssid && current_ssid[0]) ? current_ssid : "");
+        (status.associated && status.has_ip) ? "true" : "false",
+        status.associated ? "true" : "false",
+        status.has_ip ? "true" : "false",
+        status.gateway_reachable ? "true" : "false",
+        status.cloud_reachable ? "true" : "false",
+        status.auto_reconnect_enabled ? "true" : "false",
+        status.current_ssid,
+        status.current_ip,
+        status.gateway);
     send_json(fd, buf);
 }
 
@@ -1175,19 +1153,33 @@ static void handle_post_wifi(int fd, const char *body, int body_len)
         return;
     }
 
-    bool connected = wifi_http_is_connected();
+    wifi_runtime_status_t status;
     int connect_ret = 0;
+
+    wifi_manager_set_auto_reconnect_paused(ssid[0] ? false : true);
+
     if (do_connect && ssid[0]) {
         connect_ret = wifi_manager_connect(ssid, psk);
-        /* Give DHCP / wpa_supplicant a brief moment, then query actual state. */
-        usleep(500000);
-        connected = wifi_http_is_connected();
     }
 
-    char resp[512];
+    memset(&status, 0, sizeof(status));
+    wifi_manager_get_status(&status);
+
+    char resp[768];
     snprintf(resp, sizeof(resp),
-             "{\"ok\":true,\"connected\":%s,\"connect_requested\":%s,\"connect_result\":%d}",
-             connected ? "true" : "false",
+             "{"
+             "\"ok\":true,"
+             "\"connected\":%s,"
+             "\"associated\":%s,"
+             "\"has_ip\":%s,"
+             "\"cloud_reachable\":%s,"
+             "\"connect_requested\":%s,"
+             "\"connect_result\":%d"
+             "}",
+             (status.associated && status.has_ip) ? "true" : "false",
+             status.associated ? "true" : "false",
+             status.has_ip ? "true" : "false",
+             status.cloud_reachable ? "true" : "false",
              do_connect ? "true" : "false",
              connect_ret);
     send_json(fd, resp);

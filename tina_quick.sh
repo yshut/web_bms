@@ -27,9 +27,11 @@ USER="${TINA_USER:-root}"
 DEST="${TINA_DEST:-/mnt/UDISK/lvgl_app}"
 PASS="${TINA_PASS:-}"
 WS_HOST=""
+WS_HOST_ALT="${WS_HOST_ALT:-}"
 WS_PORT="5052"
 TRANSPORT_MODE="${TRANSPORT_MODE:-websocket}"
 MQTT_HOST="${MQTT_HOST:-}"
+MQTT_HOST_ALT="${MQTT_HOST_ALT:-}"
 MQTT_PORT="${MQTT_PORT:-1883}"
 MQTT_CLIENT_ID="${MQTT_CLIENT_ID:-}"
 MQTT_USERNAME="${MQTT_USERNAME:-}"
@@ -40,13 +42,13 @@ MQTT_TOPIC_PREFIX="${MQTT_TOPIC_PREFIX:-app_lvgl}"
 MQTT_USE_TLS="${MQTT_USE_TLS:-false}"
 WIFI_SSID=""
 WIFI_PSK=""
-NET_IFACE="${NET_IFACE:-eth0}"
+NET_IFACE="${NET_IFACE:-auto}"
 WIFI_IFACE="${WIFI_IFACE:-wlan0}"
-NET_USE_DHCP="${NET_USE_DHCP:-false}"
+NET_USE_DHCP="${NET_USE_DHCP:-true}"
 DEVICE_IP="${DEVICE_IP:-${IP}}"
 DEVICE_NETMASK="${DEVICE_NETMASK:-255.255.255.0}"
 DEVICE_GATEWAY="${DEVICE_GATEWAY:-}"
-NET_CONFIG_REQUESTED=0
+NET_CONFIG_REQUESTED=1
 URL=""
 FILE=""
 RESTART=0
@@ -168,9 +170,11 @@ while [ $# -gt 0 ]; do
     --dest) DEST="${2:-}"; shift 2;;
     --password) PASS="${2:-}"; shift 2;;
     --ws-host) WS_HOST="${2:-}"; shift 2;;
+    --ws-host-alt) WS_HOST_ALT="${2:-}"; shift 2;;
     --ws-port) WS_PORT="${2:-}"; shift 2;;
     --transport-mode) TRANSPORT_MODE="${2:-}"; shift 2;;
     --mqtt-host) MQTT_HOST="${2:-}"; shift 2;;
+    --mqtt-host-alt) MQTT_HOST_ALT="${2:-}"; shift 2;;
     --mqtt-port) MQTT_PORT="${2:-}"; shift 2;;
     --mqtt-client-id) MQTT_CLIENT_ID="${2:-}"; shift 2;;
     --mqtt-username) MQTT_USERNAME="${2:-}"; shift 2;;
@@ -415,20 +419,44 @@ start_python_server() {
 }
 
 build_lvgl_app() {
-  if [ ! -f "./build.sh" ]; then
-    echo -e "${RED}错误: 未找到 ./build.sh（请在 app_lvgl 目录运行）${NC}"
+  local default_cross="/home/yst/Tina-Linux/prebuilt/gcc/linux-x86/arm/toolchain-sunxi-musl/toolchain/bin/arm-openwrt-linux-"
+  local default_staging="/home/yst/Tina-Linux/out/t113-mq_r/staging_dir/target"
+  local cross="${CROSS_COMPILE:-}"
+  local staging="${STAGING_DIR:-}"
+  local make_prefix=""
+  local jobs
+
+  if [ ! -f "./Makefile" ]; then
+    echo -e "${RED}ERROR: ./Makefile not found (run in app_lvgl directory)${NC}"
     exit 1
   fi
-  # 允许用户传入 -j8 / clean 等参数
-  # 兼容常见误用：--make-args "clean -j8"（这会只清理不编译）
-  # 这里改为：若包含 clean，则先 clean，再继续默认/剩余参数进行编译。
+
+  if [ -z "${cross}" ] && [ -x "${default_cross}gcc" ]; then
+    cross="${default_cross}"
+  fi
+  if [ -z "${staging}" ] && [ -d "${default_staging}" ]; then
+    staging="${default_staging}"
+  fi
+
+  if [ -n "${staging}" ]; then
+    make_prefix+="STAGING_DIR='${staging}' "
+  fi
+  if [ -n "${cross}" ]; then
+    make_prefix+="CROSS_COMPILE='${cross}' "
+  else
+    echo -e "${YELLOW}WARN: CROSS_COMPILE not detected, using default toolchain in PATH.${NC}"
+  fi
+
+  jobs="$(getconf _NPROCESSORS_ONLN 2>/dev/null || nproc 2>/dev/null || echo 4)"
+
   if [ -n "${MAKE_ARGS:-}" ]; then
-    echo -e "${YELLOW}开始编译（./build.sh ${MAKE_ARGS}）...${NC}"
+    echo -e "${YELLOW}Building: ${make_prefix}make ${MAKE_ARGS}${NC}"
     # shellcheck disable=SC2206
     local args=(${MAKE_ARGS})
     local do_clean=0
     local build_args=()
     local a=""
+
     for a in "${args[@]}"; do
       if [ "${a}" = "clean" ]; then
         do_clean=1
@@ -436,34 +464,34 @@ build_lvgl_app() {
         build_args+=("${a}")
       fi
     done
+
     if [ "${do_clean}" -eq 1 ]; then
-      run "./build.sh clean"
+      run "${make_prefix}make clean"
     fi
+
     if [ "${#build_args[@]}" -gt 0 ]; then
-      local cmd="./build.sh"
+      local cmd="${make_prefix}make"
       for a in "${build_args[@]}"; do
         cmd+=" $(printf '%q' "${a}")"
       done
       run "${cmd}"
     else
-      # 若用户只传了 clean，则 clean 后继续默认 all 编译
-      run "./build.sh"
+      run "${make_prefix}make -j${jobs}"
     fi
   else
-    echo -e "${YELLOW}开始编译（./build.sh）...${NC}"
-    run "./build.sh"
+    echo -e "${YELLOW}Building: ${make_prefix}make -j${jobs}${NC}"
+    run "${make_prefix}make -j${jobs}"
   fi
-  # dry-run 不会真的生成文件，直接返回即可
+
   if [ "${DRYRUN}" -eq 1 ]; then
-    echo -e "${GREEN}✓ [dry-run] 编译流程已模拟完成（未实际生成 ./lvgl_app）${NC}"
+    echo -e "${GREEN}? [dry-run] build simulation finished (no ./lvgl_app generated)${NC}"
     return 0
   fi
   if [ ! -f "./lvgl_app" ]; then
-    echo -e "${RED}错误: 编译后未生成 ./lvgl_app${NC}"
-    echo -e "${YELLOW}提示: 如你传了 --make-args \"clean -j8\"，旧版本会只 clean 不 build；现在已自动处理为 clean 后再 build。${NC}"
+    echo -e "${RED}ERROR: ./lvgl_app was not generated${NC}"
     exit 1
   fi
-  echo -e "${GREEN}✓ 编译完成：./lvgl_app${NC}"
+  echo -e "${GREEN}? Build complete: ./lvgl_app${NC}"
 }
 
 if [ "${CLEANUP}" -eq 1 ]; then
@@ -560,7 +588,7 @@ echo -e "${YELLOW}步骤3: 停止旧进程 & 推送文件（避免 Text file bus
 ssh_wrap "'mkdir -p \"${REMOTE_DIR}\"'"
 
 # 2) 停止进程（UDISK/FAT 上运行中的可执行文件无法覆盖）
-ssh_wrap "'killall \"${REMOTE_BASE}\" 2>/dev/null || true; sync; sleep 1'"
+ssh_wrap "'for p in \$(ps | grep \"${REMOTE_BASE}\" | grep -v grep | sed -n \"s/^ *\\([0-9][0-9]*\\).*/\\1/p\"); do kill -9 \"\$p\" 2>/dev/null || true; done; sync; sleep 1'"
 
 # 2.2) 可选：安装 WiFi 自动连接
 if [ -n "${WIFI_SSID}" ] || [ -n "${WIFI_PSK}" ]; then
@@ -598,6 +626,8 @@ if [ -n "${WS_HOST}" ]; then
   # 说明：应用端启动后若检测到 legacy-only，会自动升级成全量模板；这里提前写好，便于后续直接改参数。
   tmpdir_ws="$(mktemp -d)"
   tmp_ws_cfg="${tmpdir_ws}/ws_config.txt"
+  WS_HOST_VALUE="${WS_HOST}${WS_HOST_ALT:+,${WS_HOST_ALT}}"
+  MQTT_HOST_VALUE="${MQTT_HOST:-${WS_HOST}}${MQTT_HOST_ALT:+,${MQTT_HOST_ALT}}"
   cat > "${tmp_ws_cfg}" <<EOF
 ${WS_HOST}
 ${WS_PORT}
@@ -610,7 +640,7 @@ ${WS_PORT}
 transport_mode=${TRANSPORT_MODE}
 
 # === WebSocket ===
-ws_host=${WS_HOST}
+ws_host=${WS_HOST_VALUE}
 ws_port=${WS_PORT}
 ws_path=/ws
 ws_use_ssl=false
@@ -618,7 +648,7 @@ ws_reconnect_interval_ms=4000
 ws_keepalive_interval_s=20
 
 # === MQTT ===
-mqtt_host=${MQTT_HOST:-${WS_HOST}}
+mqtt_host=${MQTT_HOST_VALUE}
 mqtt_port=${MQTT_PORT}
 mqtt_client_id=${MQTT_CLIENT_ID}
 mqtt_username=${MQTT_USERNAME}
@@ -671,7 +701,8 @@ echo -e "${GREEN}✓ 推送完成${NC}"
 if [ "${RESTART}" -eq 1 ]; then
   echo ""
   echo -e "${YELLOW}步骤4: 重启应用...${NC}"
-  ssh_wrap "'if command -v nohup >/dev/null 2>&1; then nohup \"${DEST}\" >/dev/null 2>&1 </dev/null & else \"${DEST}\" >/dev/null 2>&1 </dev/null & fi'"
+  ssh_wrap "'for p in \$(ps | grep \"${REMOTE_BASE}\" | grep -v grep | sed -n \"s/^ *\\([0-9][0-9]*\\).*/\\1/p\"); do kill -9 \"\$p\" 2>/dev/null || true; done; sync; sleep 1'"
+  ssh_wrap "'if command -v nohup >/dev/null 2>&1; then nohup \"${DEST}\" >/dev/null 2>&1 </dev/null & else \"${DEST}\" >/dev/null 2>&1 </dev/null & fi; sleep 1; c=\$(ps | grep \"${DEST}\" | grep -v grep | wc -l); [ "\$c" -eq 1 ]'"
   echo -e "${GREEN}✓ 已重启${NC}"
 fi
 

@@ -4,7 +4,15 @@
 #include "ws_client.h"
 #include "../utils/app_config.h"
 #include "../utils/logger.h"
+#include <ctype.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <netdb.h>
+#include <stdio.h>
 #include <string.h>
+#include <sys/select.h>
+#include <sys/socket.h>
+#include <unistd.h>
 
 typedef struct {
     remote_transport_config_t config;
@@ -14,6 +22,162 @@ typedef struct {
 } remote_transport_ctx_t;
 
 static remote_transport_ctx_t g_remote_transport_ctx;
+
+static void trim_in_place(char *text)
+{
+    char *start;
+    char *end;
+
+    if (!text || !text[0]) {
+        return;
+    }
+
+    start = text;
+    while (*start && isspace((unsigned char)*start)) {
+        start++;
+    }
+    if (start != text) {
+        memmove(text, start, strlen(start) + 1);
+    }
+
+    end = text + strlen(text);
+    while (end > text && isspace((unsigned char)end[-1])) {
+        end--;
+    }
+    *end = '\0';
+}
+
+static int is_host_list(const char *host)
+{
+    return host && strchr(host, ',') != NULL;
+}
+
+static int try_connect_host_port(const char *host, uint16_t port, int timeout_ms)
+{
+    char port_text[16];
+    struct addrinfo hints;
+    struct addrinfo *result = NULL;
+    struct addrinfo *ai;
+    int rc;
+
+    if (!host || !host[0] || port == 0) {
+        return -1;
+    }
+
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
+
+    snprintf(port_text, sizeof(port_text), "%u", (unsigned)port);
+    rc = getaddrinfo(host, port_text, &hints, &result);
+    if (rc != 0) {
+        return -1;
+    }
+
+    for (ai = result; ai; ai = ai->ai_next) {
+        int fd;
+        int flags;
+        int so_error = 0;
+        socklen_t so_error_len = sizeof(so_error);
+        fd_set write_fds;
+        struct timeval tv;
+
+        fd = socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol);
+        if (fd < 0) {
+            continue;
+        }
+
+        flags = fcntl(fd, F_GETFL, 0);
+        if (flags >= 0) {
+            (void)fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+        }
+
+        rc = connect(fd, ai->ai_addr, ai->ai_addrlen);
+        if (rc == 0) {
+            close(fd);
+            freeaddrinfo(result);
+            return 0;
+        }
+        if (errno != EINPROGRESS) {
+            close(fd);
+            continue;
+        }
+
+        FD_ZERO(&write_fds);
+        FD_SET(fd, &write_fds);
+        tv.tv_sec = timeout_ms / 1000;
+        tv.tv_usec = (timeout_ms % 1000) * 1000;
+
+        rc = select(fd + 1, NULL, &write_fds, NULL, &tv);
+        if (rc > 0 &&
+            getsockopt(fd, SOL_SOCKET, SO_ERROR, &so_error, &so_error_len) == 0 &&
+            so_error == 0) {
+            close(fd);
+            freeaddrinfo(result);
+            return 0;
+        }
+
+        close(fd);
+    }
+
+    freeaddrinfo(result);
+    return -1;
+}
+
+static void resolve_host_candidates(const char *host_value,
+                                    uint16_t port,
+                                    char *resolved_host,
+                                    size_t resolved_host_size)
+{
+    char host_copy[128];
+    char *saveptr = NULL;
+    char *token;
+    char first_candidate[128] = {0};
+
+    if (!resolved_host || resolved_host_size == 0) {
+        return;
+    }
+    resolved_host[0] = '\0';
+
+    if (!host_value || !host_value[0]) {
+        return;
+    }
+
+    strncpy(host_copy, host_value, sizeof(host_copy) - 1);
+    host_copy[sizeof(host_copy) - 1] = '\0';
+
+    if (!is_host_list(host_copy)) {
+        strncpy(resolved_host, host_copy, resolved_host_size - 1);
+        resolved_host[resolved_host_size - 1] = '\0';
+        return;
+    }
+
+    token = strtok_r(host_copy, ",", &saveptr);
+    while (token) {
+        trim_in_place(token);
+        if (token[0]) {
+            if (!first_candidate[0]) {
+                strncpy(first_candidate, token, sizeof(first_candidate) - 1);
+                first_candidate[sizeof(first_candidate) - 1] = '\0';
+            }
+            if (try_connect_host_port(token, port, 800) == 0) {
+                strncpy(resolved_host, token, resolved_host_size - 1);
+                resolved_host[resolved_host_size - 1] = '\0';
+                log_info("selected reachable server host: %s:%u", resolved_host, (unsigned)port);
+                return;
+            }
+        }
+        token = strtok_r(NULL, ",", &saveptr);
+    }
+
+    if (first_candidate[0]) {
+        strncpy(resolved_host, first_candidate, resolved_host_size - 1);
+        resolved_host[resolved_host_size - 1] = '\0';
+        log_warn("no reachable host found in list, fallback to first candidate: %s:%u",
+                 resolved_host, (unsigned)port);
+    }
+}
+
 
 static void forward_state_callback(bool connected, const char *host, uint16_t port, void *user_data)
 {
@@ -87,20 +251,33 @@ int remote_transport_init(const remote_transport_config_t *config)
 int remote_transport_init_from_app_config(void)
 {
     remote_transport_config_t config;
+    char resolved_ws_host[sizeof(config.ws_host)];
+    char resolved_mqtt_host[sizeof(config.mqtt_host)];
     memset(&config, 0, sizeof(config));
+    memset(resolved_ws_host, 0, sizeof(resolved_ws_host));
+    memset(resolved_mqtt_host, 0, sizeof(resolved_mqtt_host));
 
     config.mode = (g_app_config.transport_mode == APP_TRANSPORT_MQTT)
         ? REMOTE_TRANSPORT_MODE_MQTT
         : REMOTE_TRANSPORT_MODE_WEBSOCKET;
 
-    strncpy(config.ws_host, g_app_config.ws_host, sizeof(config.ws_host) - 1);
+    resolve_host_candidates(g_app_config.ws_host, g_app_config.ws_port,
+                            resolved_ws_host, sizeof(resolved_ws_host));
+    resolve_host_candidates(g_app_config.mqtt_host, g_app_config.mqtt_port,
+                            resolved_mqtt_host, sizeof(resolved_mqtt_host));
+
+    strncpy(config.ws_host,
+            resolved_ws_host[0] ? resolved_ws_host : g_app_config.ws_host,
+            sizeof(config.ws_host) - 1);
     config.ws_port = g_app_config.ws_port;
     strncpy(config.ws_path, g_app_config.ws_path, sizeof(config.ws_path) - 1);
     config.ws_use_ssl = g_app_config.ws_use_ssl;
     config.ws_reconnect_interval_ms = (int)g_app_config.ws_reconnect_interval_ms;
     config.ws_keepalive_interval_s = (int)g_app_config.ws_keepalive_interval_s;
 
-    strncpy(config.mqtt_host, g_app_config.mqtt_host, sizeof(config.mqtt_host) - 1);
+    strncpy(config.mqtt_host,
+            resolved_mqtt_host[0] ? resolved_mqtt_host : g_app_config.mqtt_host,
+            sizeof(config.mqtt_host) - 1);
     config.mqtt_port = g_app_config.mqtt_port;
     strncpy(config.mqtt_client_id, g_app_config.mqtt_client_id, sizeof(config.mqtt_client_id) - 1);
     strncpy(config.mqtt_username, g_app_config.mqtt_username, sizeof(config.mqtt_username) - 1);

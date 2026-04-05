@@ -29,6 +29,7 @@
 #include "utils/logger.h"
 #include "utils/app_config.h"
 #include "utils/net_manager.h"
+#include "src/wifi/wifi_manager.h"
 
 static volatile sig_atomic_t g_running        = 1;
 static volatile sig_atomic_t g_exit_requested = 0;
@@ -193,6 +194,37 @@ static void cleanup_hardware_monitor(void)
 }
 
 /* ------------------------------------------------------------------ */
+/*  WiFi                                                                  */
+/* ------------------------------------------------------------------ */
+
+static int init_wifi_manager(void)
+{
+    if (wifi_manager_init() < 0) {
+        log_warn("WiFi管理器初始化失败");
+        return -1;
+    }
+    if (wifi_manager_start() < 0) {
+        log_warn("WiFi自动重连线程启动失败");
+        return -1;
+    }
+
+    if (g_app_config.wifi_ssid[0]) {
+        log_info("WiFi自动连接已启用: iface=%s ssid=%s",
+                 g_app_config.wifi_iface[0] ? g_app_config.wifi_iface : "wlan0",
+                 g_app_config.wifi_ssid);
+    } else {
+        log_info("WiFi自动连接未配置");
+    }
+    return 0;
+}
+
+static void cleanup_wifi_manager(void)
+{
+    wifi_manager_stop();
+    log_info("WiFi管理器已停止");
+}
+
+/* ------------------------------------------------------------------ */
 /*  主函数                                                               */
 /* ------------------------------------------------------------------ */
 
@@ -271,6 +303,9 @@ int main(int argc, char *argv[])
     if (init_hardware_monitor() < 0)
         log_warn("硬件监控初始化失败");
 
+    if (init_wifi_manager() < 0)
+        log_warn("WiFi管理器初始化失败");
+
     /* CAN-MQTT 规则引擎 */
     if (can_mqtt_engine_init() == 0) {
         can_frame_dispatcher_register_engine_callback(
@@ -307,6 +342,7 @@ int main(int argc, char *argv[])
     can_frame_dispatcher_register_engine_callback(NULL, NULL);
     can_mqtt_engine_deinit();
     cleanup_hardware_monitor();
+    cleanup_wifi_manager();
     cleanup_remote_transport();
     cleanup_can_system();
     app_manager_deinit();
