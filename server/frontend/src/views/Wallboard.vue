@@ -278,11 +278,9 @@ function alertLevelClass(level: string) {
 }
 
 function canStatusText(key: 'can0' | 'can1') {
-  const value = Number(hardware[key]?.status ?? -1);
-  if (value === 1) return '正常';
-  if (value === 2) return '告警';
-  if (value === 3) return '错误';
-  return '离线';
+  const channel = hardware[key] || {};
+  if (channel.initialized === true || channel.init_done === true || channel.ready === true) return '在线';
+  return Number(channel.status ?? 0) > 0 ? '在线' : '离线';
 }
 
 function pushTrend(target: { value: number[] }, nextValue: number) {

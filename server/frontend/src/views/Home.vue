@@ -107,7 +107,7 @@ const portStatusText = computed(() => `${systemStore.connected ? 'Socket已连' 
 const statusCards = computed(() => ([
   { title: 'Socket 会话', desc: '实时事件和页面刷新链路', value: systemStore.connected ? '已连接' : '未连接' },
   { title: '设备主链路', desc: '设备与控制台在线状态', value: systemStore.isOnline ? '在线' : '离线' },
-  { title: 'CAN 通道', desc: 'CAN0 / CAN1 运行情况', value: `${formatState(hardware.value.can0?.status)} / ${formatState(hardware.value.can1?.status)}` },
+  { title: 'CAN 通道', desc: 'CAN0 / CAN1 运行情况', value: `${canStateText('can0')} / ${canStateText('can1')}` },
   { title: '存储挂载', desc: '当前录制目录与挂载点', value: hardware.value.storage?.mount_point || '未挂载' },
 ]));
 
@@ -161,6 +161,12 @@ function formatState(value: number | string) {
   if (key === 2) return '告警';
   if (key === 3) return '错误';
   return '离线';
+}
+
+function canStateText(key: 'can0' | 'can1') {
+  const channel = hardware.value[key] || {};
+  if (channel.initialized === true || channel.init_done === true || channel.ready === true) return '在线';
+  return Number(channel.status ?? 0) > 0 ? '在线' : '离线';
 }
 
 onMounted(async () => {

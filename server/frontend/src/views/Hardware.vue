@@ -172,8 +172,8 @@ const modules = computed(() => ([
   {
     kicker: '总线通道',
     name: 'CAN0',
-    status: statusName(data.can0?.status),
-    tone: toneFromStatus(data.can0?.status),
+    status: canOnlineText('can0'),
+    tone: canTone('can0'),
     items: [
       { label: '波特率', value: `${data.can0?.bitrate || 0} bps` },
       { label: '状态', value: canStatusSummary('can0') },
@@ -186,8 +186,8 @@ const modules = computed(() => ([
   {
     kicker: '总线通道',
     name: 'CAN1',
-    status: statusName(data.can1?.status),
-    tone: toneFromStatus(data.can1?.status),
+    status: canOnlineText('can1'),
+    tone: canTone('can1'),
     items: [
       { label: '波特率', value: `${data.can1?.bitrate || 0} bps` },
       { label: '状态', value: canStatusSummary('can1') },
@@ -250,7 +250,23 @@ function formatUptime(value: number | string) {
 
 function canStatusSummary(key: 'can0' | 'can1') {
   const bitrate = Number(data[key]?.bitrate || 0);
-  return `${statusName(data[key]?.status)}${bitrate ? ` / ${bitrate}` : ''}`;
+  return `${canOnlineText(key)}${bitrate ? ` / ${bitrate}` : ''}`;
+}
+
+function isCanOnline(key: 'can0' | 'can1') {
+  const channel = data[key] || {};
+  if (channel.initialized === true || channel.init_done === true || channel.ready === true) return true;
+  const status = Number(channel.status ?? -1);
+  if (status > 0) return true;
+  return false;
+}
+
+function canOnlineText(key: 'can0' | 'can1') {
+  return isCanOnline(key) ? '在线' : '离线';
+}
+
+function canTone(key: 'can0' | 'can1') {
+  return isCanOnline(key) ? 'good' : 'danger';
 }
 
 function storageUsageText() {
