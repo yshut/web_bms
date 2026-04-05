@@ -1,14 +1,6 @@
 <template>
   <div class="rules-page">
     <section class="hero-panel">
-      <div class="hero-copy">
-        <p class="eyebrow">规则管理</p>
-        <h1>把筛选条件、同步动作和规则规模放在一个清晰的控制面板里。</h1>
-        <p class="hero-desc">
-          先确定设备、状态和帧范围，再进入分组后的规则表，避免长工具栏把关键操作淹没。
-        </p>
-      </div>
-
       <div class="hero-side">
         <div class="toolbar-card">
           <div class="toolbar">

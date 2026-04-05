@@ -1,14 +1,6 @@
 <template>
   <div class="home-page">
     <section class="hero-panel">
-      <div class="hero-copy">
-        <p class="eyebrow">控制台概览</p>
-        <h1>设备、链路与规则在同一操作面上联动。</h1>
-        <p class="hero-desc">
-          当前控制台聚焦在线状态、运行版本、硬件健康度和 BMS 数据刷新情况，适合日常调试与值守切换。
-        </p>
-      </div>
-
       <div class="hero-metrics">
         <article v-for="item in heroMetrics" :key="item.label" class="metric-tile">
           <span>{{ item.label }}</span>

@@ -1,14 +1,6 @@
 <template>
   <div class="device-config-page">
     <section class="hero-panel">
-      <div class="hero-copy">
-        <p class="eyebrow">设备配置</p>
-        <h1>把网络、传输、CAN 与 WiFi 参数整理成更易校验的配置界面。</h1>
-        <p class="hero-desc">
-          重点优化字段分组、数值控件观感和留白节奏，减少高频参数编辑时的视觉噪声。
-        </p>
-      </div>
-
       <div class="hero-side">
         <div class="device-toolbar">
           <el-select

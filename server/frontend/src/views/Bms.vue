@@ -1,18 +1,6 @@
 <template>
   <div class="bms-page">
     <section class="hero-panel">
-      <div class="hero-copy">
-        <p class="eyebrow">BMS 看板</p>
-        <h1>把实时信号、消息分组和告警流压缩成一个值守画面。</h1>
-        <p class="hero-desc">
-          参考优化指南里对缓存、增量刷新和状态可见性的要求，页面优先显示 freshness、关键信号和异常。
-        </p>
-        <div class="hero-actions">
-          <el-button type="primary" :loading="loading" @click="reload">立即刷新</el-button>
-          <el-button :href="bmsApi.exportUrl" tag="a">导出 CSV</el-button>
-        </div>
-      </div>
-
       <div class="hero-side">
         <div class="stream-card" :class="{ 'stream-card--live': streamConnected }">
           <span class="stream-label">实时流</span>

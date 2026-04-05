@@ -1,18 +1,6 @@
 <template>
   <div class="hardware-page">
     <section class="hero-panel">
-      <div class="hero-copy">
-        <p class="eyebrow">硬件监控</p>
-        <h1>把系统、网络、CAN 和存储放在同一状态面板里看。</h1>
-        <p class="hero-desc">
-          页面先给出健康结论，再展开关键负载和模块细节，减少操作时在卡片堆里来回寻找状态。
-        </p>
-        <div class="hero-actions">
-          <el-button type="primary" :loading="loading" @click="reload">立即刷新</el-button>
-          <span class="refresh-note">自动刷新 3 秒一次</span>
-        </div>
-      </div>
-
       <div class="hero-status">
         <div class="status-chip" :class="statusToneClass(overallTone)">
           <span class="status-dot"></span>

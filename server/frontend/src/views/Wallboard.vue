@@ -1,13 +1,6 @@
 <template>
   <div class="wallboard">
     <section class="wallboard-hero">
-      <div>
-        <p class="eyebrow">运行大屏</p>
-        <h1>运行态势总览</h1>
-        <p class="hero-desc">
-          面向大屏值守场景，持续汇总设备在线状态、硬件健康度、BMS 告警与关键实时信号。
-        </p>
-      </div>
       <div class="hero-right">
         <div class="time-block">
           <span>{{ nowDate }}</span>

@@ -1,14 +1,6 @@
 <template>
   <div class="devices-page">
     <section class="hero-panel">
-      <div class="hero-copy">
-        <p class="eyebrow">设备总览</p>
-        <h1>把在线、历史、连接质量和规则规模汇总成设备总览。</h1>
-        <p class="hero-desc">
-          页面先给出设备规模和在线比率，再保留表格做逐台追踪，适合远程值守和筛查异常节点。
-        </p>
-      </div>
-
       <div class="hero-side">
         <div class="toolbar-panel">
           <el-button type="primary" :loading="loading" @click="reload">刷新</el-button>
