@@ -194,6 +194,20 @@ function buildSignature(nextSignals: any[], nextMessages: Record<string, any[]>,
   return `${signalPart}#${messagePart}#${alertPart}`;
 }
 
+function mergeSignals(changedSignals: any[], removedSignals: string[] = []) {
+  const signalMap = new Map<string, any>();
+  for (const row of signalRows.value) {
+    signalMap.set(String(row?.signal_name || ''), row);
+  }
+  for (const name of removedSignals) {
+    signalMap.delete(String(name || ''));
+  }
+  for (const row of changedSignals) {
+    signalMap.set(String(row?.signal_name || ''), row);
+  }
+  return Array.from(signalMap.values()).sort((a: any, b: any) => Number(b?.ts || 0) - Number(a?.ts || 0));
+}
+
 function applySnapshot(nextStats: Record<string, any>, nextSignals: any[], nextAlerts: any[]) {
   const nextMessages = buildMessageGroupsFromSignals(nextSignals);
   const signature = buildSignature(nextSignals, nextMessages, nextAlerts);
@@ -208,6 +222,11 @@ function applySnapshot(nextStats: Record<string, any>, nextSignals: any[], nextA
     alertTableKey.value += 1;
     lastSignature = signature;
   }
+}
+
+function applyPartialSignals(nextStats: Record<string, any>, changedSignals: any[], removedSignals: string[] = []) {
+  const mergedSignals = mergeSignals(changedSignals, removedSignals);
+  applySnapshot(nextStats, mergedSignals, alerts.value);
 }
 
 async function refreshAlerts() {
@@ -261,7 +280,12 @@ function connectStream() {
       const payload = JSON.parse(event.data || '{}');
       const nextStats = payload?.stats || stats.value || {};
       const nextSignals = normalizeSignalRows(payload?.signals || []);
-      applySnapshot(nextStats, nextSignals, alerts.value);
+      const removedSignals = Array.isArray(payload?.removed_signals) ? payload.removed_signals : [];
+      if (payload?.partial) {
+        applyPartialSignals(nextStats, nextSignals, removedSignals);
+      } else {
+        applySnapshot(nextStats, nextSignals, alerts.value);
+      }
       streamConnected.value = true;
     } catch (_err) {
       streamConnected.value = false;
@@ -275,7 +299,10 @@ function connectStream() {
 onMounted(async () => {
   await reload();
   connectStream();
-  reloadTimer = window.setInterval(refreshAlerts, 5000);
+  reloadTimer = window.setInterval(async () => {
+    await refreshAlerts();
+    await reload();
+  }, 60000);
 });
 
 onBeforeUnmount(() => {

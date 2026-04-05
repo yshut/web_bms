@@ -4508,28 +4508,38 @@ def api_bms_stream():
     if not _bms_collector:
         return jsonify({"ok": False, "error": "BMS collector not initialized"}), 503
 
-    def _signature(rows, stats):
-        signal_sig = "|".join(
-            f"{row.get('signal_name','')}:{row.get('value','')}:{row.get('ts',0)}"
-            for row in rows
-        )
-        return f"{signal_sig}#{stats.get('max_ts', 0)}#{stats.get('total_records', 0)}"
+    def _row_signature(row):
+        return f"{row.get('signal_name','')}:{row.get('value','')}:{row.get('ts',0)}"
 
     @stream_with_context
     def generate():
-        last_sig = None
+        last_rows = {}
         while True:
             try:
                 rows = _bms_collector.query_latest_values()
                 stats = _bms_collector.get_stats()
-                sig = _signature(rows, stats)
-                if sig != last_sig:
+                row_map = {
+                    str(row.get('signal_name') or ''): row
+                    for row in rows
+                    if str(row.get('signal_name') or '').strip()
+                }
+                changed_rows = []
+                for signal_name, row in row_map.items():
+                    current_sig = _row_signature(row)
+                    if last_rows.get(signal_name) != current_sig:
+                        changed_rows.append(row)
+                        last_rows[signal_name] = current_sig
+                removed = [name for name in list(last_rows.keys()) if name not in row_map]
+                for name in removed:
+                    last_rows.pop(name, None)
+                if changed_rows or removed:
                     payload = json.dumps({
-                        "signals": rows,
+                        "signals": changed_rows,
+                        "removed_signals": removed,
                         "stats": stats,
+                        "partial": True,
                     }, ensure_ascii=False)
                     yield f"data: {payload}\n\n"
-                    last_sig = sig
                 else:
                     yield ": keepalive\n\n"
             except GeneratorExit:
