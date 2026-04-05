@@ -2,7 +2,7 @@
   <div class="bms-page">
     <section class="hero-panel">
       <div class="hero-copy">
-        <p class="eyebrow">BMS Command View</p>
+        <p class="eyebrow">BMS 看板</p>
         <h1>把实时信号、消息分组和告警流压缩成一个值守画面。</h1>
         <p class="hero-desc">
           参考优化指南里对缓存、增量刷新和状态可见性的要求，页面优先显示 freshness、关键信号和异常。
@@ -16,7 +16,7 @@
       <div class="hero-side">
         <div class="stream-card" :class="{ 'stream-card--live': streamConnected }">
           <span class="stream-label">实时流</span>
-          <strong>{{ streamConnected ? 'Streaming' : 'Reconnecting' }}</strong>
+          <strong>{{ streamConnected ? '实时接收中' : '正在重连' }}</strong>
           <p>{{ lastUpdatedText }}</p>
           <span class="stream-age">数据年龄 {{ lastAgeText }}</span>
         </div>
@@ -35,7 +35,7 @@
       <article class="section-card section-card--signal">
         <div class="section-head">
           <div>
-            <p class="section-kicker">Signal Focus</p>
+            <p class="section-kicker">关键信号</p>
             <h2>关键实时信号</h2>
           </div>
         </div>
@@ -60,7 +60,7 @@
       <article class="section-card section-card--alert">
         <div class="section-head">
           <div>
-            <p class="section-kicker">Alert Feed</p>
+            <p class="section-kicker">活动告警</p>
             <h2>活动告警</h2>
           </div>
         </div>
@@ -82,7 +82,7 @@
     <section class="section-card">
       <div class="section-head">
         <div>
-          <p class="section-kicker">Recent Stream</p>
+          <p class="section-kicker">最新信号</p>
           <h2>最新信号</h2>
         </div>
       </div>
@@ -99,7 +99,7 @@
       <article class="section-card">
         <div class="section-head">
           <div>
-            <p class="section-kicker">Message Groups</p>
+            <p class="section-kicker">消息分组</p>
             <h2>消息分组</h2>
           </div>
         </div>
@@ -119,7 +119,7 @@
       <article class="section-card">
         <div class="section-head">
           <div>
-            <p class="section-kicker">Alert Archive</p>
+            <p class="section-kicker">告警明细</p>
             <h2>告警明细</h2>
           </div>
         </div>

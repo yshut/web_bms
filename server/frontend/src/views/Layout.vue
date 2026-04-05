@@ -4,7 +4,7 @@
       <div class="logo">
         <div class="logo-mark">QC</div>
         <div>
-          <p class="logo-kicker">Control Center</p>
+          <p class="logo-kicker">设备控制台</p>
           <h2>QT Console</h2>
         </div>
       </div>
@@ -49,7 +49,7 @@
           <div class="header-metric">
             <span>连接</span>
             <strong class="status-pulse" :class="systemStore.isOnline ? 'status-pulse--good' : 'status-pulse--danger'">
-              {{ systemStore.isOnline ? 'ONLINE' : 'OFFLINE' }}
+              {{ systemStore.isOnline ? '在线' : '离线' }}
             </strong>
           </div>
           <span v-if="systemStore.deviceId" class="device-info">

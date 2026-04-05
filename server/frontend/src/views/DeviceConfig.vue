@@ -2,7 +2,7 @@
   <div class="device-config-page">
     <section class="hero-panel">
       <div class="hero-copy">
-        <p class="eyebrow">Device Setup</p>
+        <p class="eyebrow">设备配置</p>
         <h1>把网络、传输、CAN 与 WiFi 参数整理成更易校验的配置界面。</h1>
         <p class="hero-desc">
           重点优化字段分组、数值控件观感和留白节奏，减少高频参数编辑时的视觉噪声。
@@ -26,7 +26,7 @@
               :value="device"
             />
           </el-select>
-          <el-button type="primary" :loading="loading" @click="reloadAll">刷新配置</el-button>
+          <el-button type="primary" :loading="loading" @click="handleReloadAll">刷新配置</el-button>
         </div>
         <div class="device-meta">
           <div class="meta-chip">
@@ -50,7 +50,7 @@
         <template #header>
           <div class="card-head">
             <div>
-              <p class="section-kicker">Transport + CAN</p>
+              <p class="section-kicker">传输与 CAN</p>
               <span>传输与 CAN</span>
             </div>
             <el-button type="primary" :loading="saving.config" @click="saveConfig">保存</el-button>
@@ -89,7 +89,7 @@
           <el-form-item label="MQTT Username">
             <el-input v-model="configForm.mqtt_username" />
           </el-form-item>
-          <el-form-item label="MQTT Password">
+          <el-form-item label="MQTT 密码">
             <el-input v-model="configForm.mqtt_password" show-password />
           </el-form-item>
           <el-form-item label="MQTT TLS">
@@ -135,7 +135,7 @@
         <template #header>
           <div class="card-head">
             <div>
-              <p class="section-kicker">Network</p>
+              <p class="section-kicker">网络配置</p>
               <span>网络配置</span>
             </div>
             <el-button type="primary" :loading="saving.network" @click="saveNetwork">保存</el-button>
@@ -169,7 +169,7 @@
       <template #header>
         <div class="card-head">
           <div>
-            <p class="section-kicker">WiFi Link</p>
+            <p class="section-kicker">WiFi 状态</p>
             <span>WiFi</span>
           </div>
           <div class="wifi-actions">
@@ -189,7 +189,7 @@
           <el-form-item label="SSID">
             <el-input v-model="wifiForm.ssid" />
           </el-form-item>
-          <el-form-item label="Password">
+          <el-form-item label="密码">
             <el-input v-model="wifiForm.password" show-password />
           </el-form-item>
         </el-form>
@@ -346,8 +346,8 @@ function applyWifiStatus(result: Record<string, any>) {
   if (normalized.wifi_psk) wifiForm.password = String(normalized.wifi_psk);
 }
 
-async function reloadAll() {
-  loading.value = true;
+async function reloadAll(silent = false) {
+  if (!silent) loading.value = true;
   try {
     const [config, network, wifi] = await Promise.all([
       remoteConfigApi.getConfig(activeDeviceId.value || undefined),
@@ -395,6 +395,10 @@ async function reloadAll() {
   }
 }
 
+function handleReloadAll() {
+  void reloadAll();
+}
+
 async function onDeviceChange(value: string) {
   selectedDeviceId.value = value || '';
   await syncRoute(selectedDeviceId.value);
@@ -405,7 +409,10 @@ async function saveConfig() {
   saving.config = true;
   try {
     const result: any = await remoteConfigApi.saveConfig({ ...configForm }, activeDeviceId.value || undefined);
-    if (result?.ok) ElMessage.success('传输与 CAN 配置已保存');
+    if (result?.ok) {
+      ElMessage.success('传输与 CAN 配置已保存');
+      await reloadAll(true);
+    }
   } finally {
     saving.config = false;
   }
@@ -418,6 +425,7 @@ async function saveNetwork() {
     if (result?.ok) {
       ElMessage.success('网络配置已保存');
       wifiForm.wifi_iface = networkForm.wifi_iface;
+      await reloadAll(true);
     }
   } finally {
     saving.network = false;
@@ -436,6 +444,7 @@ async function saveWifi(connect: boolean) {
     if (result?.ok) {
       ElMessage.success(connect ? 'WiFi 已保存并发起连接' : 'WiFi 已保存');
       applyWifiStatus(result);
+      await reloadAll(true);
     }
   } finally {
     saving.wifiSave = false;

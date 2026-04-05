@@ -2,7 +2,7 @@
   <div class="hardware-page">
     <section class="hero-panel">
       <div class="hero-copy">
-        <p class="eyebrow">Hardware Watch</p>
+        <p class="eyebrow">硬件监控</p>
         <h1>把系统、网络、CAN 和存储放在同一状态面板里看。</h1>
         <p class="hero-desc">
           页面先给出健康结论，再展开关键负载和模块细节，减少操作时在卡片堆里来回寻找状态。
@@ -34,7 +34,7 @@
       <article class="section-card section-card--system">
         <div class="section-head">
           <div>
-            <p class="section-kicker">System Pulse</p>
+            <p class="section-kicker">系统负载</p>
             <h2>核心负载</h2>
           </div>
           <span :class="['state-pill', statusToneClass(systemTone)]">{{ statusName(data.system?.status ?? 1) }}</span>
@@ -85,7 +85,7 @@
       <article class="section-card">
         <div class="section-head">
           <div>
-            <p class="section-kicker">Network Link</p>
+            <p class="section-kicker">网络状态</p>
             <h2>网络接口</h2>
           </div>
           <span :class="['state-pill', statusToneClass(networkTone)]">{{ statusName(data.network?.status) }}</span>
@@ -171,7 +171,7 @@ const summaryCards = computed(() => ([
 
 const modules = computed(() => ([
   {
-    kicker: 'Bus Channel',
+    kicker: '总线通道',
     name: 'CAN0',
     status: statusName(data.can0?.status),
     tone: toneFromStatus(data.can0?.status),
@@ -184,7 +184,7 @@ const modules = computed(() => ([
     ],
   },
   {
-    kicker: 'Bus Channel',
+    kicker: '总线通道',
     name: 'CAN1',
     status: statusName(data.can1?.status),
     tone: toneFromStatus(data.can1?.status),
@@ -197,7 +197,7 @@ const modules = computed(() => ([
     ],
   },
   {
-    kicker: 'Storage Health',
+    kicker: '存储健康',
     name: '存储状态',
     status: statusName(data.storage?.status),
     tone: toneFromStatus(data.storage?.status),
@@ -268,7 +268,8 @@ function statusToneClass(value: string) {
 }
 
 async function reload() {
-  loading.value = true;
+  const shouldShowLoading = !lastUpdated.value;
+  if (shouldShowLoading) loading.value = true;
   try {
     const result: any = await hardwareApi.status();
     connected.value = !!result?.ok;

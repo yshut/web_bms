@@ -167,7 +167,8 @@ async function loadBase() {
 }
 
 async function listDir(path?: string) {
-  loading.value = true;
+  const shouldShowLoading = !items.value.length;
+  if (shouldShowLoading) loading.value = true;
   try {
     const targetPath = path || currentPath.value || baseDir.value || '/';
     currentPath.value = targetPath;

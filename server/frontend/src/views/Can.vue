@@ -2,7 +2,7 @@
   <div class="can-page">
     <section class="hero-panel">
       <div class="hero-copy">
-        <p class="eyebrow">CAN Stream</p>
+        <p class="eyebrow">CAN 监控</p>
         <h1>把采集状态、筛选条件和帧流放在同一工作台里。</h1>
         <p class="hero-desc">
           保留快速启动与刷新能力，但把运行状态、缓存规模和过滤结果提到首屏，减少抓帧时的跳读。
@@ -59,7 +59,7 @@
           <article class="stat-card">
             <span>运行状态</span>
             <strong class="status-pulse" :class="running ? 'status-pulse--good' : 'status-pulse--warning'">
-              {{ running ? 'RUNNING' : 'STOPPED' }}
+              {{ running ? '采集中' : '已停止' }}
             </strong>
             <p>来源 {{ source }}</p>
           </article>
@@ -80,7 +80,7 @@
     <section class="section-card">
       <div class="section-head">
         <div>
-          <p class="section-kicker">Frame Table</p>
+          <p class="section-kicker">帧列表</p>
           <h2>CAN 帧</h2>
         </div>
         <span class="table-note">最多保留 500 行，避免浏览器堆积</span>

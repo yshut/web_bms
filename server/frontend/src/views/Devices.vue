@@ -2,7 +2,7 @@
   <div class="devices-page">
     <section class="hero-panel">
       <div class="hero-copy">
-        <p class="eyebrow">Fleet Watch</p>
+        <p class="eyebrow">设备总览</p>
         <h1>把在线、历史、连接质量和规则规模汇总成设备总览。</h1>
         <p class="hero-desc">
           页面先给出设备规模和在线比率，再保留表格做逐台追踪，适合远程值守和筛查异常节点。
@@ -44,7 +44,7 @@
       <article class="section-card">
         <div class="section-head">
           <div>
-            <p class="section-kicker">Online Nodes</p>
+            <p class="section-kicker">在线状态</p>
             <h2>在线设备</h2>
           </div>
           <span class="meta">{{ onlineRows.length }} 台</span>
@@ -55,7 +55,7 @@
               <strong>{{ row.id }}</strong>
               <p>{{ formatUptime(row.status?.uptime_seconds) }}</p>
             </div>
-            <span class="status-pulse status-pulse--good">ONLINE</span>
+            <span class="status-pulse status-pulse--good">在线</span>
           </div>
           <div v-if="!onlineRows.length" class="empty-state">当前没有在线设备</div>
         </div>
@@ -64,7 +64,7 @@
       <article class="section-card">
         <div class="section-head">
           <div>
-            <p class="section-kicker">Offline Nodes</p>
+            <p class="section-kicker">离线状态</p>
             <h2>离线设备</h2>
           </div>
           <span class="meta">{{ offlineRows.length }} 台</span>
@@ -75,7 +75,7 @@
               <strong>{{ row.id }}</strong>
               <p>{{ row.status?.mqtt_host || '-' }}</p>
             </div>
-            <span class="status-pulse status-pulse--danger">OFFLINE</span>
+            <span class="status-pulse status-pulse--danger">离线</span>
           </div>
           <div v-if="!offlineRows.length" class="empty-state">当前没有离线设备</div>
         </div>
@@ -85,7 +85,7 @@
     <section class="section-card">
       <div class="section-head">
         <div>
-          <p class="section-kicker">Fleet Table</p>
+          <p class="section-kicker">设备明细</p>
           <h2>设备列表</h2>
         </div>
       </div>
@@ -154,7 +154,8 @@ function formatUptime(value: number | string) {
 }
 
 async function reload() {
-  loading.value = true;
+  const shouldShowLoading = !historyDevices.value.length && !onlineDevices.value.length;
+  if (shouldShowLoading) loading.value = true;
   try {
     const list: any = await deviceApi.list();
     onlineDevices.value = list?.devices || [];

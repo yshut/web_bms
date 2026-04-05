@@ -2,7 +2,7 @@
   <div class="uds-page">
     <el-card shadow="hover">
       <div class="toolbar">
-        <el-button type="primary" :loading="loading" @click="reload">刷新</el-button>
+        <el-button type="primary" :loading="loading" @click="handleReload">刷新</el-button>
         <el-button @click="pickFirmware">上传固件</el-button>
         <input ref="fileInput" type="file" class="hidden-input" @change="onUpload" />
       </div>
@@ -109,8 +109,8 @@ function formatBytes(value: number | string) {
   return `${(num / 1024 / 1024).toFixed(1)} MB`;
 }
 
-async function reload() {
-  loading.value = true;
+async function reload(silent = false) {
+  if (!silent) loading.value = true;
   try {
     const [cfg, list, state, progressResp, logsResp] = await Promise.all([
       udsApi.config(),
@@ -130,16 +130,23 @@ async function reload() {
   }
 }
 
+function handleReload() {
+  void reload();
+}
+
 async function saveConfig() {
   const result: any = await udsApi.saveConfig({ ...config });
-  if (result?.ok) ElMessage.success('UDS 参数已保存');
+  if (result?.ok) {
+    ElMessage.success('UDS 参数已保存');
+    await reload(true);
+  }
 }
 
 async function selectFile(path: string) {
   const result: any = await udsApi.setFile(path);
   if (result?.ok) {
     ElMessage.success('已选择固件');
-    currentFile.value = path;
+    await reload(true);
   }
 }
 
@@ -154,7 +161,7 @@ async function onUpload(event: Event) {
   const result: any = await udsApi.upload(file);
   if (result?.ok) {
     ElMessage.success('固件上传成功');
-    await reload();
+    await reload(true);
   }
   input.value = '';
 }
@@ -163,7 +170,7 @@ async function start() {
   const result: any = await udsApi.start();
   if (result?.ok) {
     ElMessage.success('已启动');
-    await reload();
+    await reload(true);
   }
 }
 
@@ -171,13 +178,15 @@ async function stop() {
   const result: any = await udsApi.stop();
   if (result?.ok) {
     ElMessage.success('已停止');
-    await reload();
+    await reload(true);
   }
 }
 
 onMounted(async () => {
   await reload();
-  reloadTimer = window.setInterval(reload, 3000);
+  reloadTimer = window.setInterval(() => {
+    void reload(true);
+  }, 3000);
 });
 
 onBeforeUnmount(() => {

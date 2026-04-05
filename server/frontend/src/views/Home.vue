@@ -2,7 +2,7 @@
   <div class="home-page">
     <section class="hero-panel">
       <div class="hero-copy">
-        <p class="eyebrow">Operations Workspace</p>
+        <p class="eyebrow">控制台概览</p>
         <h1>设备、链路与规则在同一操作面上联动。</h1>
         <p class="hero-desc">
           当前控制台聚焦在线状态、运行版本、硬件健康度和 BMS 数据刷新情况，适合日常调试与值守切换。
@@ -22,7 +22,7 @@
       <article class="overview-panel section-card">
         <div class="section-head">
           <div>
-            <p class="section-kicker">System Pulse</p>
+            <p class="section-kicker">系统状态</p>
             <h2>实时总览</h2>
           </div>
           <span class="subtle">{{ lastUpdatedText }}</span>
@@ -31,7 +31,7 @@
           <div class="signal-row">
             <span>设备连接</span>
             <strong :class="{ good: systemStore.isOnline, bad: !systemStore.isOnline }">
-              {{ systemStore.isOnline ? 'ONLINE' : 'OFFLINE' }}
+              {{ systemStore.isOnline ? '在线' : '离线' }}
             </strong>
           </div>
           <div class="signal-row">
@@ -52,7 +52,7 @@
       <article class="section-card section-card--accent">
         <div class="section-head">
           <div>
-            <p class="section-kicker">Quick Path</p>
+            <p class="section-kicker">重点功能</p>
             <h2>高频入口</h2>
           </div>
         </div>
@@ -72,7 +72,7 @@
     <section class="workspace section-card">
       <div class="section-head">
         <div>
-          <p class="section-kicker">Workspace</p>
+          <p class="section-kicker">功能总览</p>
           <h2>功能区</h2>
         </div>
       </div>

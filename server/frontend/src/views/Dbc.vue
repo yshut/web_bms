@@ -2,10 +2,10 @@
   <div class="dbc-page">
     <el-card shadow="hover">
       <div class="toolbar">
-        <el-upload action="/api/dbc/upload" :show-file-list="false" :on-success="reload" accept=".dbc,.kcd">
+        <el-upload action="/api/dbc/upload" :show-file-list="false" :on-success="onUploadSuccess" accept=".dbc,.kcd">
           <el-button type="primary">上传 DBC</el-button>
         </el-upload>
-        <el-button @click="reloadMappings">刷新映射</el-button>
+        <el-button :loading="loading" @click="handleReloadMappings">刷新映射</el-button>
         <el-input v-model="mappingPrefix" placeholder="ID 前缀过滤，如 188" style="width: 180px" />
       </div>
     </el-card>
@@ -13,7 +13,7 @@
     <div class="grid">
       <el-card shadow="hover">
         <template #header><span>文件列表</span></template>
-        <el-table :data="dbcFiles" size="small">
+        <el-table :data="dbcFiles" v-loading="loading" size="small">
           <el-table-column prop="name" label="文件名" min-width="220" />
           <el-table-column label="大小" width="120">
             <template #default="{ row }">{{ formatSize(row.size) }}</template>
@@ -37,7 +37,7 @@
 
     <el-card shadow="hover">
       <template #header><span>映射</span></template>
-      <el-table :data="mappings" size="small" max-height="320">
+      <el-table :data="mappings" v-loading="loading" size="small" max-height="320">
         <el-table-column prop="id_hex" label="CAN ID" width="120" />
         <el-table-column prop="name" label="消息名" min-width="180" />
         <el-table-column prop="file" label="文件" min-width="180" />
@@ -46,7 +46,7 @@
 
     <el-card shadow="hover">
       <template #header><span>信号定义</span></template>
-      <el-table :data="signals" size="small" max-height="360">
+      <el-table :data="signals" v-loading="loading" size="small" max-height="360">
         <el-table-column prop="message_name" label="消息" min-width="180" />
         <el-table-column prop="signal_name" label="信号" min-width="180" />
         <el-table-column prop="unit" label="单位" width="100" />
@@ -65,6 +65,7 @@ const dbcFiles = ref<any[]>([]);
 const mappings = ref<any[]>([]);
 const signals = ref<any[]>([]);
 const stats = ref<Record<string, any>>({});
+const loading = ref(false);
 const mappingPrefix = ref('');
 
 function formatSize(size: number) {
@@ -73,19 +74,33 @@ function formatSize(size: number) {
   return `${(size / 1024 / 1024).toFixed(1)} MB`;
 }
 
-async function reload() {
-  const [list, statsResp] = await Promise.all([
-    dbcApi.list(),
-    dbcApi.stats(),
-  ]) as any[];
-  dbcFiles.value = list?.data?.items || [];
-  stats.value = statsResp || {};
-  await reloadMappings();
+async function reload(silent = false) {
+  if (!silent) loading.value = true;
+  try {
+    const [list, statsResp] = await Promise.all([
+      dbcApi.list(),
+      dbcApi.stats(),
+    ]) as any[];
+    dbcFiles.value = list?.data?.items || [];
+    stats.value = statsResp || {};
+    await reloadMappings(silent);
+  } finally {
+    loading.value = false;
+  }
 }
 
-async function reloadMappings() {
-  const result: any = await dbcApi.mappings(mappingPrefix.value || undefined);
-  mappings.value = result?.mappings || [];
+async function reloadMappings(silent = false) {
+  if (!silent && !mappings.value.length) loading.value = true;
+  try {
+    const result: any = await dbcApi.mappings(mappingPrefix.value || undefined);
+    mappings.value = result?.mappings || [];
+  } finally {
+    loading.value = false;
+  }
+}
+
+function handleReloadMappings() {
+  void reloadMappings();
 }
 
 async function loadSignals(name: string) {
@@ -94,15 +109,22 @@ async function loadSignals(name: string) {
   signals.value = Object.values(nextSignals);
 }
 
+async function onUploadSuccess() {
+  ElMessage.success('DBC 文件已上传');
+  await reload(true);
+}
+
 async function deleteFile(name: string) {
   const result: any = await dbcApi.delete(name);
   if (result?.ok) {
     ElMessage.success('删除成功');
-    await reload();
+    await reload(true);
   }
 }
 
-onMounted(reload);
+onMounted(() => {
+  void reload();
+});
 </script>
 
 <style scoped>

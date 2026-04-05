@@ -2,7 +2,7 @@
   <div class="rules-page">
     <section class="hero-panel">
       <div class="hero-copy">
-        <p class="eyebrow">Rules Control</p>
+        <p class="eyebrow">规则管理</p>
         <h1>把筛选条件、同步动作和规则规模放在一个清晰的控制面板里。</h1>
         <p class="hero-desc">
           先确定设备、状态和帧范围，再进入分组后的规则表，避免长工具栏把关键操作淹没。
@@ -389,7 +389,8 @@ async function loadDevices() {
 }
 
 async function reload() {
-  loading.value = true;
+  const shouldShowLoading = !items.value.length && total.value === 0;
+  if (shouldShowLoading) loading.value = true;
   try {
     const result: any = await rulesApi.query({
       device_id: activeDeviceId.value || undefined,

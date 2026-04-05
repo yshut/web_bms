@@ -2,7 +2,7 @@
   <div class="wallboard">
     <section class="wallboard-hero">
       <div>
-        <p class="eyebrow">Realtime Wallboard</p>
+        <p class="eyebrow">运行大屏</p>
         <h1>运行态势总览</h1>
         <p class="hero-desc">
           面向大屏值守场景，持续汇总设备在线状态、硬件健康度、BMS 告警与关键实时信号。
@@ -20,7 +20,7 @@
           </div>
           <div class="status-pill" :class="{ live: streamConnected }">
             <span class="status-dot"></span>
-            {{ streamConnected ? 'BMS 流已连接' : 'BMS 流重连中' }}
+            {{ streamConnected ? 'BMS 流已连接' : 'BMS 流重连中，请稍候' }}
           </div>
         </div>
       </div>
@@ -38,7 +38,7 @@
       <article class="panel panel--wide">
         <div class="panel-head">
           <div>
-            <p class="kicker">Hardware Trend</p>
+            <p class="kicker">硬件趋势</p>
             <h2>设备健康趋势</h2>
           </div>
           <span>{{ lastHardwareText }}</span>
@@ -98,7 +98,7 @@
       <article class="panel">
         <div class="panel-head">
           <div>
-            <p class="kicker">Signal Focus</p>
+            <p class="kicker">关键信号</p>
             <h2>关键实时信号</h2>
           </div>
         </div>
@@ -125,7 +125,7 @@
       <article class="panel">
         <div class="panel-head">
           <div>
-            <p class="kicker">Alert Feed</p>
+            <p class="kicker">活动告警</p>
             <h2>活动告警</h2>
           </div>
         </div>
@@ -145,7 +145,7 @@
       <article class="panel">
         <div class="panel-head">
           <div>
-            <p class="kicker">Connection Matrix</p>
+            <p class="kicker">设备与链路</p>
             <h2>设备与链路</h2>
           </div>
         </div>
@@ -160,7 +160,7 @@
           </div>
           <div class="matrix-row">
             <span>Socket</span>
-            <strong>{{ systemStore.connected ? 'Connected' : 'Disconnected' }}</strong>
+            <strong>{{ systemStore.connected ? '已连接' : '未连接' }}</strong>
           </div>
           <div class="matrix-row">
             <span>网络接口</span>
@@ -168,7 +168,7 @@
           </div>
           <div class="matrix-row">
             <span>MQTT/BMS</span>
-            <strong>{{ streamConnected ? 'Streaming' : 'Reconnecting' }}</strong>
+            <strong>{{ streamConnected ? '实时接收中' : '正在重连' }}</strong>
           </div>
           <div class="matrix-row">
             <span>最后刷新</span>
@@ -218,7 +218,7 @@ const lastBoardUpdate = computed(() => signalTimestamp(lastBoardStamp.value / 10
 const headlineMetrics = computed(() => ([
   {
     label: '在线状态',
-    value: systemStore.isOnline ? 'ONLINE' : 'OFFLINE',
+    value: systemStore.isOnline ? '在线' : '离线',
     detail: systemStore.deviceId || '等待接入设备',
   },
   {
@@ -286,10 +286,10 @@ function alertLevelClass(level: string) {
 
 function canStatusText(key: 'can0' | 'can1') {
   const value = Number(hardware[key]?.status ?? -1);
-  if (value === 1) return 'Normal';
-  if (value === 2) return 'Warn';
-  if (value === 3) return 'Error';
-  return 'Offline';
+  if (value === 1) return '正常';
+  if (value === 2) return '告警';
+  if (value === 3) return '错误';
+  return '离线';
 }
 
 function pushTrend(target: { value: number[] }, nextValue: number) {
