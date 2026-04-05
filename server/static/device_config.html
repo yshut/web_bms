@@ -73,6 +73,7 @@ table tr:hover td{background:#1e293b55}
     <select id="device-id" onchange="onDeviceChange()" style="width:220px"></select>
     <button class="btn btn-s" onclick="refreshDeviceList()" style="padding:5px 12px">Refresh</button>
     <button class="btn btn-s" onclick="connectDevice()" style="padding:5px 12px">Connect</button>
+    <button class="btn btn-p" onclick="openConsoleConfig()" style="padding:5px 12px">新配置页</button>
   </div>
   <div id="build-info" class="build-chip" title="部署版本检查中">
     <span>Build</span>
@@ -497,6 +498,12 @@ function apiUrl(url) {
 }
 function openConsoleRules() {
   var url = '/console/rules-v2';
+  if(gDeviceId) url += '?device_id=' + encodeURIComponent(gDeviceId);
+  if(gDeviceIp) url += (url.indexOf('?') >= 0 ? '&' : '?') + 'device=' + encodeURIComponent(gDeviceIp);
+  window.location.href = url;
+}
+function openConsoleConfig() {
+  var url = '/console/device-config-v2';
   if(gDeviceId) url += '?device_id=' + encodeURIComponent(gDeviceId);
   if(gDeviceIp) url += (url.indexOf('?') >= 0 ? '&' : '?') + 'device=' + encodeURIComponent(gDeviceIp);
   window.location.href = url;

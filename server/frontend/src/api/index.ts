@@ -95,6 +95,41 @@ export const deviceApi = {
   list: () => api.get('/device/list'),
 };
 
+export const remoteConfigApi = {
+  getConfig: (deviceId?: string) =>
+    api.get('/device/remote/config', {
+      params: deviceId ? { device_id: deviceId } : undefined,
+    }),
+  saveConfig: (body: Record<string, any>, deviceId?: string) =>
+    api.post('/device/remote/config', body, {
+      params: deviceId ? { device_id: deviceId } : undefined,
+    }),
+  getNetwork: (deviceId?: string) =>
+    api.get('/device/remote/network', {
+      params: deviceId ? { device_id: deviceId } : undefined,
+    }),
+  saveNetwork: (body: Record<string, any>, deviceId?: string) =>
+    api.post('/device/remote/network', body, {
+      params: deviceId ? { device_id: deviceId } : undefined,
+    }),
+  getWifi: (deviceId?: string) =>
+    api.get('/device/remote/wifi', {
+      params: deviceId ? { device_id: deviceId } : undefined,
+    }),
+  saveWifi: (body: Record<string, any>, deviceId?: string) =>
+    api.post('/device/remote/wifi', body, {
+      params: deviceId ? { device_id: deviceId } : undefined,
+    }),
+  scanWifi: (deviceId?: string) =>
+    api.post('/device/remote/wifi/scan', {}, {
+      params: deviceId ? { device_id: deviceId } : undefined,
+    }),
+  disconnectWifi: (deviceId?: string) =>
+    api.post('/device/remote/wifi/disconnect', {}, {
+      params: deviceId ? { device_id: deviceId } : undefined,
+    }),
+};
+
 export const rulesApi = {
   query: (params: {
     device_id?: string;

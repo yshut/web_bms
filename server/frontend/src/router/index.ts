@@ -9,6 +9,12 @@ const routes: RouteRecordRaw[] = [
     redirect: '/can',
     children: [
       {
+        path: '/device-config-v2',
+        name: 'DeviceConfigV2',
+        component: () => import('@/views/DeviceConfig.vue'),
+        meta: { title: '设备配置', icon: 'Setting' },
+      },
+      {
         path: '/can',
         name: 'Can',
         component: () => import('@/views/Can.vue'),
