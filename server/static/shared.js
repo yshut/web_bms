@@ -46,15 +46,15 @@
   }
 
   function navItems() {
-    // 路由优先用 server/web_server.py 提供的入口；工具页用 /static/*.html
+    // 已迁移页面优先走 /console/*，未迁移的兼容页保留原入口
     return [
-      { href: "/", label: "主页" },
-      { href: "/can", label: "CAN 监控" },
+      { href: "/console/", label: "主页" },
+      { href: "/console/can", label: "CAN 监控" },
       { href: "/hardware", label: "硬件监控" },
-      { href: "/dbc", label: "DBC 解析" },
-      { href: "/uds", label: "UDS" },
+      { href: "/console/dbc", label: "DBC 解析" },
+      { href: "/console/uds", label: "UDS" },
       { href: "/files", label: "文件管理" },
-      { href: "/device_config", label: "设备配置" },
+      { href: "/console/device-config-v2", label: "设备配置" },
     ];
   }
 

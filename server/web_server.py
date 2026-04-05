@@ -1572,10 +1572,7 @@ def sync_auth_cookies(resp):
 
 @app.route('/')
 def index():
-    resp = send_from_directory(app.static_folder, 'index.html')
-    resp.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
-    resp.headers['Pragma'] = 'no-cache'
-    return resp
+    return redirect('/console/')
 
 
 def _frontend_console_response():
@@ -1628,20 +1625,12 @@ def test_page():
 @app.route('/can')
 @app.route('/can_monitor')
 def can_monitor():
-    """CAN监控页面"""
-    resp = send_from_directory(app.static_folder, 'can_monitor.html')
-    resp.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
-    resp.headers['Pragma'] = 'no-cache'
-    return resp
+    return redirect('/console/can')
 
 @app.route('/dbc_viewer')
 @app.route('/dbc')
 def dbc_viewer():
-    """DBC信号实时解析页面"""
-    resp = send_from_directory(app.static_folder, 'dbc_viewer.html')
-    resp.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
-    resp.headers['Pragma'] = 'no-cache'
-    return resp
+    return redirect('/console/dbc')
 
 @app.route('/api/status', methods=['GET'])
 def api_status():
@@ -2873,11 +2862,7 @@ def api_dbc_parse():
 # 新增：UDS 固件下载页面
 @app.route('/uds')
 def uds():
-    """UDS 固件下载界面"""
-    resp = send_from_directory(app.static_folder, 'uds.html')
-    resp.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
-    resp.headers['Pragma'] = 'no-cache'
-    return resp
+    return redirect('/console/uds')
 
 @app.route('/api/can/live_data', methods=['GET'])
 def api_can_live_data():
@@ -3865,7 +3850,7 @@ def _device_proxy(device_ip: str, path: str, method: str, body: bytes = None,
 
 @app.route('/device_config')
 def device_config_page():
-    return send_from_directory('static', 'device_config.html')
+    return redirect('/console/device-config-v2')
 
 @app.route('/files')
 def file_manager_page():
@@ -4619,10 +4604,7 @@ def api_rules_push_local():
 
 @app.route('/rules')
 def rules_page():
-    """CAN-MQTT 规则管理页面"""
-    resp = send_from_directory(app.static_folder, 'can_mqtt_rules.html')
-    resp.headers['Cache-Control'] = 'no-store, no-cache'
-    return resp
+    return redirect('/console/rules-v2')
 
 @app.route('/rules/editor')
 def rules_editor_page():

@@ -19,45 +19,28 @@
     button{width:100%;padding:12px 14px;border:none;border-radius:10px;background:var(--acc);color:#fff;font-size:15px;font-weight:600;cursor:pointer}
     button:disabled{opacity:.6;cursor:default}
     .msg{min-height:22px;margin-top:14px;font-size:14px;color:var(--err)}
-    .hint{margin-top:16px;padding:12px 14px;border:1px solid #22314a;border-radius:12px;background:#0d1627;color:var(--muted);font-size:13px}
-    .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;color:var(--text)}
   </style>
 </head>
 <body>
   <div class="card">
     <h1>系统登录</h1>
-    <p>登录后可访问设备配置、CAN 监控、规则管理和控制台页面。只读账号登录后只能查看，不能修改。</p>
+    <p>登录后可访问设备配置、CAN 监控、规则管理和控制台页面。</p>
     <form id="login-form">
       <label for="username">用户名</label>
-      <input id="username" name="username" autocomplete="username" value="admin">
+      <input id="username" name="username" autocomplete="username">
       <label for="password">密码</label>
-      <input id="password" name="password" type="password" autocomplete="current-password" value="yst123456.">
+      <input id="password" name="password" type="password" autocomplete="current-password">
       <button id="submit-btn" type="submit">登录</button>
       <div class="msg" id="msg"></div>
     </form>
-    <div class="hint">
-      默认账号：<span class="mono">admin</span><br>
-      默认密码：<span class="mono">yst123456.</span>
-      <div id="viewer-hint" style="display:none;margin-top:10px">
-        只读账号：<span class="mono">viewer</span>
-      </div>
-    </div>
   </div>
   <script>
     (function () {
       var form = document.getElementById('login-form');
       var msg = document.getElementById('msg');
       var button = document.getElementById('submit-btn');
-      var viewerHint = document.getElementById('viewer-hint');
       var params = new URLSearchParams(window.location.search);
       var next = params.get('next') || '/';
-
-      fetch('/api/auth/status', { cache: 'no-store' })
-        .then(function (resp) { return resp.json(); })
-        .then(function (data) {
-          if (data && data.viewer_enabled) viewerHint.style.display = 'block';
-        })
-        .catch(function () {});
 
       form.addEventListener('submit', async function (event) {
         event.preventDefault();
