@@ -122,26 +122,79 @@
         </el-table-column>
       </el-table>
 
-      <el-table :data="items" v-loading="loading" style="width: 100%" max-height="640" empty-text="暂无 CAN 转 MQTT 规则">
-        <el-table-column prop="id" label="规则ID" min-width="180" />
-        <el-table-column prop="name" label="名称" min-width="160" />
-        <el-table-column label="状态" width="100">
+      <div class="frame-summary">
+        <span>当前页规则 {{ items.length }} 条</span>
+        <span>整理后帧 {{ frameRows.length }} 条</span>
+      </div>
+
+      <el-table :data="frameRows" v-loading="loading" style="width: 100%" max-height="640" empty-text="暂无 CAN 转 MQTT 规则">
+        <el-table-column type="expand" width="48">
           <template #default="{ row }">
-            <el-tag :type="row.enabled ? 'success' : 'info'">{{ row.enabled ? '启用' : '禁用' }}</el-tag>
+            <div class="frame-detail">
+              <div class="frame-topic-list">
+                <el-tag
+                  v-for="topic in row.topics"
+                  :key="topic"
+                  class="topic-tag"
+                  size="small"
+                  effect="plain"
+                >
+                  {{ topic }}
+                </el-tag>
+              </div>
+              <el-table :data="row.rules" size="small" border>
+                <el-table-column prop="id" label="规则ID" min-width="180" />
+                <el-table-column prop="name" label="名称" min-width="160" />
+                <el-table-column label="状态" width="90">
+                  <template #default="{ row: rule }">
+                    <el-tag :type="rule.enabled ? 'success' : 'info'" size="small">{{ rule.enabled ? '启用' : '禁用' }}</el-tag>
+                  </template>
+                </el-table-column>
+                <el-table-column prop="signal_name" label="信号" min-width="160" />
+                <el-table-column label="MQTT Topic" min-width="280">
+                  <template #default="{ row: rule }">{{ rule.mqtt?.topic_template || '' }}</template>
+                </el-table-column>
+                <el-table-column label="解析" min-width="180">
+                  <template #default="{ row: rule }">{{ decodeText(rule) }}</template>
+                </el-table-column>
+              </el-table>
+            </div>
           </template>
         </el-table-column>
+        <el-table-column prop="message_name" label="报文" min-width="180" />
         <el-table-column label="接口" width="90">
           <template #default="{ row }">{{ row.channel || 'any' }}</template>
         </el-table-column>
         <el-table-column label="CAN ID" width="120">
           <template #default="{ row }">{{ row.match_any_id ? 'ANY' : hexId(row.can_id) }}</template>
         </el-table-column>
-        <el-table-column prop="signal_name" label="信号" min-width="180" />
-        <el-table-column label="MQTT Topic" min-width="280">
-          <template #default="{ row }">{{ row.mqtt?.topic_template || '' }}</template>
+        <el-table-column label="帧类型" width="100">
+          <template #default="{ row }">{{ row.match_any_id ? 'ANY' : (row.is_extended ? '扩展帧' : '标准帧') }}</template>
         </el-table-column>
-        <el-table-column label="解析" min-width="180">
-          <template #default="{ row }">{{ decodeText(row) }}</template>
+        <el-table-column label="规则数" width="90">
+          <template #default="{ row }">{{ row.rule_count }}</template>
+        </el-table-column>
+        <el-table-column label="信号" min-width="260">
+          <template #default="{ row }">
+            <div class="signal-list">
+              <el-tag
+                v-for="signal in row.signals"
+                :key="signal"
+                size="small"
+                effect="plain"
+                class="signal-tag"
+              >
+                {{ signal }}
+              </el-tag>
+            </div>
+          </template>
+        </el-table-column>
+        <el-table-column label="MQTT Topic" min-width="320">
+          <template #default="{ row }">
+            <div class="topic-list">
+              <div v-for="topic in row.topics" :key="topic" class="topic-item">{{ topic }}</div>
+            </div>
+          </template>
         </el-table-column>
       </el-table>
 
@@ -259,6 +312,38 @@ function decodeText(row: any) {
   if (d.unit) parts.push(d.unit);
   return parts.join(' ');
 }
+
+const frameRows = computed(() => {
+  const frameMap = new Map<string, any>();
+  for (const rule of items.value) {
+    const key = [
+      rule.channel || 'any',
+      rule.match_any_id ? 'any' : String(rule.can_id ?? 0),
+      rule.is_extended ? 'ext' : 'std',
+      rule.message_name || '',
+    ].join('|');
+    const current = frameMap.get(key) || {
+      key,
+      channel: rule.channel || 'any',
+      can_id: Number(rule.can_id ?? 0),
+      match_any_id: !!rule.match_any_id,
+      is_extended: !!rule.is_extended,
+      message_name: rule.message_name || rule.name || '-',
+      rules: [] as any[],
+      signals: [] as string[],
+      topics: [] as string[],
+      rule_count: 0,
+    };
+    current.rules.push(rule);
+    current.rule_count = current.rules.length;
+    const signal = String(rule.signal_name || '').trim();
+    if (signal && !current.signals.includes(signal)) current.signals.push(signal);
+    const topic = String(rule.mqtt?.topic_template || '').trim();
+    if (topic && !current.topics.includes(topic)) current.topics.push(topic);
+    frameMap.set(key, current);
+  }
+  return Array.from(frameMap.values());
+});
 
 async function syncRoute(deviceId: string) {
   const query = { ...route.query } as Record<string, string>;
@@ -457,6 +542,41 @@ onBeforeUnmount(() => {
   justify-content: space-between;
   align-items: center;
   gap: 12px;
+}
+
+.frame-summary {
+  display: flex;
+  gap: 16px;
+  color: #606266;
+  font-size: 13px;
+  margin-bottom: 12px;
+}
+
+.frame-detail {
+  display: grid;
+  gap: 12px;
+}
+
+.frame-topic-list,
+.signal-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.topic-list {
+  display: grid;
+  gap: 4px;
+}
+
+.topic-item {
+  line-height: 1.5;
+  word-break: break-all;
+}
+
+.topic-tag,
+.signal-tag {
+  max-width: 100%;
 }
 
 .table-actions {
