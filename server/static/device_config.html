@@ -300,8 +300,53 @@ table tr:hover td{background:#1e293b55}
   <div style="display:flex;gap:8px;margin-bottom:14px;align-items:center">
     <button class="btn btn-p" onclick="addRule()">+ 新增规则</button>
     <button class="btn btn-s" onclick="loadRules()">刷新</button>
+    <button class="btn btn-s" onclick="clearRuleFilters()">清空筛选</button>
     <span style="color:var(--txt2);font-size:12px">共 <b id="rule-count">0</b> 条规则</span>
     <span class="msg" id="rules-msg" style="margin:0;margin-left:auto"></span>
+  </div>
+  <div class="row" style="margin-bottom:14px">
+    <div class="card" style="margin-bottom:0">
+      <h3>规则概览</h3>
+      <div class="row">
+        <div><label class="lbl">总数</label><div id="rules-total" style="font-size:24px;font-weight:700">0</div></div>
+        <div><label class="lbl">启用</label><div id="rules-enabled" style="font-size:24px;font-weight:700;color:var(--ok)">0</div></div>
+      </div>
+      <div class="row" style="margin-bottom:0">
+        <div><label class="lbl">禁用</label><div id="rules-disabled" style="font-size:24px;font-weight:700;color:var(--err)">0</div></div>
+        <div><label class="lbl">ANY 匹配</label><div id="rules-any" style="font-size:24px;font-weight:700;color:var(--warn)">0</div></div>
+      </div>
+    </div>
+    <div class="card" style="margin-bottom:0">
+      <h3>筛选</h3>
+      <div class="row">
+        <div><label class="lbl">搜索</label><input id="rule-search" placeholder="规则名 / 报文 / 信号 / Topic / CAN ID" oninput="renderRules()"></div>
+        <div><label class="lbl">接口</label>
+          <select id="rule-filter-iface" onchange="renderRules()">
+            <option value="">全部</option>
+            <option value="can0">can0</option>
+            <option value="can1">can1</option>
+            <option value="any">any</option>
+          </select>
+        </div>
+      </div>
+      <div class="row" style="margin-bottom:0">
+        <div><label class="lbl">状态</label>
+          <select id="rule-filter-enabled" onchange="renderRules()">
+            <option value="">全部</option>
+            <option value="true">仅启用</option>
+            <option value="false">仅禁用</option>
+          </select>
+        </div>
+        <div><label class="lbl">帧类型</label>
+          <select id="rule-filter-frame" onchange="renderRules()">
+            <option value="">全部</option>
+            <option value="std">标准帧</option>
+            <option value="ext">扩展帧</option>
+            <option value="any_id">ANY ID</option>
+          </select>
+        </div>
+      </div>
+    </div>
   </div>
   <div id="rules-list"></div>
   <div id="rule-editor" style="display:none" class="card">
@@ -904,12 +949,54 @@ function syncRules(){
   if(!Array.isArray(gr.rules)) gr.rules = [];
   gr.rules = gr.rules.map(normRule);
 }
+function updateRuleSummary(rules){
+  rules = Array.isArray(rules) ? rules : [];
+  var enabled = rules.filter(function(rule){ return !!rule.enabled; }).length;
+  var anyCount = rules.filter(function(rule){ return !!rule.match_any_id; }).length;
+  document.getElementById('rules-total').textContent = String(rules.length);
+  document.getElementById('rules-enabled').textContent = String(enabled);
+  document.getElementById('rules-disabled').textContent = String(rules.length - enabled);
+  document.getElementById('rules-any').textContent = String(anyCount);
+}
+function getRuleFilterState(){
+  return {
+    q: String((document.getElementById('rule-search') || {}).value || '').trim().toLowerCase(),
+    iface: String((document.getElementById('rule-filter-iface') || {}).value || '').trim(),
+    enabled: String((document.getElementById('rule-filter-enabled') || {}).value || '').trim(),
+    frame: String((document.getElementById('rule-filter-frame') || {}).value || '').trim()
+  };
+}
+function ruleMatchesFilter(rule, filter){
+  if(filter.iface && (rule.channel || 'any') !== filter.iface) return false;
+  if(filter.enabled === 'true' && !rule.enabled) return false;
+  if(filter.enabled === 'false' && rule.enabled) return false;
+  if(filter.frame === 'std' && rule.is_extended) return false;
+  if(filter.frame === 'ext' && !rule.is_extended) return false;
+  if(filter.frame === 'any_id' && !rule.match_any_id) return false;
+  if(filter.q) {
+    var topic = ((rule.mqtt || {}).topic_template || '').toLowerCase();
+    var hay = [
+      rule.id, rule.name, rule.message_name, rule.signal_name,
+      rule.channel, rule.match_any_id ? 'any' : ruleHex(rule.can_id), topic
+    ].join(' ').toLowerCase();
+    if(hay.indexOf(filter.q) < 0) return false;
+  }
+  return true;
+}
+function clearRuleFilters(){
+  document.getElementById('rule-search').value = '';
+  document.getElementById('rule-filter-iface').value = '';
+  document.getElementById('rule-filter-enabled').value = '';
+  document.getElementById('rule-filter-frame').value = '';
+  renderRules();
+}
 async function loadRules() {
   try {
     var r = await api('rules', {cache:'no-store'}), d = await r.json();
     gr = (d && typeof d === 'object') ? d : {version:1,rules:[]};
     syncRules();
     document.getElementById('rule-count').textContent = (gr.rules||[]).length;
+    updateRuleSummary(gr.rules || []);
     if(d && d.ok === false) {
       var extra = [];
       if(d.source) extra.push(d.source);
@@ -927,23 +1014,35 @@ async function loadRules() {
 function renderRules() {
   syncRules();
   var rules = gr.rules || [];
+  var filter = getRuleFilterState();
+  var filtered = [];
+  rules.forEach(function(rule, i){
+    if(ruleMatchesFilter(rule, filter)) filtered.push({rule: rule, index: i});
+  });
   var h = '';
   if(rules.length === 0) {
     h = '<div style="color:var(--txt2);text-align:center;padding:30px">暂无规则，点击“新增规则”添加</div>';
+  } else if(filtered.length === 0) {
+    h = '<div style="color:var(--txt2);text-align:center;padding:30px">没有匹配当前筛选条件的规则</div>';
   } else {
-    h = '<table><tr><th>信号 / 报文</th><th>CAN ID</th><th>接口</th><th>MQTT Topic</th><th>解析</th><th>状态</th><th>操作</th></tr>';
-    rules.forEach(function(rule, i) {
+    h = '<table><tr><th>信号 / 报文</th><th>CAN 匹配</th><th>MQTT 发布</th><th>解析</th><th>状态</th><th>操作</th></tr>';
+    filtered.forEach(function(item) {
+      var rule = item.rule, i = item.index;
       var topic = (rule.mqtt||{}).topic_template || '--';
       var meta = ruleMeta(rule);
+      var pm = normPayloadMode((rule.mqtt||{}).payload_mode) === 1 ? 'RAW' : 'JSON';
       h += '<tr>';
       h += '<td><div><b>'+escH(ruleTitle(rule, i))+'</b></div><div style="color:var(--txt2);font-size:12px">'+escH(meta || '--')+'</div></td>';
-      h += '<td><span class="tag '+(rule.match_any_id?'tag-err':'tag-ok')+'">'+escH(rule.match_any_id ? 'ANY' : ruleHex(rule.can_id))+'</span>';
-      h += '<div style="color:var(--txt2);font-size:12px;margin-top:4px">'+(rule.is_extended ? '扩展帧' : '标准帧')+'</div></td>';
-      h += '<td>'+escH(rule.channel || 'any')+'</td>';
-      h += '<td style="font-family:monospace;font-size:12px;word-break:break-all;max-width:240px">'+escH(topic)+'</td>';
+      h += '<td><div><span class="tag '+(rule.match_any_id?'tag-err':'tag-ok')+'">'+escH(rule.match_any_id ? 'ANY' : ruleHex(rule.can_id))+'</span>';
+      h += ' <span class="tag '+(rule.is_extended?'tag-err':'tag-ok')+'">'+(rule.is_extended ? 'EXT' : 'STD')+'</span></div>';
+      h += '<div style="color:var(--txt2);font-size:12px;margin-top:4px">接口: '+escH(rule.channel || 'any')+'</div></td>';
+      h += '<td><div style="font-family:monospace;font-size:12px;word-break:break-all;max-width:320px">'+escH(topic)+'</div>';
+      h += '<div style="color:var(--txt2);font-size:12px;margin-top:4px">QoS '+escH(String((rule.mqtt||{}).qos || 0))+' / '+pm+' / '+(((rule.mqtt||{}).retain) ? 'Retain' : 'No retain')+'</div></td>';
       h += '<td style="color:var(--txt2);font-size:12px">'+escH(ruleSignalText(rule))+'</td>';
-      h += '<td>'+(rule.enabled ? '<span class="badge bok">启用</span>' : '<span class="badge berr">禁用</span>')+'</td>';
+      h += '<td>'+(rule.enabled ? '<span class="badge bok">启用</span>' : '<span class="badge berr">禁用</span>');
+      h += '<div style="color:var(--txt2);font-size:12px;margin-top:4px">优先级 '+escH(String(rule.priority || 0))+'</div></td>';
       h += '<td><button class="btn btn-s" onclick="editRule('+i+')" style="padding:3px 10px;margin-right:4px">编辑</button>';
+      h += '<button class="btn btn-s" onclick="copyRule('+i+')" style="padding:3px 10px;margin-right:4px">复制</button>';
       h += '<button class="btn btn-d" onclick="delRule('+i+')" style="padding:3px 10px">删</button></td>';
       h += '</tr>';
     });
@@ -977,6 +1076,17 @@ function addRule() {
   resetRuleEditor();
   document.getElementById('rule-editor').style.display='block';
   document.getElementById('rule-editor').scrollIntoView({behavior:'smooth'});
+}
+
+function copyRule(i) {
+  var source = normRule(gr.rules[i] || {});
+  var clone = JSON.parse(JSON.stringify(source));
+  clone.id = (source.id || 'rule') + '_copy_' + Date.now();
+  clone.name = (source.name || ruleTitle(source, i)) + ' Copy';
+  gr.rules.push(normRule(clone));
+  renderRules();
+  gei = gr.rules.length - 1;
+  editRule(gei);
 }
 
 function editRule(i) {
