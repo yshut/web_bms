@@ -630,7 +630,11 @@ class MQTTHub:
             self._pending[rid] = waiter
 
         try:
-            info = self._client.publish(self._topic(did, "cmd/request"), json.dumps(message), qos=self._qos)
+            info = self._client.publish(
+                self._topic(did, "cmd/request"),
+                json.dumps(message, ensure_ascii=False, separators=(",", ":")),
+                qos=self._qos,
+            )
             rc = getattr(info, "rc", 0)
             if rc not in (0, getattr(mqtt, "MQTT_ERR_SUCCESS", 0)):
                 return {"ok": False, "error": f"mqtt publish failed rc={rc}"}

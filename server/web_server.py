@@ -479,14 +479,43 @@ def _remote_fs_read(path: str, device_id: Optional[str] = None):
     # Config pages should fail fast and fall back to defaults/cache rather than
     # stalling the whole UI for multiple sequential file-read timeouts.
     resp = qt_request({'cmd': 'fs_read', 'path': path}, timeout=2.0, device_id=device_id)
-    if not isinstance(resp, dict) or not resp.get('ok') or not isinstance(resp.get('data'), dict):
+    if isinstance(resp, dict) and resp.get('ok') and isinstance(resp.get('data'), dict):
+        payload = resp.get('data') or {}
+        try:
+            content = base64.b64decode(str(payload.get('data') or '').encode('ascii')) if payload.get('data') else b''
+        except Exception as exc:
+            return False, {'ok': False, 'error': f'base64 decode failed: {exc}'}
+        return True, {'path': path, 'content': content, 'raw': payload}
+
+    # Rules/config snapshots can be larger than the simple fs_read ceiling on the
+    # device. Fall back to ranged reads so the cloud UI can still inspect them.
+    err = ''
+    if isinstance(resp, dict):
+        err = str(resp.get('error') or '')
+    err_l = err.lower()
+    should_stream = not isinstance(resp, dict) or ('too large' in err_l) or ('read failed' in err_l)
+    if not should_stream:
         return False, resp
-    payload = resp.get('data') or {}
+
     try:
-        content = base64.b64decode(str(payload.get('data') or '').encode('ascii')) if payload.get('data') else b''
+        chunks = []
+        total = 0
+        max_bytes = 8 * 1024 * 1024
+        for chunk in _remote_fs_stream(path, device_id=device_id):
+            total += len(chunk)
+            if total > max_bytes:
+                raise RuntimeError(f'remote file exceeds {max_bytes} bytes')
+            chunks.append(chunk)
+        return True, {
+            'path': path,
+            'content': b''.join(chunks),
+            'raw': {'streamed': True, 'size': total},
+        }
     except Exception as exc:
-        return False, {'ok': False, 'error': f'base64 decode failed: {exc}'}
-    return True, {'path': path, 'content': content, 'raw': payload}
+        merged = dict(resp) if isinstance(resp, dict) else {'ok': False}
+        merged['error'] = merged.get('error') or str(exc)
+        merged['stream_error'] = str(exc)
+        return False, merged
 
 
 def _remote_fs_read_best(paths: list, device_id: Optional[str] = None):
