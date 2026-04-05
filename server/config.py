@@ -184,6 +184,8 @@ RULES_DB_PATH = str(_env_or_json('RULES_DB_PATH', 'rules.db_path', _default_rule
 AUTH_ENABLE = _as_bool(_env_or_json('AUTH_ENABLE', 'auth.enable', True), True)
 AUTH_USERNAME = str(_env_or_json('AUTH_USERNAME', 'auth.username', 'admin'))
 AUTH_PASSWORD = str(_env_or_json('AUTH_PASSWORD', 'auth.password', 'yst123456.'))
+AUTH_VIEWER_USERNAME = str(_env_or_json('AUTH_VIEWER_USERNAME', 'auth.viewer_username', 'viewer'))
+AUTH_VIEWER_PASSWORD = str(_env_or_json('AUTH_VIEWER_PASSWORD', 'auth.viewer_password', ''))
 AUTH_SECRET_KEY = str(_env_or_json('AUTH_SECRET_KEY', 'auth.secret_key', 'app-lvgl-auth-20260405'))
 
 # 打印配置信息（启动时）

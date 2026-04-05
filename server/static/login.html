@@ -26,7 +26,7 @@
 <body>
   <div class="card">
     <h1>系统登录</h1>
-    <p>登录后可访问设备配置、CAN 监控、规则管理和控制台页面。</p>
+    <p>登录后可访问设备配置、CAN 监控、规则管理和控制台页面。只读账号登录后只能查看，不能修改。</p>
     <form id="login-form">
       <label for="username">用户名</label>
       <input id="username" name="username" autocomplete="username" value="admin">
@@ -38,6 +38,9 @@
     <div class="hint">
       默认账号：<span class="mono">admin</span><br>
       默认密码：<span class="mono">yst123456.</span>
+      <div id="viewer-hint" style="display:none;margin-top:10px">
+        只读账号：<span class="mono">viewer</span>
+      </div>
     </div>
   </div>
   <script>
@@ -45,8 +48,16 @@
       var form = document.getElementById('login-form');
       var msg = document.getElementById('msg');
       var button = document.getElementById('submit-btn');
+      var viewerHint = document.getElementById('viewer-hint');
       var params = new URLSearchParams(window.location.search);
       var next = params.get('next') || '/';
+
+      fetch('/api/auth/status', { cache: 'no-store' })
+        .then(function (resp) { return resp.json(); })
+        .then(function (data) {
+          if (data && data.viewer_enabled) viewerHint.style.display = 'block';
+        })
+        .catch(function () {});
 
       form.addEventListener('submit', async function (event) {
         event.preventDefault();

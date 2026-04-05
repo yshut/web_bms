@@ -37,6 +37,9 @@
           <span v-if="systemStore.deviceId" class="device-info">
             设备: {{ systemStore.deviceId }}
           </span>
+          <el-tag v-if="authRole" size="small" :type="authRole === 'admin' ? 'danger' : 'info'">
+            {{ authRole === 'admin' ? '管理员' : '只读' }}
+          </el-tag>
           <el-button size="small" @click="logout">退出</el-button>
         </div>
       </el-header>
@@ -49,7 +52,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useSystemStore } from '@/stores/system';
 import { ElMessage } from 'element-plus';
@@ -57,6 +60,7 @@ import { ElMessage } from 'element-plus';
 const route = useRoute();
 const router = useRouter();
 const systemStore = useSystemStore();
+const authRole = ref('');
 
 const routes = computed(() => {
   return router.options.routes[0].children || [];
@@ -76,6 +80,16 @@ async function logout() {
     ElMessage.error('退出失败');
   }
 }
+
+onMounted(async () => {
+  try {
+    const resp = await fetch('/api/auth/status', { cache: 'no-store' });
+    const data = await resp.json();
+    authRole.value = String(data?.role || '').trim();
+  } catch (error) {
+    authRole.value = '';
+  }
+});
 </script>
 
 <style scoped>

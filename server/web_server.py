@@ -1246,6 +1246,7 @@ def _parse_can_line_generic(line: str):
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
 
 _AUTH_SESSION_KEY = 'auth_user'
+_AUTH_ROLE_SESSION_KEY = 'auth_role'
 _AUTH_PUBLIC_PATHS = {
     '/login',
     '/api/auth/login',
@@ -1262,6 +1263,30 @@ def _is_authenticated() -> bool:
     if not _auth_enabled():
         return True
     return bool(str(session.get(_AUTH_SESSION_KEY, '') or '').strip())
+
+
+def _current_auth_role() -> str:
+    if not _is_authenticated():
+        return ''
+    role = str(session.get(_AUTH_ROLE_SESSION_KEY, '') or '').strip().lower()
+    return role or 'admin'
+
+
+def _is_write_request() -> bool:
+    return request.method.upper() in ('POST', 'PUT', 'PATCH', 'DELETE')
+
+
+def _viewer_account_enabled() -> bool:
+    return bool(str(getattr(cfg, 'AUTH_VIEWER_PASSWORD', '') or '').strip())
+
+
+def _authenticate_credentials(username: str, password: str) -> Tuple[bool, str]:
+    if username == getattr(cfg, 'AUTH_USERNAME', 'admin') and password == getattr(cfg, 'AUTH_PASSWORD', 'yst123456.'):
+        return True, 'admin'
+    if _viewer_account_enabled():
+        if username == getattr(cfg, 'AUTH_VIEWER_USERNAME', 'viewer') and password == getattr(cfg, 'AUTH_VIEWER_PASSWORD', ''):
+            return True, 'viewer'
+    return False, ''
 
 
 def _is_public_request_path(path: str) -> bool:
@@ -1287,6 +1312,12 @@ def require_login():
     if _is_public_request_path(request.path):
         return None
     if _is_authenticated():
+        if _is_write_request() and _current_auth_role() != 'admin':
+            return jsonify({
+                'ok': False,
+                'error': 'admin privileges required',
+                'role': _current_auth_role(),
+            }), 403
         return None
     if request.path.startswith('/api/'):
         return jsonify({
@@ -1314,6 +1345,8 @@ def auth_status():
         'ok': True,
         'authenticated': _is_authenticated(),
         'username': session.get(_AUTH_SESSION_KEY) if _is_authenticated() else None,
+        'role': _current_auth_role() if _is_authenticated() else None,
+        'viewer_enabled': _viewer_account_enabled(),
     })
 
 
@@ -1322,12 +1355,15 @@ def auth_login():
     body = request.get_json(silent=True) or {}
     username = str(body.get('username') or '').strip()
     password = str(body.get('password') or '')
-    if username == getattr(cfg, 'AUTH_USERNAME', 'admin') and password == getattr(cfg, 'AUTH_PASSWORD', 'yst123456.'):
+    ok, role = _authenticate_credentials(username, password)
+    if ok:
         session.permanent = True
         session[_AUTH_SESSION_KEY] = username
+        session[_AUTH_ROLE_SESSION_KEY] = role
         return jsonify({
             'ok': True,
             'username': username,
+            'role': role,
             'next': str(body.get('next') or '/').strip() or '/',
         })
     return jsonify({'ok': False, 'error': '用户名或密码错误'}), 401
@@ -1336,6 +1372,7 @@ def auth_login():
 @app.route('/api/auth/logout', methods=['POST'])
 def auth_logout():
     session.pop(_AUTH_SESSION_KEY, None)
+    session.pop(_AUTH_ROLE_SESSION_KEY, None)
     return jsonify({'ok': True})
 
 
