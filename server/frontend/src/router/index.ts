@@ -97,9 +97,12 @@ const router = createRouter({
 });
 
 function firstAccessiblePath(authStore: ReturnType<typeof useAuthStore>) {
+  const candidates: RouteRecordRaw[] = [];
+  const wallboardRoute = routes.find((item) => item.name === 'Wallboard');
+  if (wallboardRoute) candidates.push(wallboardRoute);
   const layoutRoute = routes.find((item) => item.name === 'Layout');
-  const children = layoutRoute?.children || [];
-  const matched = children.find((item) => {
+  candidates.push(...(layoutRoute?.children || []));
+  const matched = candidates.find((item) => {
     const permission = String(item.meta?.permission || '').trim();
     return permission && authStore.can(permission);
   });

@@ -12,7 +12,19 @@
 </template>
 
 <script setup lang="ts">
-function goLogin() {
+async function goLogin() {
+  try {
+    const token = document.cookie
+      .split('; ')
+      .find((item) => item.startsWith('app_lvgl_csrf='))
+      ?.split('=')[1];
+    await fetch('/api/auth/logout', {
+      method: 'POST',
+      headers: token ? { 'X-CSRF-Token': decodeURIComponent(token) } : {},
+    });
+  } catch (_error) {
+    // ignore logout errors and force navigation to login page
+  }
   window.location.href = '/login';
 }
 </script>
