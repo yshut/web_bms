@@ -477,13 +477,34 @@ def _apply_common_response_headers(resp):
 @app.route('/api/realtime/config', methods=['GET'])
 def api_realtime_config():
     """返回实时通信配置（纯 MQTT 模式，WebSocket Hub 已移除）。"""
+    def _request_is_secure() -> bool:
+        try:
+            forwarded_proto = str(request.headers.get('X-Forwarded-Proto', '') or '').split(',', 1)[0].strip().lower()
+            if forwarded_proto:
+                return forwarded_proto == 'https'
+        except Exception:
+            pass
+        try:
+            forwarded_ssl = str(request.headers.get('X-Forwarded-Ssl', '') or '').strip().lower()
+            if forwarded_ssl:
+                return forwarded_ssl in ('on', '1', 'true', 'yes')
+        except Exception:
+            pass
+        try:
+            return str(request.scheme or '').lower() == 'https'
+        except Exception:
+            return False
+
     mqtt_ws_url = getattr(cfg, 'MQTT_WS_URL', '')
+    secure_request = _request_is_secure()
     # 若未配置 ws_url，自动推断（使用请求来源主机 + 默认 9001 端口）
     if not mqtt_ws_url:
         host = request.host.split(':')[0]
         mqtt_ws_port = getattr(cfg, 'MQTT_WS_PORT', 9001)
-        scheme = 'wss' if request.scheme == 'https' else 'ws'
+        scheme = 'wss' if secure_request else 'ws'
         mqtt_ws_url = f"{scheme}://{host}:{mqtt_ws_port}"
+    elif secure_request and mqtt_ws_url.startswith('ws://'):
+        mqtt_ws_url = 'wss://' + mqtt_ws_url[len('ws://'):]
     topic_prefix = getattr(cfg, 'MQTT_TOPIC_PREFIX', 'app_lvgl')
     import random, string
     cid = 'browser_' + ''.join(random.choices(string.ascii_lowercase + string.digits, k=6))

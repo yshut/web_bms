@@ -45,7 +45,7 @@
     "qos": 1,
     "topic_prefix": "app_lvgl",
     "use_tls": false,
-    "ws_url": "ws://cloud.yshut.cn:9001"
+    "ws_url": ""
   },
   
   "paths": {
