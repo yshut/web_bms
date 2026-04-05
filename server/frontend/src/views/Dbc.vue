@@ -45,6 +45,29 @@
     </el-card>
 
     <el-card shadow="hover">
+      <template #header>
+        <div class="toolbar">
+          <span>DBC 解析</span>
+          <div class="toolbar">
+            <el-select v-model="selectedDbc" clearable placeholder="全部 DBC" style="width: 220px">
+              <el-option v-for="item in dbcFiles" :key="item.name" :label="item.name" :value="item.name" />
+            </el-select>
+            <el-button @click="loadRecentRaw">载入最近报文</el-button>
+            <el-button type="primary" @click="parseFrames">开始解析</el-button>
+          </div>
+        </div>
+      </template>
+      <el-input v-model="parseInput" type="textarea" :rows="8" placeholder="每行一条 CAN 原始报文" />
+      <el-table :data="parseRows" size="small" max-height="360" style="margin-top: 14px">
+        <el-table-column prop="message_name" label="报文" min-width="180" />
+        <el-table-column prop="signal_name" label="信号" min-width="180" />
+        <el-table-column prop="value" label="值" width="120" />
+        <el-table-column prop="unit" label="单位" width="100" />
+        <el-table-column prop="channel" label="通道" width="100" />
+      </el-table>
+    </el-card>
+
+    <el-card shadow="hover">
       <template #header><span>信号定义</span></template>
       <el-table :data="signals" v-loading="loading" size="small" max-height="360">
         <el-table-column prop="message_name" label="消息" min-width="180" />
@@ -67,6 +90,9 @@ const signals = ref<any[]>([]);
 const stats = ref<Record<string, any>>({});
 const loading = ref(false);
 const mappingPrefix = ref('');
+const selectedDbc = ref('');
+const parseInput = ref('');
+const parseRows = ref<any[]>([]);
 
 function formatSize(size: number) {
   if (size < 1024) return `${size} B`;
@@ -112,6 +138,22 @@ async function loadSignals(name: string) {
 async function onUploadSuccess() {
   ElMessage.success('DBC 文件已上传');
   await reload(true);
+}
+
+async function loadRecentRaw() {
+  const result: any = await dbcApi.recentRaw(120);
+  parseInput.value = Array.isArray(result?.lines) ? result.lines.join('\n') : '';
+}
+
+async function parseFrames() {
+  const lines = parseInput.value.split('\n').map((item) => item.trim()).filter(Boolean);
+  if (!lines.length) {
+    ElMessage.warning('请先输入或载入原始报文');
+    return;
+  }
+  const result: any = await dbcApi.parse(lines, selectedDbc.value || undefined);
+  parseRows.value = result?.data || result?.rows || result?.results || [];
+  ElMessage.success(`已解析 ${parseRows.value.length} 条信号`);
 }
 
 async function deleteFile(name: string) {

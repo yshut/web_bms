@@ -72,6 +72,41 @@
     <section class="section-card">
       <div class="section-head">
         <div>
+          <p class="section-kicker">录制状态</p>
+          <h2>CAN 通道记录</h2>
+        </div>
+        <div class="toolbar toolbar--actions">
+          <el-button type="primary" :disabled="recording" @click="startRecord">开始记录</el-button>
+          <el-button :disabled="!recording" @click="stopRecord">停止记录</el-button>
+        </div>
+      </div>
+      <div class="stats-grid">
+        <article class="stat-card">
+          <span>录制状态</span>
+          <strong>{{ recording ? '记录中' : '未记录' }}</strong>
+          <p>{{ recordFile || '等待开始录制' }}</p>
+        </article>
+        <article class="stat-card">
+          <span>总帧数</span>
+          <strong>{{ recordStats.total_frames || 0 }}</strong>
+          <p>当前录制会话累计帧数</p>
+        </article>
+        <article class="stat-card">
+          <span>CAN0</span>
+          <strong>{{ recordStats.can0_frames || 0 }}</strong>
+          <p>CAN0 已记录帧数</p>
+        </article>
+        <article class="stat-card">
+          <span>CAN1</span>
+          <strong>{{ recordStats.can1_frames || 0 }}</strong>
+          <p>CAN1 已记录帧数</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="section-card">
+      <div class="section-head">
+        <div>
           <p class="section-kicker">帧列表</p>
           <h2>CAN 帧</h2>
         </div>
@@ -129,6 +164,7 @@ const filterText = ref('');
 const source = ref('device_cmd');
 const lastUpdated = ref(0);
 const frames = ref<any[]>([]);
+const recordStats = ref<Record<string, any>>({});
 const selectedDeviceId = ref('');
 const devices = ref<string[]>([]);
 let timer: number | null = null;
@@ -139,6 +175,8 @@ const deviceOptions = computed(() => {
 });
 
 const activeDeviceId = computed(() => selectedDeviceId.value.trim() || '');
+const recording = computed(() => !!recordStats.value.recording);
+const recordFile = computed(() => String(recordStats.value.current_file || ''));
 
 const filteredFrames = computed(() => {
   const keyword = filterText.value.trim().toUpperCase();
@@ -228,6 +266,11 @@ async function syncCanStatus() {
   applyCanStatus(result);
 }
 
+async function syncRecordStatus() {
+  const result: any = await canApi.getRecordStatus(activeDeviceId.value || undefined);
+  recordStats.value = result?.data || {};
+}
+
 function stopPolling() {
   if (timer != null) {
     window.clearInterval(timer);
@@ -267,11 +310,28 @@ async function clearFrames() {
   await refreshFrames();
 }
 
+async function startRecord() {
+  const result: any = await canApi.startRecord(activeDeviceId.value || undefined);
+  if (result?.ok) {
+    ElMessage.success('CAN 记录已启动');
+    await syncRecordStatus();
+  }
+}
+
+async function stopRecord() {
+  const result: any = await canApi.stopRecord(activeDeviceId.value || undefined);
+  if (result?.ok) {
+    ElMessage.success('CAN 记录已停止');
+    await syncRecordStatus();
+  }
+}
+
 async function onDeviceChange(value: string) {
   selectedDeviceId.value = value || '';
   await syncRoute(selectedDeviceId.value);
   await Promise.all([
     syncCanStatus(),
+    syncRecordStatus(),
     refreshFrames(),
   ]);
 }
@@ -286,6 +346,7 @@ onMounted(async () => {
   await loadDevices();
   await Promise.all([
     syncCanStatus(),
+    syncRecordStatus(),
     refreshFrames(),
   ]);
   if (autoRefresh.value) startPolling();

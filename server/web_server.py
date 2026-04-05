@@ -1246,6 +1246,7 @@ app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
 _AUTH_SESSION_KEY = 'auth_user'
 _AUTH_ROLE_SESSION_KEY = 'auth_role'
 _AUTH_CSRF_SESSION_KEY = 'auth_csrf_token'
+_AUTH_PERMISSIONS_SESSION_KEY = 'auth_permissions'
 _AUTH_FAILURES = {}
 _AUTH_PUBLIC_PATHS = {
     '/login',
@@ -1253,6 +1254,152 @@ _AUTH_PUBLIC_PATHS = {
     '/api/auth/logout',
     '/api/auth/status',
 }
+_AUTH_USERS_PATH = os.path.join(SERVER_DIR, 'uploads', 'auth_users.json')
+_AUTH_PERMISSION_KEYS = [
+    'home',
+    'hardware',
+    'files',
+    'device_config',
+    'can',
+    'uds',
+    'dbc',
+    'devices',
+    'rules',
+    'bms',
+    'wallboard',
+    'user_admin',
+]
+
+
+def _all_permissions() -> List[str]:
+    return list(_AUTH_PERMISSION_KEYS)
+
+
+def _normalize_permissions(values) -> List[str]:
+    if values == '*' or values == ['*']:
+        return _all_permissions()
+    if not isinstance(values, (list, tuple, set)):
+        return []
+    allowed = []
+    for item in values:
+        key = str(item or '').strip()
+        if key in _AUTH_PERMISSION_KEYS and key not in allowed:
+            allowed.append(key)
+    return allowed
+
+
+def _auth_builtin_users() -> Dict[str, dict]:
+    users: Dict[str, dict] = {}
+    admin_username = str(getattr(cfg, 'AUTH_USERNAME', 'admin') or 'admin').strip() or 'admin'
+    users[admin_username] = {
+        'username': admin_username,
+        'role': 'super_admin',
+        'permissions': _all_permissions(),
+        'password': str(getattr(cfg, 'AUTH_PASSWORD', 'yst123456.') or ''),
+        'password_hash': str(getattr(cfg, 'AUTH_PASSWORD_HASH', '') or ''),
+        'builtin': True,
+    }
+    if _viewer_account_enabled():
+        viewer_username = str(getattr(cfg, 'AUTH_VIEWER_USERNAME', 'viewer') or 'viewer').strip() or 'viewer'
+        users[viewer_username] = {
+            'username': viewer_username,
+            'role': 'user',
+            'permissions': ['home', 'hardware', 'devices', 'bms', 'wallboard'],
+            'password': str(getattr(cfg, 'AUTH_VIEWER_PASSWORD', '') or ''),
+            'password_hash': str(getattr(cfg, 'AUTH_VIEWER_PASSWORD_HASH', '') or ''),
+            'builtin': True,
+        }
+    return users
+
+
+def _load_auth_users_file() -> Dict[str, dict]:
+    try:
+        if not os.path.exists(_AUTH_USERS_PATH):
+            return {}
+        with open(_AUTH_USERS_PATH, 'r', encoding='utf-8') as f:
+            payload = json.load(f)
+        raw_users = payload.get('users') if isinstance(payload, dict) else payload
+        if not isinstance(raw_users, list):
+            return {}
+        users: Dict[str, dict] = {}
+        for item in raw_users:
+            if not isinstance(item, dict):
+                continue
+            username = str(item.get('username') or '').strip()
+            if not username:
+                continue
+            users[username] = {
+                'username': username,
+                'role': str(item.get('role') or 'user').strip().lower() or 'user',
+                'permissions': _normalize_permissions(item.get('permissions')),
+                'password_hash': str(item.get('password_hash') or '').strip(),
+                'password': '',
+                'builtin': False,
+            }
+        return users
+    except Exception:
+        return {}
+
+
+def _save_auth_users_file(users: Dict[str, dict]) -> None:
+    rows = []
+    for username in sorted(users.keys()):
+        item = users[username]
+        if item.get('builtin'):
+            continue
+        rows.append({
+            'username': username,
+            'role': str(item.get('role') or 'user'),
+            'permissions': _normalize_permissions(item.get('permissions')),
+            'password_hash': str(item.get('password_hash') or '').strip(),
+        })
+    os.makedirs(os.path.dirname(_AUTH_USERS_PATH), exist_ok=True)
+    with open(_AUTH_USERS_PATH, 'w', encoding='utf-8') as f:
+        json.dump({'users': rows}, f, ensure_ascii=False, indent=2)
+
+
+def _get_auth_users() -> Dict[str, dict]:
+    users = _auth_builtin_users()
+    users.update(_load_auth_users_file())
+    return users
+
+
+def _permission_default_for_role(role: str) -> List[str]:
+    role = str(role or '').strip().lower()
+    if role == 'super_admin':
+        return _all_permissions()
+    if role == 'admin':
+        return [key for key in _AUTH_PERMISSION_KEYS if key != 'user_admin']
+    return ['home', 'hardware', 'devices', 'bms', 'wallboard']
+
+
+def _current_auth_permissions() -> List[str]:
+    if not _is_authenticated():
+        return []
+    cached = _normalize_permissions(session.get(_AUTH_PERMISSIONS_SESSION_KEY) or [])
+    if cached:
+        return cached
+    username = str(session.get(_AUTH_SESSION_KEY) or '').strip()
+    users = _get_auth_users()
+    current = users.get(username) or {}
+    permissions = _normalize_permissions(current.get('permissions') or _permission_default_for_role(_current_auth_role()))
+    session[_AUTH_PERMISSIONS_SESSION_KEY] = permissions
+    return permissions
+
+
+def _current_user_can(permission_key: str) -> bool:
+    permission_key = str(permission_key or '').strip()
+    if not permission_key:
+        return True
+    if _current_auth_role() == 'super_admin':
+        return True
+    return permission_key in _current_auth_permissions()
+
+
+def _require_super_admin() -> Optional[Tuple[Response, int]]:
+    if _current_auth_role() == 'super_admin':
+        return None
+    return jsonify({'ok': False, 'error': 'super admin privileges required'}), 403
 
 
 def _auth_enabled() -> bool:
@@ -1269,7 +1416,7 @@ def _current_auth_role() -> str:
     if not _is_authenticated():
         return ''
     role = str(session.get(_AUTH_ROLE_SESSION_KEY, '') or '').strip().lower()
-    return role or 'admin'
+    return role or 'super_admin'
 
 
 def _csrf_cookie_name() -> str:
@@ -1322,19 +1469,11 @@ def _verify_password(raw_password: str, password_plain: str, password_hash: str)
 
 
 def _authenticate_credentials(username: str, password: str) -> Tuple[bool, str]:
-    if username == getattr(cfg, 'AUTH_USERNAME', 'admin') and _verify_password(
-        password,
-        getattr(cfg, 'AUTH_PASSWORD', 'yst123456.'),
-        getattr(cfg, 'AUTH_PASSWORD_HASH', ''),
-    ):
-        return True, 'admin'
-    if _viewer_account_enabled():
-        if username == getattr(cfg, 'AUTH_VIEWER_USERNAME', 'viewer') and _verify_password(
-            password,
-            getattr(cfg, 'AUTH_VIEWER_PASSWORD', ''),
-            getattr(cfg, 'AUTH_VIEWER_PASSWORD_HASH', ''),
-        ):
-            return True, 'viewer'
+    for item in _get_auth_users().values():
+        if username != item.get('username'):
+            continue
+        if _verify_password(password, item.get('password', ''), item.get('password_hash', '')):
+            return True, str(item.get('role') or 'user')
     return False, ''
 
 
@@ -1441,7 +1580,7 @@ def require_login():
     if _is_public_request_path(request.path):
         return None
     if _is_authenticated():
-        if _is_write_request() and _current_auth_role() != 'admin':
+        if _is_write_request() and _current_auth_role() not in ('super_admin', 'admin'):
             return jsonify({
                 'ok': False,
                 'error': 'admin privileges required',
@@ -1481,6 +1620,7 @@ def auth_status():
         'authenticated': _is_authenticated(),
         'username': session.get(_AUTH_SESSION_KEY) if _is_authenticated() else None,
         'role': _current_auth_role() if _is_authenticated() else None,
+        'permissions': _current_auth_permissions() if _is_authenticated() else [],
         'viewer_enabled': _viewer_account_enabled(),
         'lockout_remaining': remaining,
         'csrf_cookie_name': _csrf_cookie_name(),
@@ -1508,12 +1648,16 @@ def auth_login():
         session.permanent = True
         session[_AUTH_SESSION_KEY] = username
         session[_AUTH_ROLE_SESSION_KEY] = role
+        user_item = _get_auth_users().get(username) or {}
+        permissions = _normalize_permissions(user_item.get('permissions') or _permission_default_for_role(role))
+        session[_AUTH_PERMISSIONS_SESSION_KEY] = permissions
         _clear_auth_failures(client_key)
         _append_auth_audit('login', username, True, role=role)
         return jsonify({
             'ok': True,
             'username': username,
             'role': role,
+            'permissions': permissions,
             'next': str(body.get('next') or '/').strip() or '/',
             'csrf_token': _ensure_csrf_token(),
         })
@@ -1532,8 +1676,72 @@ def auth_logout():
     _append_auth_audit('logout', str(session.get(_AUTH_SESSION_KEY) or ''), True, role=_current_auth_role())
     session.pop(_AUTH_SESSION_KEY, None)
     session.pop(_AUTH_ROLE_SESSION_KEY, None)
+    session.pop(_AUTH_PERMISSIONS_SESSION_KEY, None)
     session.pop(_AUTH_CSRF_SESSION_KEY, None)
     return jsonify({'ok': True})
+
+
+@app.route('/api/auth/users', methods=['GET', 'POST', 'DELETE'])
+def auth_users():
+    denied = _require_super_admin()
+    if denied:
+        return denied
+    users = _get_auth_users()
+    if request.method == 'GET':
+        rows = []
+        for username in sorted(users.keys()):
+            item = users[username]
+            rows.append({
+                'username': username,
+                'role': item.get('role') or 'user',
+                'permissions': _normalize_permissions(item.get('permissions') or []),
+                'builtin': bool(item.get('builtin')),
+            })
+        return jsonify({'ok': True, 'items': rows, 'all_permissions': _all_permissions()})
+
+    if request.method == 'DELETE':
+        body = request.get_json(silent=True) or {}
+        username = str(body.get('username') or '').strip()
+        if not username:
+            return jsonify({'ok': False, 'error': 'missing username'}), 400
+        if username not in users or users[username].get('builtin'):
+            return jsonify({'ok': False, 'error': 'cannot delete builtin user'}), 400
+        del users[username]
+        _save_auth_users_file(users)
+        return jsonify({'ok': True})
+
+    body = request.get_json(silent=True) or {}
+    username = str(body.get('username') or '').strip()
+    role = str(body.get('role') or 'user').strip().lower() or 'user'
+    permissions = _normalize_permissions(body.get('permissions') or _permission_default_for_role(role))
+    password = str(body.get('password') or '')
+    if not username:
+        return jsonify({'ok': False, 'error': 'missing username'}), 400
+    if role not in ('super_admin', 'admin', 'user'):
+        return jsonify({'ok': False, 'error': 'invalid role'}), 400
+    current = users.get(username) or {'builtin': False}
+    if current.get('builtin') and username != getattr(cfg, 'AUTH_USERNAME', 'admin'):
+        return jsonify({'ok': False, 'error': 'cannot modify builtin user'}), 400
+    updated = dict(current)
+    updated['username'] = username
+    updated['role'] = role
+    updated['permissions'] = permissions
+    updated['builtin'] = bool(current.get('builtin', False))
+    if password:
+        salt = secrets.token_hex(8)
+        iterations = 120000
+        digest = hashlib.pbkdf2_hmac('sha256', password.encode('utf-8'), salt.encode('utf-8'), iterations).hex()
+        updated['password_hash'] = f'pbkdf2_sha256${iterations}${salt}${digest}'
+    elif not current.get('password_hash') and not updated.get('builtin'):
+        return jsonify({'ok': False, 'error': 'missing password'}), 400
+    users[username] = updated
+    _save_auth_users_file(users)
+    return jsonify({'ok': True, 'item': {
+        'username': username,
+        'role': role,
+        'permissions': permissions,
+        'builtin': updated.get('builtin', False),
+    }})
 
 
 @app.after_request
@@ -1936,7 +2144,8 @@ def api_can_status():
 @app.route('/api/can/record/start', methods=['POST'])
 def api_can_record_start():
     """开始录制CAN报文 — MQTT"""
-    result = qt_request({"cmd": "can_record_start"}, timeout=3.0)
+    device_id = _get_requested_device_id()
+    result = qt_request({"cmd": "can_record_start"}, timeout=3.0, device_id=device_id)
     if result and result.get("ok"):
         return jsonify({"ok": True, "data": result.get("data", {"recording": True})})
     # 备用：设备 HTTP
@@ -1948,7 +2157,8 @@ def api_can_record_start():
 @app.route('/api/can/record/stop', methods=['POST'])
 def api_can_record_stop():
     """停止录制CAN报文 — MQTT"""
-    result = qt_request({"cmd": "can_record_stop"}, timeout=3.0)
+    device_id = _get_requested_device_id()
+    result = qt_request({"cmd": "can_record_stop"}, timeout=3.0, device_id=device_id)
     if result and result.get("ok"):
         d = result.get("data", {})
         return jsonify({"ok": True, "data": {"recording": False, "filename": d.get("filename", "")}})
@@ -1957,6 +2167,29 @@ def api_can_record_stop():
     if ok and j:
         return jsonify({"ok": True, "data": j.get("data", {})})
     return jsonify({"ok": False, "error": "failed to stop recording"})
+
+
+@app.route('/api/can/record/status', methods=['GET'])
+def api_can_record_status():
+    device_id = _get_requested_device_id()
+    result = qt_request({"cmd": "can_get_status"}, timeout=3.0, device_id=device_id)
+    if isinstance(result, dict) and result.get('ok') and isinstance(result.get('data'), dict):
+        data = result.get('data') or {}
+        return jsonify({
+            'ok': True,
+            'data': {
+                'recording': bool(data.get('recording') or data.get('is_recording')),
+                'total_frames': int(data.get('total_frames') or 0),
+                'can0_frames': int(data.get('can0_frames') or 0),
+                'can1_frames': int(data.get('can1_frames') or 0),
+                'bytes_written': int(data.get('bytes_written') or 0),
+                'current_file': str(data.get('current_file') or ''),
+            },
+        })
+    ok, j = _device_proxy_json(DEVICE_DEFAULT_IP, '/api/recorder/status', 'GET', timeout=4)
+    if ok and isinstance(j, dict):
+        return jsonify(j)
+    return jsonify({'ok': False, 'error': 'recorder status unavailable'}), 503
 
 @app.route('/api/can/config', methods=['GET'])
 def api_can_config():

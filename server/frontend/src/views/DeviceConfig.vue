@@ -191,11 +191,12 @@
           <div class="status-row"><span>当前 SSID</span><strong>{{ wifiStatus.current_ssid || wifiStatus.ssid || '-' }}</strong></div>
           <div class="status-row"><span>当前 IP</span><strong>{{ wifiStatus.current_ip || '-' }}</strong></div>
           <div class="status-row"><span>网关</span><strong>{{ wifiStatus.gateway || '-' }}</strong></div>
-          <div class="status-row"><span>云端连通</span><strong>{{ wifiStatus.cloud_reachable ? '可达' : '不可达' }}</strong></div>
+          <div class="status-row"><span>云端连通</span><strong :class="wifiStatus.cloud_reachable ? 'ok-text' : 'bad-text'">{{ wifiStatus.cloud_reachable ? '可达' : '不可达' }}</strong></div>
+          <div class="status-row"><span>自动重连</span><strong>{{ wifiStatus.auto_reconnect_enabled ? '已启用' : '未启用' }}</strong></div>
         </div>
       </div>
 
-      <el-table :data="wifiNetworks" size="small" max-height="320">
+      <el-table :data="sortedWifiNetworks" size="small" max-height="320">
         <el-table-column prop="ssid" label="SSID" min-width="220" />
         <el-table-column label="信号" width="100">
           <template #default="{ row }">{{ row.signal ?? '-' }}</template>
@@ -292,6 +293,7 @@ const deviceOptions = computed(() => {
 });
 
 const activeDeviceId = computed(() => selectedDeviceId.value.trim() || '');
+const sortedWifiNetworks = computed(() => [...wifiNetworks.value].sort((a: any, b: any) => Number(b?.signal || -999) - Number(a?.signal || -999)));
 
 const wifiStatusText = computed(() => {
   if (wifiStatus.error && !wifiStatus.connected && !wifiStatus.associated) return `获取失败: ${wifiStatus.error}`;
@@ -668,6 +670,14 @@ onBeforeUnmount(() => {
 .status-row strong {
   color: #eef5ff;
   text-align: right;
+}
+
+.status-row strong.ok-text {
+  color: #28daaf;
+}
+
+.status-row strong.bad-text {
+  color: #ff7b8b;
 }
 
 @media (max-width: 1100px) {

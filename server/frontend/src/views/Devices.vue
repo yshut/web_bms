@@ -141,8 +141,8 @@ function formatUptime(value: number | string) {
   const d = Math.floor(h / 24);
   const hh = h % 24;
   const m = Math.floor((total % 3600) / 60);
-  const s = Math.floor(total % 60);
-  return d > 0 ? `${d}d ${hh}h ${m}m ${s}s` : `${hh}h ${m}m ${s}s`;
+  if (d > 0) return `${d}天 ${hh}小时 ${m}分钟`;
+  return `${hh}小时 ${m}分钟`;
 }
 
 async function reload() {

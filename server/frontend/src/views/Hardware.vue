@@ -51,12 +51,12 @@
 
           <div class="facts-grid">
             <div class="fact-box">
-              <span>温度</span>
-              <strong>{{ formatNum(data.system?.temperature) }} °C</strong>
-            </div>
-            <div class="fact-box">
               <span>运行时间</span>
               <strong>{{ formatUptime(data.system?.uptime) }}</strong>
+            </div>
+            <div class="fact-box">
+              <span>网络地址</span>
+              <strong>{{ bestNetworkAddress }}</strong>
             </div>
             <div class="fact-box">
               <span>已用内存</span>
@@ -80,7 +80,8 @@
         </div>
         <div class="detail-list">
           <div class="detail-row"><span>接口</span><strong>{{ data.network?.interface || '-' }}</strong></div>
-          <div class="detail-row"><span>IP 地址</span><strong>{{ data.network?.ip || '-' }}</strong></div>
+          <div class="detail-row"><span>主地址</span><strong>{{ bestNetworkAddress }}</strong></div>
+          <div class="detail-row"><span>网关</span><strong>{{ data.network?.gateway || '-' }}</strong></div>
           <div class="detail-row"><span>MAC</span><strong>{{ data.network?.mac || '-' }}</strong></div>
           <div class="detail-row"><span>接收流量</span><strong>{{ formatBytes(data.network?.rx_bytes) }}</strong></div>
           <div class="detail-row"><span>发送流量</span><strong>{{ formatBytes(data.network?.tx_bytes) }}</strong></div>
@@ -136,26 +137,36 @@ const overallTone = computed(() => {
 
 const summaryCards = computed(() => ([
   {
-    label: 'CPU / 温度',
-    value: `${formatNum(data.system?.cpu_usage)}% / ${formatNum(data.system?.temperature)}°C`,
-    detail: '持续观察负载与热量变化',
+    label: 'CPU / 内存',
+    value: `${formatNum(data.system?.cpu_usage)}% / ${formatNum(data.system?.memory_usage)}%`,
+    detail: '持续观察系统负载',
   },
   {
     label: '网络地址',
-    value: data.network?.ip || '-',
-    detail: data.network?.interface || '等待网络接口',
+    value: bestNetworkAddress.value,
+    detail: networkDetail.value,
   },
   {
-    label: 'CAN 收发',
-    value: `${data.can0?.rx || 0} / ${data.can1?.rx || 0}`,
-    detail: 'CAN0 / CAN1 当前接收帧数',
+    label: 'CAN 状态',
+    value: `${canStatusSummary('can0')} / ${canStatusSummary('can1')}`,
+    detail: 'CAN0 / CAN1 通道状态',
   },
   {
-    label: '存储余量',
-    value: formatBytes(data.storage?.free),
+    label: '存储状态',
+    value: storageSummary.value,
     detail: data.storage?.mount_point || '未挂载',
   },
 ]));
+const bestNetworkAddress = computed(() =>
+  data.network?.ip || data.network?.gateway || data.network?.mac || '-');
+const networkDetail = computed(() =>
+  [data.network?.interface, data.network?.gateway].filter(Boolean).join(' / ') || '等待网络接口');
+const storageSummary = computed(() => {
+  const used = Number(data.storage?.used || 0);
+  const total = Number(data.storage?.total || 0);
+  if (used > 0 && total > 0) return `${formatBytes(used)} / ${formatBytes(total)}`;
+  return formatBytes(data.storage?.free);
+});
 
 const modules = computed(() => ([
   {
@@ -165,6 +176,7 @@ const modules = computed(() => ([
     tone: toneFromStatus(data.can0?.status),
     items: [
       { label: '波特率', value: `${data.can0?.bitrate || 0} bps` },
+      { label: '状态', value: canStatusSummary('can0') },
       { label: '接收帧', value: String(data.can0?.rx || 0) },
       { label: '发送帧', value: String(data.can0?.tx || 0) },
       { label: '错误数', value: String(data.can0?.errors || 0) },
@@ -178,6 +190,7 @@ const modules = computed(() => ([
     tone: toneFromStatus(data.can1?.status),
     items: [
       { label: '波特率', value: `${data.can1?.bitrate || 0} bps` },
+      { label: '状态', value: canStatusSummary('can1') },
       { label: '接收帧', value: String(data.can1?.rx || 0) },
       { label: '发送帧', value: String(data.can1?.tx || 0) },
       { label: '错误数', value: String(data.can1?.errors || 0) },
@@ -194,6 +207,7 @@ const modules = computed(() => ([
       { label: '总量', value: formatBytes(data.storage?.total) },
       { label: '已用', value: formatBytes(data.storage?.used) },
       { label: '可用', value: formatBytes(data.storage?.free) },
+      { label: '占用率', value: storageUsageText() },
       { label: '最后错误', value: data.storage?.last_error || '-' },
     ],
   },
@@ -232,6 +246,18 @@ function formatUptime(value: number | string) {
   const m = Math.floor((total % 3600) / 60);
   const s = Math.floor(total % 60);
   return `${h}h ${m}m ${s}s`;
+}
+
+function canStatusSummary(key: 'can0' | 'can1') {
+  const bitrate = Number(data[key]?.bitrate || 0);
+  return `${statusName(data[key]?.status)}${bitrate ? ` / ${bitrate}` : ''}`;
+}
+
+function storageUsageText() {
+  const used = Number(data.storage?.used || 0);
+  const total = Number(data.storage?.total || 0);
+  if (!used || !total) return '-';
+  return `${((used / total) * 100).toFixed(1)}%`;
 }
 
 function safePercent(value: number | string) {

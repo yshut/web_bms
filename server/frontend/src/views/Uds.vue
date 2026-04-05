@@ -24,7 +24,9 @@
             </el-select>
           </el-form-item>
           <el-form-item label="波特率">
-            <el-input-number v-model="config.bitrate" :min="10000" :step="1000" />
+            <el-select v-model="config.bitrate">
+              <el-option v-for="item in baudrates" :key="item" :label="`${item} bps`" :value="item" />
+            </el-select>
           </el-form-item>
           <el-form-item label="TX ID">
             <el-input v-model="config.tx_id" />
@@ -100,6 +102,7 @@ const config = reactive({
   rx_id: '7FB',
   block_size: 256,
 });
+const baudrates = [10000, 20000, 50000, 100000, 125000, 250000, 500000, 800000, 1000000];
 
 function formatBytes(value: number | string) {
   const num = Number(value ?? 0);

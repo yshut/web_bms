@@ -71,16 +71,18 @@
 import { computed, onMounted, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useSystemStore } from '@/stores/system';
+import { useAuthStore } from '@/stores/auth';
 import { ElMessage } from 'element-plus';
 
 const route = useRoute();
 const router = useRouter();
 const systemStore = useSystemStore();
+const authStore = useAuthStore();
 const authRole = ref('');
 
 const routes = computed(() => {
   const layoutRoute = router.options.routes.find((item) => item.name === 'Layout');
-  return layoutRoute?.children || [];
+  return (layoutRoute?.children || []).filter((item) => authStore.can(String(item.meta?.permission || '')));
 });
 
 const activeMenu = computed(() => route.path);
@@ -112,9 +114,8 @@ async function logout() {
 
 onMounted(async () => {
   try {
-    const resp = await fetch('/api/auth/status', { cache: 'no-store' });
-    const data = await resp.json();
-    authRole.value = String(data?.role || '').trim();
+    await authStore.load(true);
+    authRole.value = authStore.role;
   } catch (error) {
     authRole.value = '';
   }

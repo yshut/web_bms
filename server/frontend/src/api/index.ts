@@ -69,6 +69,12 @@ export const canApi = {
   setServer: (host: string, port: number) => api.post('/can/server', { host, port }),
   getStatus: (deviceId?: string) =>
     api.get('/can/status', { params: deviceId ? { device_id: deviceId } : undefined }),
+  getRecordStatus: (deviceId?: string) =>
+    api.get('/can/record/status', { params: deviceId ? { device_id: deviceId } : undefined }),
+  startRecord: (deviceId?: string) =>
+    api.post('/can/record/start', {}, { params: deviceId ? { device_id: deviceId } : undefined }),
+  stopRecord: (deviceId?: string) =>
+    api.post('/can/record/stop', {}, { params: deviceId ? { device_id: deviceId } : undefined }),
   getFrames: (limit = 50, deviceId?: string) =>
     api.get('/can/frames', {
       params: {
@@ -95,6 +101,15 @@ export const dbcApi = {
   stats: () => api.get('/dbc/stats'),
   mappings: (prefix?: string) => api.get('/dbc/mappings', { params: prefix ? { prefix } : undefined }),
   signals: (name: string) => api.get('/dbc/signals', { params: { name } }),
+  parse: (lines: string[], name?: string) => api.post('/dbc/parse', { lines, ...(name ? { name } : {}) }),
+  recentRaw: (limit = 120) => api.get('/dbc/recent_raw', { params: { limit } }),
+};
+
+export const authApi = {
+  status: () => api.get('/auth/status'),
+  users: () => api.get('/auth/users'),
+  saveUser: (body: Record<string, any>) => api.post('/auth/users', body),
+  deleteUser: (username: string) => api.delete('/auth/users', { data: { username } }),
 };
 
 export const udsApi = {
@@ -165,6 +180,7 @@ export const bmsApi = {
   signals: (ts?: number) => api.get('/bms/signals', { params: ts ? { _: ts } : undefined }),
   messages: (ts?: number) => api.get('/bms/messages', { params: ts ? { _: ts } : undefined }),
   alerts: (limit = 100, ts?: number) => api.get('/bms/alerts', { params: { limit, ...(ts ? { _: ts } : {}) } }),
+  query: (signals: string[], limit = 300) => api.get('/bms/query', { params: { signals: signals.join(','), limit } }),
   exportUrl: '/api/bms/export',
 };
 

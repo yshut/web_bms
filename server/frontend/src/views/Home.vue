@@ -41,22 +41,30 @@
         </div>
       </article>
 
-      <article class="section-card section-card--accent">
+      <article class="section-card">
         <div class="section-head">
           <div>
-            <p class="section-kicker">重点功能</p>
-            <h2>高频入口</h2>
+            <p class="section-kicker">在线设备</p>
+            <h2>设备状态</h2>
           </div>
         </div>
-        <div class="spotlight-list">
-          <article
-            v-for="item in spotlightCards"
-            :key="item.title"
-            class="spotlight-item"
-          >
-            <strong>{{ item.title }}</strong>
-            <span>{{ item.desc }}</span>
-          </article>
+        <div class="signal-list">
+          <div class="signal-row">
+            <span>当前在线</span>
+            <strong>{{ onlineDeviceCount }}</strong>
+          </div>
+          <div class="signal-row">
+            <span>当前设备</span>
+            <strong>{{ systemStore.deviceId || '未绑定' }}</strong>
+          </div>
+          <div class="signal-row">
+            <span>网络地址</span>
+            <strong>{{ networkAddress }}</strong>
+          </div>
+          <div class="signal-row">
+            <span>功能口</span>
+            <strong>{{ portStatusText }}</strong>
+          </div>
         </div>
       </article>
     </section>
@@ -64,17 +72,17 @@
     <section class="workspace section-card">
       <div class="section-head">
         <div>
-          <p class="section-kicker">功能总览</p>
-          <h2>功能区</h2>
+          <p class="section-kicker">系统状态</p>
+          <h2>功能口状态</h2>
         </div>
       </div>
       <div class="workspace-grid">
-        <article v-for="item in cards" :key="item.title" class="workspace-item">
+        <article v-for="item in statusCards" :key="item.title" class="workspace-item">
           <div>
             <strong>{{ item.title }}</strong>
             <p>{{ item.desc }}</p>
           </div>
-          <span>{{ item.group }}</span>
+          <span>{{ item.value }}</span>
         </article>
       </div>
     </section>
@@ -93,23 +101,15 @@ const bmsStats = ref<Record<string, any>>({});
 const alertCount = ref(0);
 const lastUpdated = ref(0);
 
-const cards = [
-  { title: '设备配置', desc: '网络、WiFi、MQTT、CAN 参数', group: '配置' },
-  { title: '规则管理', desc: 'CAN-MQTT 规则分页、导入导出', group: '规则' },
-  { title: 'CAN 监控', desc: '受控轮询、过滤与缓存查看', group: '总线' },
-  { title: '硬件监控', desc: '系统、网络、存储、CAN 状态', group: '状态' },
-  { title: 'DBC 管理', desc: '文件、统计、映射和信号定义', group: '协议' },
-  { title: 'UDS 诊断', desc: '参数、固件选择、进度和日志', group: '诊断' },
-  { title: '文件管理', desc: '设备文件浏览、上传、重命名、删除', group: '文件' },
-  { title: '设备管理', desc: '在线状态、设备历史和远程状态', group: '设备' },
-  { title: 'BMS 看板', desc: '统计、消息分组、告警和导出', group: '分析' },
-];
-
-const spotlightCards = [
-  { title: '硬件监控', desc: '快速确认 CPU、温度、网络和 CAN 通道状态' },
-  { title: '规则管理', desc: '查看分页规则、远程同步和导入导出操作' },
-  { title: 'CAN 监控', desc: '实时抓帧并按接口、ID、数据内容过滤' },
-];
+const onlineDeviceCount = computed(() => systemStore.devices.length || (systemStore.isOnline ? 1 : 0));
+const networkAddress = computed(() => hardware.value.network?.ip || hardware.value.network?.gateway || systemStore.deviceAddress || '未获取');
+const portStatusText = computed(() => `${systemStore.connected ? 'Socket已连' : 'Socket未连'} / ${hardware.value.network?.interface || '网络待更新'}`);
+const statusCards = computed(() => ([
+  { title: 'Socket 会话', desc: '实时事件和页面刷新链路', value: systemStore.connected ? '已连接' : '未连接' },
+  { title: '设备主链路', desc: '设备与控制台在线状态', value: systemStore.isOnline ? '在线' : '离线' },
+  { title: 'CAN 通道', desc: 'CAN0 / CAN1 运行情况', value: `${formatState(hardware.value.can0?.status)} / ${formatState(hardware.value.can1?.status)}` },
+  { title: '存储挂载', desc: '当前录制目录与挂载点', value: hardware.value.storage?.mount_point || '未挂载' },
+]));
 
 const heroMetrics = computed(() => ([
   {
@@ -153,6 +153,14 @@ const lastUpdatedText = computed(() => {
 function formatNum(value: number | string) {
   const num = Number(value ?? 0);
   return Number.isFinite(num) ? num.toFixed(1) : '-';
+}
+
+function formatState(value: number | string) {
+  const key = Number(value ?? 0);
+  if (key === 1) return '正常';
+  if (key === 2) return '告警';
+  if (key === 3) return '错误';
+  return '离线';
 }
 
 onMounted(async () => {
@@ -290,12 +298,6 @@ onMounted(async () => {
   box-shadow: var(--app-shadow);
 }
 
-.section-card--accent {
-  background:
-    linear-gradient(180deg, rgba(22, 31, 46, 0.9), rgba(11, 18, 31, 0.9)),
-    radial-gradient(circle at top right, rgba(208, 165, 103, 0.12), transparent 36%);
-}
-
 .section-head {
   display: flex;
   justify-content: space-between;
@@ -323,7 +325,6 @@ onMounted(async () => {
 }
 
 .signal-row span,
-.spotlight-item span,
 .workspace-item p {
   color: #9eabc1;
 }
@@ -341,36 +342,15 @@ onMounted(async () => {
   color: #ff7b8b;
 }
 
-.spotlight-list {
-  display: grid;
-  gap: 12px;
-}
-
-.spotlight-item,
 .workspace-item {
   width: 100%;
   text-align: left;
 }
 
-.spotlight-item {
-  padding: 16px 18px;
-  border-radius: 18px;
-  color: #edf5ff;
-  border: 1px solid rgba(139, 162, 199, 0.12);
-  background: rgba(255, 255, 255, 0.03);
-}
-
-.spotlight-item strong,
 .workspace-item strong {
   display: block;
   font-size: 16px;
   color: #f4f8ff;
-}
-
-.spotlight-item span {
-  display: block;
-  margin-top: 8px;
-  line-height: 1.6;
 }
 
 .workspace-grid {

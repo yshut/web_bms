@@ -67,22 +67,6 @@
       </article>
     </section>
 
-    <section class="section-card">
-      <div class="section-head">
-        <div>
-          <p class="section-kicker">最新信号</p>
-          <h2>最新信号</h2>
-        </div>
-      </div>
-      <el-table :key="signalTableKey" :data="signalRows" size="small" max-height="360" :row-key="signalRowKey">
-        <el-table-column prop="signal_name" label="信号" min-width="220" />
-        <el-table-column prop="value" label="值" width="120" />
-        <el-table-column prop="unit" label="单位" width="100" />
-        <el-table-column prop="channel" label="通道" width="100" />
-        <el-table-column prop="ts_text" label="时间" width="120" />
-      </el-table>
-    </section>
-
     <section class="group-grid">
       <article class="section-card">
         <div class="section-head">
@@ -91,9 +75,9 @@
             <h2>消息分组</h2>
           </div>
         </div>
-        <el-collapse :key="messageTableKey">
+        <el-collapse v-model="activeMessageGroups">
           <el-collapse-item v-for="(rows, name) in messages" :key="name" :title="`${name} (${rows.length})`" :name="name">
-            <el-table :data="rows" size="small" :row-key="signalRowKey">
+            <el-table :data="rows" size="small" :row-key="signalRowKey" max-height="280">
               <el-table-column prop="signal_name" label="信号" min-width="180" />
               <el-table-column prop="value" label="值" width="120" />
               <el-table-column prop="unit" label="单位" width="100" />
@@ -107,6 +91,24 @@
       <article class="section-card">
         <div class="section-head">
           <div>
+            <p class="section-kicker">最新信号</p>
+            <h2>最新信号</h2>
+          </div>
+        </div>
+        <el-table :key="signalTableKey" :data="signalRows" size="small" max-height="420" :row-key="signalRowKey">
+          <el-table-column prop="signal_name" label="信号" min-width="180" />
+          <el-table-column prop="value" label="值" width="120" />
+          <el-table-column prop="unit" label="单位" width="100" />
+          <el-table-column prop="channel" label="通道" width="100" />
+          <el-table-column prop="ts_text" label="时间" width="120" />
+        </el-table>
+      </article>
+    </section>
+
+    <section class="group-grid">
+      <article class="section-card">
+        <div class="section-head">
+          <div>
             <p class="section-kicker">告警明细</p>
             <h2>告警明细</h2>
           </div>
@@ -117,6 +119,27 @@
           <el-table-column prop="message" label="描述" min-width="220" />
           <el-table-column prop="ts_text" label="时间" width="120" />
         </el-table>
+      </article>
+
+      <article class="section-card">
+        <div class="section-head">
+          <div>
+            <p class="section-kicker">趋势曲线</p>
+            <h2>实时曲线</h2>
+          </div>
+          <div class="toolbar">
+            <el-select v-model="chartSignal" filterable placeholder="选择信号" style="width: 260px">
+              <el-option v-for="row in signalRows" :key="row.signal_name" :label="row.signal_name" :value="row.signal_name" />
+            </el-select>
+            <el-button @click="loadChartData">刷新曲线</el-button>
+          </div>
+        </div>
+        <div class="chart-surface">
+          <svg v-if="chartPath" viewBox="0 0 900 240" class="chart-svg" preserveAspectRatio="none">
+            <path :d="chartPath" />
+          </svg>
+          <div v-else class="empty-state">选择信号后显示曲线</div>
+        </div>
       </article>
     </section>
   </div>
@@ -136,6 +159,9 @@ const signalTableKey = ref(0);
 const messageTableKey = ref(0);
 const alertTableKey = ref(0);
 const streamConnected = ref(false);
+const activeMessageGroups = ref<string[]>([]);
+const chartSignal = ref('');
+const chartRows = ref<any[]>([]);
 let pendingReload = false;
 let reloadInFlight = false;
 let lastSignature = '';
@@ -180,6 +206,18 @@ const lastUpdatedText = computed(() => {
 });
 
 const lastAgeText = computed(() => formatAge(lastUpdated.value > 0 ? lastUpdated.value / 1000 : 0));
+const chartPath = computed(() => {
+  if (chartRows.value.length < 2) return '';
+  const values = chartRows.value.map((row) => Number(row.value || 0));
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const span = Math.max(1, max - min);
+  return chartRows.value.map((row, index) => {
+    const x = (index / Math.max(1, chartRows.value.length - 1)) * 900;
+    const y = 220 - (((Number(row.value || 0) - min) / span) * 180);
+    return `${index === 0 ? 'M' : 'L'} ${x.toFixed(2)} ${y.toFixed(2)}`;
+  }).join(' ');
+});
 
 function formatTs(value: any, isMs = false) {
   const num = Number(value || 0);
@@ -307,6 +345,12 @@ async function refreshAlerts() {
   applySnapshot(stats.value, signalRows.value, nextAlerts);
 }
 
+async function loadChartData() {
+  if (!chartSignal.value) return;
+  const result: any = await bmsApi.query([chartSignal.value], 300);
+  chartRows.value = result?.data?.[chartSignal.value] || [];
+}
+
 async function reload() {
   if (reloadInFlight) {
     pendingReload = true;
@@ -369,10 +413,13 @@ function connectStream() {
 
 onMounted(async () => {
   await reload();
+  chartSignal.value = lifeSignal.value?.signal_name || '';
+  if (chartSignal.value) await loadChartData();
   connectStream();
   reloadTimer = window.setInterval(async () => {
     await refreshAlerts();
     await reload();
+    if (chartSignal.value) await loadChartData();
   }, 60000);
 });
 
@@ -583,6 +630,13 @@ onBeforeUnmount(() => {
   margin-top: 14px;
 }
 
+.toolbar {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
 .focus-item,
 .alert-item {
   display: flex;
@@ -644,6 +698,27 @@ onBeforeUnmount(() => {
 
 .group-grid {
   grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.chart-surface {
+  min-height: 240px;
+  padding: 12px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(136, 176, 255, 0.08);
+}
+
+.chart-svg {
+  width: 100%;
+  height: 240px;
+}
+
+.chart-svg path {
+  fill: none;
+  stroke: #4ac6ff;
+  stroke-width: 3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 :deep(.el-collapse) {
