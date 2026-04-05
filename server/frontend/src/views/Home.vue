@@ -1,38 +1,113 @@
 <template>
   <div class="home-page">
-    <el-card shadow="hover">
-      <div class="hero">
-        <div>
-          <h1>控制台</h1>
-          <p>集中查看设备、规则、CAN、UDS、文件和 BMS 数据。</p>
-        </div>
-        <div class="hero-meta">
-          <el-tag :type="systemStore.isOnline ? 'success' : 'danger'">
-            {{ systemStore.isOnline ? '设备在线' : '设备离线' }}
-          </el-tag>
-          <span class="meta">{{ buildLabel }}</span>
+    <section class="hero-panel">
+      <div class="hero-copy">
+        <p class="eyebrow">Operations Workspace</p>
+        <h1>设备、链路与规则在同一操作面上联动。</h1>
+        <p class="hero-desc">
+          当前控制台聚焦在线状态、运行版本、硬件健康度和 BMS 数据刷新情况，适合日常调试与值守切换。
+        </p>
+        <div class="hero-actions">
+          <el-button type="primary" @click="go('/device-config-v2')">进入设备配置</el-button>
+          <el-button plain @click="openWallboard">打开运行大屏</el-button>
         </div>
       </div>
-    </el-card>
 
-    <div class="grid">
-      <el-card v-for="item in cards" :key="item.path" shadow="hover" class="nav-card" @click="go(item.path)">
-        <div class="nav-title">{{ item.title }}</div>
-        <div class="nav-desc">{{ item.desc }}</div>
-      </el-card>
-    </div>
+      <div class="hero-metrics">
+        <article v-for="item in heroMetrics" :key="item.label" class="metric-tile">
+          <span>{{ item.label }}</span>
+          <strong>{{ item.value }}</strong>
+          <p>{{ item.detail }}</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="overview-grid">
+      <article class="overview-panel section-card">
+        <div class="section-head">
+          <div>
+            <p class="section-kicker">System Pulse</p>
+            <h2>实时总览</h2>
+          </div>
+          <span class="subtle">{{ lastUpdatedText }}</span>
+        </div>
+        <div class="signal-list">
+          <div class="signal-row">
+            <span>设备连接</span>
+            <strong :class="{ good: systemStore.isOnline, bad: !systemStore.isOnline }">
+              {{ systemStore.isOnline ? 'ONLINE' : 'OFFLINE' }}
+            </strong>
+          </div>
+          <div class="signal-row">
+            <span>硬件采样</span>
+            <strong>{{ hardwareSummary }}</strong>
+          </div>
+          <div class="signal-row">
+            <span>BMS 告警</span>
+            <strong>{{ alertSummary }}</strong>
+          </div>
+          <div class="signal-row">
+            <span>运行版本</span>
+            <strong>{{ buildLabel }}</strong>
+          </div>
+        </div>
+      </article>
+
+      <article class="section-card section-card--accent">
+        <div class="section-head">
+          <div>
+            <p class="section-kicker">Quick Path</p>
+            <h2>高频入口</h2>
+          </div>
+        </div>
+        <div class="spotlight-list">
+          <button
+            v-for="item in spotlightCards"
+            :key="item.path"
+            class="spotlight-item"
+            type="button"
+            @click="go(item.path)"
+          >
+            <strong>{{ item.title }}</strong>
+            <span>{{ item.desc }}</span>
+          </button>
+        </div>
+      </article>
+    </section>
+
+    <section class="workspace section-card">
+      <div class="section-head">
+        <div>
+          <p class="section-kicker">Workspace</p>
+          <h2>功能区</h2>
+        </div>
+      </div>
+      <div class="workspace-grid">
+        <button v-for="item in cards" :key="item.path" class="workspace-item" type="button" @click="go(item.path)">
+          <div>
+            <strong>{{ item.title }}</strong>
+            <p>{{ item.desc }}</p>
+          </div>
+          <span>进入</span>
+        </button>
+      </div>
+    </section>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
-import { statusApi } from '@/api';
+import { bmsApi, hardwareApi, statusApi } from '@/api';
 import { useSystemStore } from '@/stores/system';
 
 const router = useRouter();
 const systemStore = useSystemStore();
 const buildLabel = ref('版本检查中');
+const hardware = ref<Record<string, any>>({});
+const bmsStats = ref<Record<string, any>>({});
+const alertCount = ref(0);
+const lastUpdated = ref(0);
 
 const cards = [
   { path: '/device-config-v2', title: '设备配置', desc: '网络、WiFi、MQTT、CAN 参数' },
@@ -46,15 +121,80 @@ const cards = [
   { path: '/bms', title: 'BMS 看板', desc: '统计、消息分组、告警和导出' },
 ];
 
+const spotlightCards = [
+  { path: '/hardware', title: '硬件监控', desc: '快速确认 CPU、温度、网络和 CAN 通道状态' },
+  { path: '/rules-v2', title: '规则管理', desc: '查看分页规则、远程同步和导入导出操作' },
+  { path: '/can', title: 'CAN 监控', desc: '实时抓帧并按接口、ID、数据内容过滤' },
+];
+
+const heroMetrics = computed(() => ([
+  {
+    label: '在线设备',
+    value: systemStore.isOnline ? '1' : '0',
+    detail: systemStore.deviceId || '等待连接中的设备',
+  },
+  {
+    label: 'CPU / 温度',
+    value: `${formatNum(hardware.value.system?.cpu_usage)}% / ${formatNum(hardware.value.system?.temperature)}°C`,
+    detail: '来自硬件状态轮询',
+  },
+  {
+    label: 'BMS 记录',
+    value: String(bmsStats.value.total_records ?? 0),
+    detail: `${alertCount.value} 条当前告警`,
+  },
+  {
+    label: '版本',
+    value: buildLabel.value,
+    detail: '服务端构建标识',
+  },
+]));
+
+const hardwareSummary = computed(() => {
+  const memory = formatNum(hardware.value.system?.memory_usage);
+  const network = hardware.value.network?.ip || '未分配 IP';
+  return `内存 ${memory}% / ${network}`;
+});
+
+const alertSummary = computed(() => {
+  if (!alertCount.value) return '当前无活动告警';
+  return `${alertCount.value} 条活动告警`;
+});
+
+const lastUpdatedText = computed(() => {
+  if (!lastUpdated.value) return '等待首次采样';
+  return `更新于 ${new Date(lastUpdated.value).toLocaleTimeString()}`;
+});
+
 function go(path: string) {
   router.push(path);
 }
 
+function openWallboard() {
+  const target = router.resolve({ path: '/wallboard' }).href;
+  window.open(target, '_blank', 'noopener,noreferrer');
+}
+
+function formatNum(value: number | string) {
+  const num = Number(value ?? 0);
+  return Number.isFinite(num) ? num.toFixed(1) : '-';
+}
+
 onMounted(async () => {
   try {
-    const result: any = await statusApi.getVersion();
+    const [versionResult, hardwareResult, statsResult, alertsResult] = await Promise.all([
+      statusApi.getVersion(),
+      hardwareApi.status(),
+      bmsApi.stats(Date.now()),
+      bmsApi.alerts(20, Date.now()),
+    ]) as any[];
+    const result: any = versionResult;
     const server = result?.server || {};
     buildLabel.value = [server.build_tag, server.git_commit].filter(Boolean).join(' / ') || '版本未知';
+    hardware.value = hardwareResult?.data || {};
+    bmsStats.value = statsResult?.data || {};
+    alertCount.value = Array.isArray(alertsResult?.data) ? alertsResult.data.length : 0;
+    lastUpdated.value = Date.now();
   } catch {
     buildLabel.value = '版本未知';
   }
@@ -64,41 +204,268 @@ onMounted(async () => {
 <style scoped>
 .home-page {
   display: grid;
-  gap: 16px;
+  gap: 20px;
 }
 
-.hero {
+.hero-panel {
+  display: flex;
+  gap: 24px;
+  padding: 28px;
+  min-height: 320px;
+  border-radius: 28px;
+  border: 1px solid rgba(136, 176, 255, 0.14);
+  background:
+    linear-gradient(135deg, rgba(17, 35, 58, 0.96), rgba(8, 18, 31, 0.92)),
+    radial-gradient(circle at right top, rgba(74, 198, 255, 0.16), transparent 34%);
+  box-shadow: var(--app-shadow);
+  align-items: stretch;
+}
+
+.hero-copy {
+  flex: 1.1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  max-width: 660px;
+}
+
+.eyebrow,
+.section-kicker {
+  margin: 0 0 10px;
+  color: #72a2cf;
+  font-size: 12px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+}
+
+.hero-copy h1,
+.section-head h2 {
+  margin: 0;
+  color: #f4f8ff;
+}
+
+.hero-copy h1 {
+  font-size: clamp(34px, 4vw, 54px);
+  line-height: 1.04;
+  max-width: 10em;
+}
+
+.hero-desc {
+  margin: 18px 0 0;
+  max-width: 42rem;
+  font-size: 15px;
+  line-height: 1.8;
+  color: #97abca;
+}
+
+.hero-actions {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 24px;
+}
+
+.hero-metrics {
+  flex: 0.9;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.metric-tile,
+.section-card {
+  border-radius: 24px;
+}
+
+.metric-tile {
+  padding: 18px;
+  min-height: 132px;
+  border: 1px solid rgba(136, 176, 255, 0.1);
+  background: rgba(255, 255, 255, 0.035);
+  backdrop-filter: blur(10px);
+}
+
+.metric-tile span,
+.subtle {
+  color: #7d94b7;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.metric-tile strong {
+  display: block;
+  margin-top: 14px;
+  color: #f5fbff;
+  font-size: clamp(22px, 2vw, 30px);
+  line-height: 1.15;
+}
+
+.metric-tile p {
+  margin-top: 12px;
+  color: #8ea4c4;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.overview-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.05fr) minmax(320px, 0.95fr);
+  gap: 20px;
+}
+
+.section-card {
+  padding: 22px 24px;
+  border: 1px solid rgba(136, 176, 255, 0.12);
+  background: linear-gradient(180deg, rgba(14, 28, 47, 0.8), rgba(9, 18, 31, 0.76));
+  box-shadow: var(--app-shadow);
+}
+
+.section-card--accent {
+  background:
+    linear-gradient(180deg, rgba(14, 31, 49, 0.88), rgba(8, 18, 31, 0.9)),
+    radial-gradient(circle at top right, rgba(25, 211, 162, 0.12), transparent 36%);
+}
+
+.section-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+  margin-bottom: 18px;
+}
+
+.signal-list {
+  display: grid;
+  gap: 12px;
+}
+
+.signal-row {
   display: flex;
   justify-content: space-between;
   gap: 16px;
   align-items: center;
-  flex-wrap: wrap;
+  padding: 14px 0;
+  border-bottom: 1px solid rgba(136, 176, 255, 0.08);
 }
 
-.hero h1 {
-  margin: 0 0 8px;
-  font-size: 30px;
+.signal-row:last-child {
+  border-bottom: none;
 }
 
-.hero p,
-.meta,
-.nav-desc {
-  color: #6b7280;
+.signal-row span,
+.spotlight-item span,
+.workspace-item p {
+  color: #93a6c4;
 }
 
-.grid {
+.signal-row strong {
+  color: #eef5ff;
+  text-align: right;
+}
+
+.signal-row strong.good {
+  color: #28daaf;
+}
+
+.signal-row strong.bad {
+  color: #ff7b8b;
+}
+
+.spotlight-list {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-  gap: 16px;
+  gap: 12px;
 }
 
-.nav-card {
+.spotlight-item,
+.workspace-item {
+  width: 100%;
+  border: 0;
   cursor: pointer;
+  text-align: left;
+  transition: transform 180ms ease, border-color 180ms ease, background 180ms ease;
 }
 
-.nav-title {
-  font-size: 18px;
-  font-weight: 600;
-  margin-bottom: 8px;
+.spotlight-item {
+  padding: 16px 18px;
+  border-radius: 18px;
+  color: #edf5ff;
+  border: 1px solid rgba(136, 176, 255, 0.12);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.spotlight-item strong,
+.workspace-item strong {
+  display: block;
+  font-size: 16px;
+  color: #f4f8ff;
+}
+
+.spotlight-item span {
+  display: block;
+  margin-top: 8px;
+  line-height: 1.6;
+}
+
+.workspace-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 14px;
+}
+
+.workspace-item {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+  min-height: 120px;
+  padding: 18px;
+  border-radius: 20px;
+  border: 1px solid rgba(136, 176, 255, 0.12);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.02));
+  color: #eff6ff;
+}
+
+.workspace-item p {
+  margin-top: 10px;
+  line-height: 1.65;
+}
+
+.workspace-item span {
+  color: #66d7ff;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.spotlight-item:hover,
+.workspace-item:hover {
+  transform: translateY(-2px);
+  border-color: rgba(74, 198, 255, 0.3);
+  background: rgba(74, 198, 255, 0.08);
+}
+
+@media (max-width: 1180px) {
+  .hero-panel,
+  .overview-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .hero-panel {
+    padding: 24px;
+  }
+}
+
+@media (max-width: 760px) {
+  .hero-metrics {
+    grid-template-columns: 1fr;
+  }
+
+  .hero-copy h1 {
+    font-size: 34px;
+  }
+
+  .section-card {
+    padding: 18px;
+  }
 }
 </style>

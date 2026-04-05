@@ -41,11 +41,35 @@ export default defineConfig({
   build: {
     outDir: '../static/console',
     emptyOutDir: true,
+    chunkSizeWarningLimit: 1000,
     rollupOptions: {
       output: {
-        manualChunks: {
-          'element-plus': ['element-plus'],
-          'echarts': ['echarts', 'vue-echarts'],
+        manualChunks(id) {
+          if (!id.includes('node_modules')) return;
+
+          if (id.includes('/echarts/') || id.includes('/zrender/') || id.includes('/vue-echarts/')) {
+            return 'echarts';
+          }
+
+          if (id.includes('/@element-plus/icons-vue/')) {
+            return 'element-plus-icons';
+          }
+
+          if (
+            id.includes('/element-plus/') ||
+            id.includes('/@element-plus/') ||
+            id.includes('/@floating-ui/')
+          ) {
+            return 'element-plus-core';
+          }
+
+          if (id.includes('/vue/') || id.includes('/vue-router/') || id.includes('/pinia/')) {
+            return 'vue-vendor';
+          }
+
+          if (id.includes('/axios/')) {
+            return 'axios';
+          }
         },
       },
     },

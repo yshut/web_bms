@@ -3,6 +3,12 @@ import type { RouteRecordRaw } from 'vue-router';
 
 const routes: RouteRecordRaw[] = [
   {
+    path: '/wallboard',
+    name: 'Wallboard',
+    component: () => import('@/views/Wallboard.vue'),
+    meta: { title: '运行大屏' },
+  },
+  {
     path: '/',
     name: 'Layout',
     component: () => import('@/views/Layout.vue'),
