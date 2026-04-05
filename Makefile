@@ -12,8 +12,8 @@ STRIP := $(CROSS_COMPILE)strip
 TARGET := lvgl_app
 
 # 无屏幕模式：只编译 logic / utils / drivers（不含 ui/ 和 LVGL）
-SRC_DIRS := . logic drivers utils
-INC_DIRS := . logic drivers utils
+SRC_DIRS := . logic drivers utils src/wifi
+INC_DIRS := . logic drivers utils src/wifi
 
 # 查找所有源文件（排除测试程序和 UI 文件）
 SRCS := $(foreach dir,$(SRC_DIRS),$(wildcard $(dir)/*.c))
@@ -83,4 +83,3 @@ help:
 	@echo "  TARGET        - 目标程序名（默认: lvgl_app）"
 
 .PHONY: all clean install run help
-
