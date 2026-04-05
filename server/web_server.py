@@ -1249,6 +1249,7 @@ app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
 
 _AUTH_SESSION_KEY = 'auth_user'
 _AUTH_ROLE_SESSION_KEY = 'auth_role'
+_AUTH_FAILURES = {}
 _AUTH_PUBLIC_PATHS = {
     '/login',
     '/api/auth/login',
@@ -1325,6 +1326,72 @@ def _authenticate_credentials(username: str, password: str) -> Tuple[bool, str]:
     return False, ''
 
 
+def _client_auth_key() -> str:
+    forwarded = str(request.headers.get('X-Forwarded-For', '') or '').split(',')[0].strip()
+    return forwarded or str(request.remote_addr or 'unknown')
+
+
+def _cleanup_auth_failures(now_ts: float) -> None:
+    lockout_seconds = max(1, int(getattr(cfg, 'AUTH_LOCKOUT_SECONDS', 300)))
+    stale_before = now_ts - (lockout_seconds * 2)
+    for key, item in list(_AUTH_FAILURES.items()):
+        if not isinstance(item, dict):
+            _AUTH_FAILURES.pop(key, None)
+            continue
+        if float(item.get('last_ts') or 0) < stale_before:
+            _AUTH_FAILURES.pop(key, None)
+
+
+def _get_lockout_remaining(client_key: str, now_ts: float) -> int:
+    item = _AUTH_FAILURES.get(client_key)
+    if not isinstance(item, dict):
+        return 0
+    lock_until = float(item.get('lock_until') or 0)
+    if lock_until <= now_ts:
+        return 0
+    return int(max(1, round(lock_until - now_ts)))
+
+
+def _register_auth_failure(client_key: str, now_ts: float) -> int:
+    max_failures = max(1, int(getattr(cfg, 'AUTH_MAX_FAILURES', 6)))
+    lockout_seconds = max(1, int(getattr(cfg, 'AUTH_LOCKOUT_SECONDS', 300)))
+    item = _AUTH_FAILURES.get(client_key)
+    if not isinstance(item, dict):
+        item = {'count': 0, 'lock_until': 0, 'last_ts': now_ts}
+    item['count'] = int(item.get('count') or 0) + 1
+    item['last_ts'] = now_ts
+    if item['count'] >= max_failures:
+        item['lock_until'] = now_ts + lockout_seconds
+        item['count'] = 0
+    _AUTH_FAILURES[client_key] = item
+    return int(max(0, round(float(item.get('lock_until') or 0) - now_ts)))
+
+
+def _clear_auth_failures(client_key: str) -> None:
+    _AUTH_FAILURES.pop(client_key, None)
+
+
+def _append_auth_audit(action: str, username: str, ok: bool, role: str = '', detail: str = '') -> None:
+    path = str(getattr(cfg, 'AUTH_AUDIT_LOG_PATH', '') or '').strip()
+    if not path:
+        return
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        line = json.dumps({
+            'ts': _format_local_ts(time.time()),
+            'ip': _client_auth_key(),
+            'action': str(action or ''),
+            'username': str(username or ''),
+            'ok': bool(ok),
+            'role': str(role or ''),
+            'detail': str(detail or ''),
+        }, ensure_ascii=False)
+        with open(path, 'a', encoding='utf-8') as f:
+            f.write(line + '\n')
+    except Exception:
+        pass
+
+
 def _is_public_request_path(path: str) -> bool:
     path = str(path or '').strip() or '/'
     if path in _AUTH_PUBLIC_PATHS:
@@ -1377,12 +1444,14 @@ def login_page():
 
 @app.route('/api/auth/status', methods=['GET'])
 def auth_status():
+    remaining = _get_lockout_remaining(_client_auth_key(), time.time())
     return jsonify({
         'ok': True,
         'authenticated': _is_authenticated(),
         'username': session.get(_AUTH_SESSION_KEY) if _is_authenticated() else None,
         'role': _current_auth_role() if _is_authenticated() else None,
         'viewer_enabled': _viewer_account_enabled(),
+        'lockout_remaining': remaining,
     })
 
 
@@ -1391,22 +1460,43 @@ def auth_login():
     body = request.get_json(silent=True) or {}
     username = str(body.get('username') or '').strip()
     password = str(body.get('password') or '')
+    now_ts = time.time()
+    client_key = _client_auth_key()
+    _cleanup_auth_failures(now_ts)
+    remaining = _get_lockout_remaining(client_key, now_ts)
+    if remaining > 0:
+        _append_auth_audit('login', username, False, detail=f'locked:{remaining}s')
+        return jsonify({
+            'ok': False,
+            'error': f'登录失败次数过多，请 {remaining} 秒后再试',
+            'lockout_remaining': remaining,
+        }), 429
     ok, role = _authenticate_credentials(username, password)
     if ok:
         session.permanent = True
         session[_AUTH_SESSION_KEY] = username
         session[_AUTH_ROLE_SESSION_KEY] = role
+        _clear_auth_failures(client_key)
+        _append_auth_audit('login', username, True, role=role)
         return jsonify({
             'ok': True,
             'username': username,
             'role': role,
             'next': str(body.get('next') or '/').strip() or '/',
         })
-    return jsonify({'ok': False, 'error': '用户名或密码错误'}), 401
+    remaining = _register_auth_failure(client_key, now_ts)
+    _append_auth_audit('login', username, False, detail='bad_credentials')
+    payload = {'ok': False, 'error': '用户名或密码错误'}
+    if remaining > 0:
+        payload['lockout_remaining'] = remaining
+        payload['error'] = f'登录失败次数过多，请 {remaining} 秒后再试'
+        return jsonify(payload), 429
+    return jsonify(payload), 401
 
 
 @app.route('/api/auth/logout', methods=['POST'])
 def auth_logout():
+    _append_auth_audit('logout', str(session.get(_AUTH_SESSION_KEY) or ''), True, role=_current_auth_role())
     session.pop(_AUTH_SESSION_KEY, None)
     session.pop(_AUTH_ROLE_SESSION_KEY, None)
     return jsonify({'ok': True})

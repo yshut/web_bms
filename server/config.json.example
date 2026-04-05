@@ -23,7 +23,10 @@
     "password_hash": "",
     "viewer_username": "viewer",
     "viewer_password_hash": "",
-    "secret_key": "change-this-session-secret-in-production"
+    "secret_key": "change-this-session-secret-in-production",
+    "max_failures": 6,
+    "lockout_seconds": 300,
+    "audit_log_path": "./uploads/auth_audit.log"
   },
   
   "tcp_hub": {

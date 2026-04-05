@@ -189,6 +189,9 @@ AUTH_VIEWER_USERNAME = str(_env_or_json('AUTH_VIEWER_USERNAME', 'auth.viewer_use
 AUTH_VIEWER_PASSWORD = str(_env_or_json('AUTH_VIEWER_PASSWORD', 'auth.viewer_password', ''))
 AUTH_VIEWER_PASSWORD_HASH = str(_env_or_json('AUTH_VIEWER_PASSWORD_HASH', 'auth.viewer_password_hash', ''))
 AUTH_SECRET_KEY = str(_env_or_json('AUTH_SECRET_KEY', 'auth.secret_key', 'app-lvgl-auth-20260405'))
+AUTH_MAX_FAILURES = int(_env_or_json('AUTH_MAX_FAILURES', 'auth.max_failures', 6))
+AUTH_LOCKOUT_SECONDS = int(_env_or_json('AUTH_LOCKOUT_SECONDS', 'auth.lockout_seconds', 300))
+AUTH_AUDIT_LOG_PATH = str(_env_or_json('AUTH_AUDIT_LOG_PATH', 'auth.audit_log_path', os.path.join(SERVER_DIR, 'uploads', 'auth_audit.log')))
 
 # 打印配置信息（启动时）
 def print_config():

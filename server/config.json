@@ -9,6 +9,18 @@
     "debug": false
   },
 
+  "auth": {
+    "enable": true,
+    "username": "admin",
+    "password_hash": "pbkdf2_sha256$260000$480fab8d6c630e5822fb7bcdc49050c6$1c62b95b9a7b1c998e764df89abd31b62630ac252eae88188e702ee675b462ef",
+    "viewer_username": "viewer",
+    "viewer_password_hash": "",
+    "secret_key": "change-this-session-secret-in-production",
+    "max_failures": 6,
+    "lockout_seconds": 300,
+    "audit_log_path": "./uploads/auth_audit.log"
+  },
+
   "mqtt": {
     "enable": true,
     "host": "127.0.0.1",
