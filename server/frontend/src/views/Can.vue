@@ -76,7 +76,6 @@
           <template #default="{ row }">{{ formatData(row) }}</template>
         </el-table-column>
       </el-table>
-      <div v-if="polling" class="poll-indicator">刷新中…</div>
     </el-card>
   </div>
 </template>
@@ -98,7 +97,6 @@ const route = useRoute();
 const router = useRouter();
 const systemStore = useSystemStore();
 const loading = ref(false);
-const polling = ref(false);
 const running = ref(false);
 const autoRefresh = ref(true);
 const limit = ref(100);
@@ -179,7 +177,6 @@ async function loadDevices() {
 
 async function refreshFrames() {
   if (!frames.value.length) loading.value = true;
-  else polling.value = true;
   try {
     const result: any = await canApi.getFrames(limit.value, activeDeviceId.value || undefined);
     const nextFrames = result?.data?.frames || result?.frames || [];
@@ -188,7 +185,6 @@ async function refreshFrames() {
     lastUpdated.value = Date.now();
   } finally {
     loading.value = false;
-    polling.value = false;
   }
 }
 
@@ -286,10 +282,4 @@ onBeforeUnmount(() => {
   font-size: 13px;
 }
 
-.poll-indicator {
-  margin-top: 8px;
-  color: #6b7280;
-  font-size: 12px;
-  text-align: right;
-}
 </style>

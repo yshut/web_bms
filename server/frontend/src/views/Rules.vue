@@ -106,6 +106,7 @@
         class="preview-table"
         max-height="280"
         size="small"
+        empty-text="暂无预览规则"
       >
         <el-table-column prop="id" label="规则ID" min-width="180" />
         <el-table-column prop="name" label="名称" min-width="160" />
@@ -120,7 +121,7 @@
         </el-table-column>
       </el-table>
 
-      <el-table :data="items" v-loading="loading" style="width: 100%" max-height="640">
+      <el-table :data="items" v-loading="loading" style="width: 100%" max-height="640" empty-text="暂无 CAN 转 MQTT 规则">
         <el-table-column prop="id" label="规则ID" min-width="180" />
         <el-table-column prop="name" label="名称" min-width="160" />
         <el-table-column label="状态" width="100">
@@ -160,7 +161,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
 import { ElMessage } from 'element-plus';
 import type { UploadFile } from 'element-plus';
 import { useRoute, useRouter } from 'vue-router';
@@ -188,6 +189,7 @@ const selectedExcel = ref<File | null>(null);
 const previewSummary = ref('');
 const previewRows = ref<any[]>([]);
 const selectedDeviceId = ref('');
+let reloadTimer: number | null = null;
 const deviceMeta = reactive({
   devices: [] as string[],
   history: [] as string[],
@@ -219,6 +221,34 @@ function hexId(v: number) {
   return `0x${(Number(v || 0) >>> 0).toString(16).toUpperCase()}`;
 }
 
+function normalizeRule(rule: any, index = 0) {
+  const src = rule?.source || {};
+  const match = rule?.match || {};
+  const mqtt = rule?.mqtt || {};
+  const decode = rule?.decode || {};
+  return {
+    ...rule,
+    id: rule?.id || `rule_${index + 1}`,
+    name: rule?.name || rule?.signal_name || src.signal_name || src.message_name || `规则${index + 1}`,
+    enabled: rule?.enabled !== false,
+    channel: rule?.channel || rule?.interface || match.channel || 'any',
+    can_id: Number(rule?.can_id ?? match.can_id ?? 0),
+    match_any_id: !!(rule?.match_any_id ?? match.match_any_id),
+    is_extended: !!(rule?.is_extended ?? match.is_extended),
+    message_name: rule?.message_name || src.message_name || '',
+    signal_name: rule?.signal_name || src.signal_name || rule?.name || '',
+    mqtt: {
+      ...mqtt,
+      topic_template: mqtt?.topic_template || mqtt?.topic || '',
+    },
+    decode: {
+      ...decode,
+      start_bit: decode?.start_bit ?? 0,
+      bit_length: decode?.bit_length ?? decode?.length ?? 0,
+    },
+  };
+}
+
 function decodeText(row: any) {
   const d = row?.decode || {};
   const parts = [`bit${d.start_bit ?? 0}`, `len${d.bit_length ?? 0}`];
@@ -248,6 +278,13 @@ async function loadDevices() {
 async function reload() {
   loading.value = true;
   try {
+    if (activeDeviceId.value) {
+      try {
+        await rulesApi.getRemote(activeDeviceId.value);
+      } catch {
+        // Keep showing the last indexed snapshot when device pull fails.
+      }
+    }
     const result: any = await rulesApi.query({
       device_id: activeDeviceId.value || undefined,
       q: filters.q || undefined,
@@ -257,7 +294,7 @@ async function reload() {
       page: page.value,
       page_size: pageSize.value,
     });
-    items.value = result.items || [];
+    items.value = Array.isArray(result.items) ? result.items.map((row: any, index: number) => normalizeRule(row, index)) : [];
     total.value = result.total || 0;
     version.value = result.version || 1;
     source.value = result.source || '';
@@ -308,7 +345,7 @@ async function importExcel(push: boolean) {
   previewRows.value = [];
   if (!push) {
     const rules = result.rules?.rules || [];
-    previewRows.value = rules.slice(0, 20);
+    previewRows.value = rules.slice(0, 20).map((row: any, index: number) => normalizeRule(row, index));
     previewSummary.value = `已转换 ${result.rule_count || rules.length || 0} 条规则，当前预览前 ${previewRows.value.length} 条`;
     ElMessage.success('Excel 转换成功');
   } else {
@@ -331,6 +368,14 @@ onMounted(async () => {
   selectedDeviceId.value = String(route.query.device_id || systemStore.deviceId || '').trim();
   await loadDevices();
   await reload();
+  reloadTimer = window.setInterval(reload, 5000);
+});
+
+onBeforeUnmount(() => {
+  if (reloadTimer != null) {
+    window.clearInterval(reloadTimer);
+    reloadTimer = null;
+  }
 });
 </script>
 

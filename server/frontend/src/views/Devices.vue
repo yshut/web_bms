@@ -36,13 +36,14 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { deviceApi } from '@/api';
 
 const loading = ref(false);
 const onlineDevices = ref<string[]>([]);
 const historyDevices = ref<string[]>([]);
 const statuses = ref<Record<string, any>>({});
+let reloadTimer: number | null = null;
 
 const deviceRows = computed(() =>
   historyDevices.value.map((id) => ({
@@ -53,11 +54,14 @@ const deviceRows = computed(() =>
 );
 
 function formatUptime(value: number | string) {
-  const total = Math.max(0, Number(value ?? 0));
+  let total = Math.max(0, Number(value ?? 0));
+  if (total > 86400 * 365 * 5) total = Math.floor(total / 1000);
   const h = Math.floor(total / 3600);
+  const d = Math.floor(h / 24);
+  const hh = h % 24;
   const m = Math.floor((total % 3600) / 60);
   const s = Math.floor(total % 60);
-  return `${h}h ${m}m ${s}s`;
+  return d > 0 ? `${d}d ${hh}h ${m}m ${s}s` : `${hh}h ${m}m ${s}s`;
 }
 
 async function reload() {
@@ -80,7 +84,17 @@ async function reload() {
   }
 }
 
-onMounted(reload);
+onMounted(async () => {
+  await reload();
+  reloadTimer = window.setInterval(reload, 5000);
+});
+
+onBeforeUnmount(() => {
+  if (reloadTimer != null) {
+    window.clearInterval(reloadTimer);
+    reloadTimer = null;
+  }
+});
 </script>
 
 <style scoped>

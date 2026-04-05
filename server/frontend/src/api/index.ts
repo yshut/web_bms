@@ -202,6 +202,8 @@ export const remoteConfigApi = {
 };
 
 export const rulesApi = {
+  getRemote: (deviceId?: string) =>
+    api.get('/device/remote/rules', { params: deviceId ? { device_id: deviceId } : undefined }),
   query: (params: {
     device_id?: string;
     q?: string;

@@ -184,7 +184,7 @@ async function mkdirDialog() {
       await listDir();
     }
   } catch (error) {
-    // ignore cancel
+    if (error !== 'cancel' && error !== 'close') ElMessage.error('新建文件夹失败');
   }
 }
 
@@ -202,7 +202,7 @@ async function renamePath(row: any) {
       await listDir();
     }
   } catch (error) {
-    // ignore cancel
+    if (error !== 'cancel' && error !== 'close') ElMessage.error('重命名失败');
   }
 }
 
@@ -221,7 +221,7 @@ async function removePath(row: any) {
       await listDir();
     }
   } catch (error) {
-    // ignore cancel
+    if (error !== 'cancel' && error !== 'close') ElMessage.error('删除失败');
   }
 }
 
