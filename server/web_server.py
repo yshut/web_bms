@@ -10,6 +10,7 @@ import atexit
 import signal
 import posixpath
 import socket
+import subprocess
 from flask import Flask, request, jsonify, send_from_directory, Response, stream_with_context
 import re
 from typing import Optional, Tuple
@@ -28,6 +29,68 @@ except Exception:
     from path_config import BASE_DIR  # type: ignore
 
 SERVER_DIR = os.path.dirname(os.path.abspath(__file__))
+SERVER_UI_BUILD = 'ui-debug-20260405-01'
+SERVER_PROCESS_STARTED_TS = time.time()
+
+
+def _format_local_ts(ts: float) -> str:
+    try:
+        return time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(float(ts)))
+    except Exception:
+        return ''
+
+
+def _detect_git_commit() -> str:
+    roots = []
+    try:
+        roots.append(BASE_DIR)
+    except Exception:
+        pass
+    roots.append(os.path.dirname(SERVER_DIR))
+    roots.append(SERVER_DIR)
+    seen = set()
+    for root in roots:
+        root = os.path.abspath(str(root or '').strip())
+        if not root or root in seen or not os.path.isdir(root):
+            continue
+        seen.add(root)
+        try:
+            proc = subprocess.run(
+                ['git', 'rev-parse', '--short', 'HEAD'],
+                cwd=root,
+                capture_output=True,
+                text=True,
+                timeout=1.5,
+                check=True,
+            )
+            sha = str(proc.stdout or '').strip()
+            if sha:
+                return sha
+        except Exception:
+            continue
+    return ''
+
+
+SERVER_GIT_COMMIT = _detect_git_commit()
+
+
+def _get_server_runtime_info() -> dict:
+    commit = str(SERVER_GIT_COMMIT or '').strip()
+    build = str(SERVER_UI_BUILD or '').strip()
+    parts = [p for p in (build, commit) if p]
+    return {
+        'build_tag': build,
+        'git_commit': commit,
+        'label': ' / '.join(parts) if parts else 'unknown',
+        'process_started_ts': SERVER_PROCESS_STARTED_TS,
+        'process_started_at': _format_local_ts(SERVER_PROCESS_STARTED_TS),
+        'hostname': socket.gethostname(),
+        'pid': os.getpid(),
+        'public_host': getattr(cfg, 'WEB_HOST_DISPLAY', ''),
+        'web_port': getattr(cfg, 'WEB_PORT', 0),
+        'mqtt_host': getattr(cfg, 'MQTT_HOST', ''),
+        'mqtt_port': getattr(cfg, 'MQTT_PORT', 0),
+    }
 
 # WebSocket Hub 已移除，仅保留 import 守护，防止旧引用报错
 WSHub = None  # noqa: F841 — stub, not used
@@ -248,9 +311,35 @@ _STATUS_CACHE_TTL = 0.5  # 秒
 UDISK_DIR = BASE_DIR
 
 # 通过 WebSocket 与 Qt 设备通信
+def _resolve_default_device_id() -> Optional[str]:
+    try:
+        info = _mqtt_hub.info() if _mqtt_hub else {}
+    except Exception:
+        info = {}
+    candidates = []
+    try:
+        candidates.append((info or {}).get('device_id'))
+    except Exception:
+        pass
+    try:
+        candidates.extend((info or {}).get('devices') or [])
+    except Exception:
+        pass
+    try:
+        candidates.extend((info or {}).get('history') or [])
+    except Exception:
+        pass
+    for item in candidates:
+        did = str(item or '').strip()
+        if did:
+            return did
+    return None
+
+
 def qt_request(payload: dict, timeout: float = None, device_id: Optional[str] = None) -> dict:
     if timeout is None:
         timeout = cfg.SOCKET_TIMEOUT
+    device_id = str(device_id or '').strip() or _resolve_default_device_id()
     mqtt_diag = _get_mqtt_runtime_diag(device_id)
     if _mqtt_hub and _mqtt_hub.is_broker_connected():
         try:
@@ -270,7 +359,7 @@ def _get_requested_device_id(default: Optional[str] = None) -> Optional[str]:
     if device_id is None:
         device_id = request.args.get('device_id') or request.args.get('deviceId')
     device_id = str(device_id or '').strip()
-    return device_id or None
+    return device_id or _resolve_default_device_id()
 
 
 def _get_mqtt_device_info(device_id: Optional[str] = None) -> dict:
@@ -503,7 +592,17 @@ def _get_realtime_cache_hub():
 def _apply_common_response_headers(resp):
     try:
         path = str(getattr(request, 'path', '') or '')
-        if path.startswith('/api/') or path in ('/device_config', '/files'):
+        runtime = _get_server_runtime_info()
+        resp.headers.setdefault('X-App-Build', str(runtime.get('build_tag') or 'unknown'))
+        if runtime.get('git_commit'):
+            resp.headers.setdefault('X-App-Commit', str(runtime.get('git_commit')))
+        if runtime.get('process_started_at'):
+            resp.headers.setdefault('X-App-Started-At', str(runtime.get('process_started_at')))
+        if (
+            path.startswith('/api/')
+            or path.startswith('/static/')
+            or path in ('/', '/can', '/hardware', '/dbc', '/uds', '/files', '/device_config')
+        ):
             resp.headers.setdefault('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0')
             resp.headers.setdefault('Pragma', 'no-cache')
             resp.headers.setdefault('Expires', '0')
@@ -576,45 +675,53 @@ def _can_bind(host: str, port: int) -> Tuple[bool, str]:
         except Exception:
             pass
 
-_FS_BASE_CACHE = {"ts": 0.0, "base": None, "source": None}
+_FS_BASE_CACHE = {}
 
-def _guess_device_base_dir() -> dict:
+def _guess_device_base_dir(device_id: Optional[str] = None) -> dict:
     """尝试获取设备真实可写根目录（优先 storage_mount），用于文件上传/UDS固件路径。
     兼容旧设备：没有 fs_base 时通过 fs_list 探测 /mnt/UDISK /mnt/SDCARD。
     """
+    resolved_device_id = str(device_id or '').strip() or _resolve_default_device_id()
+    cache_key = resolved_device_id or '__default__'
+    cache_entry = _FS_BASE_CACHE.get(cache_key) if isinstance(_FS_BASE_CACHE, dict) else None
     try:
         now = time.time()
-        if _FS_BASE_CACHE.get("base") and (now - float(_FS_BASE_CACHE.get("ts") or 0.0)) < 3.0:
-            return {"ok": True, "base": _FS_BASE_CACHE["base"], "source": _FS_BASE_CACHE.get("source") or "cache"}
+        if cache_entry and cache_entry.get("base") and (now - float(cache_entry.get("ts") or 0.0)) < 3.0:
+            return {
+                "ok": True,
+                "base": cache_entry["base"],
+                "source": cache_entry.get("source") or "cache",
+                "device_id": resolved_device_id,
+            }
     except Exception:
         pass
 
     # 1) 新设备：fs_base
     try:
-        r = qt_request({"cmd": "fs_base"}, timeout=2.0)
+        r = qt_request({"cmd": "fs_base"}, timeout=2.0, device_id=resolved_device_id)
         if isinstance(r, dict) and r.get("ok") and isinstance(r.get("data"), dict):
             base = str(r["data"].get("base") or "").strip()
             if base.startswith("/mnt"):
-                _FS_BASE_CACHE.update({"ts": time.time(), "base": base, "source": "device"})
-                return {"ok": True, "base": base, "source": "device"}
+                _FS_BASE_CACHE[cache_key] = {"ts": time.time(), "base": base, "source": "device"}
+                return {"ok": True, "base": base, "source": "device", "device_id": resolved_device_id}
     except Exception:
         pass
 
     # 2) 旧设备：探测常见挂载点
     def _probe(path: str) -> bool:
         try:
-            rr = qt_request({"cmd": "fs_list", "path": path}, timeout=2.0)
+            rr = qt_request({"cmd": "fs_list", "path": path}, timeout=2.0, device_id=resolved_device_id)
             return bool(isinstance(rr, dict) and rr.get("ok"))
         except Exception:
             return False
 
     for cand in ("/mnt/UDISK", "/mnt/udisk", "/mnt/SDCARD", "/mnt/sdcard"):
         if _probe(cand):
-            _FS_BASE_CACHE.update({"ts": time.time(), "base": cand, "source": "probe"})
-            return {"ok": True, "base": cand, "source": "probe"}
+            _FS_BASE_CACHE[cache_key] = {"ts": time.time(), "base": cand, "source": "probe"}
+            return {"ok": True, "base": cand, "source": "probe", "device_id": resolved_device_id}
 
-    _FS_BASE_CACHE.update({"ts": time.time(), "base": UDISK_DIR, "source": "server_default"})
-    return {"ok": True, "base": UDISK_DIR, "source": "server_default"}
+    _FS_BASE_CACHE[cache_key] = {"ts": time.time(), "base": UDISK_DIR, "source": "server_default"}
+    return {"ok": True, "base": UDISK_DIR, "source": "server_default", "device_id": resolved_device_id}
 
 
 def _device_write_file_chunked(dst_path: str, file_obj, total_size: int, chunk_size: int = 131072,
@@ -1187,6 +1294,7 @@ def api_status():
         history = []
     
     resp = {
+        "server": _get_server_runtime_info(),
         "hub": {
             "connected": connected,
             "healthy": healthy,
@@ -1271,6 +1379,7 @@ def api_status_fast():
         history = []
 
     resp = {
+        "server": _get_server_runtime_info(),
         "hub": {
             "connected": bool((hub_info or {}).get("connected")),
             "healthy": None,
@@ -1299,6 +1408,14 @@ def api_status_fast():
     except Exception:
         pass
     return jsonify(resp)
+
+
+@app.route('/api/version', methods=['GET'])
+def api_version():
+    return jsonify({
+        "ok": True,
+        "server": _get_server_runtime_info(),
+    })
 
 
 @app.route('/api/ws/clients', methods=['GET'])
@@ -2471,7 +2588,7 @@ def api_uds_upload():
 
     base = (request.form.get('base') or '').replace('\\', '/').strip()
     if not base or base.rstrip('/') == '/mnt':
-        gb = _guess_device_base_dir()
+        gb = _guess_device_base_dir(device_id=device_id)
         base = gb.get("base") or DEVICE_FS_DEFAULT
     if not base.startswith('/mnt'):
         base = DEVICE_FS_DEFAULT
@@ -2563,7 +2680,7 @@ def _api_uds_upload_old_unused():
     safe_name = _sanitize_filename_ascii(name, default_name="firmware.s19")
     base = (request.form.get('base') or '').replace('\\', '/').strip()
     if not base or base.rstrip('/') == '/mnt':
-        gb = _guess_device_base_dir()
+        gb = _guess_device_base_dir(device_id=device_id)
         base = gb.get("base") or UDISK_DIR
     if not base.startswith('/mnt'):
         base = UDISK_DIR
@@ -2621,6 +2738,9 @@ def api_uds_list():
     device_id = _get_requested_device_id()
     device_ip = _normalize_device_ip(request.args.get('device', DEVICE_DEFAULT_IP))
     base = request.args.get('base', DEVICE_FS_DEFAULT)
+    if not str(base or '').strip() or str(base).rstrip('/') == '/mnt':
+        guessed = _guess_device_base_dir(device_id=device_id)
+        base = guessed.get("base") or DEVICE_FS_DEFAULT
     exts = {'.s19', '.hex', '.bin', '.mot', '.srec'}
     ok_remote, remote_data = _remote_fs_json('uds_list', {'dir': base}, timeout=6.0, device_id=device_id)
     if ok_remote:
@@ -2744,11 +2864,13 @@ def _device_proxy_json(device_ip, path, method='GET', body=None, content_type=No
 
 @app.route('/api/fs/base', methods=['GET'])
 def api_fs_base():
-    base = _guess_device_base_dir()
+    device_id = _get_requested_device_id()
+    base = _guess_device_base_dir(device_id=device_id)
     return jsonify({
         "ok": True,
         "base": base.get("base") or DEVICE_FS_DEFAULT,
         "source": base.get("source") or "device",
+        "device_id": base.get("device_id") or device_id,
     })
 
 
@@ -2765,6 +2887,24 @@ def api_fs_list():
     import urllib.parse
     status, data, ct = _device_proxy(device_ip,
         f'/api/files/list?path={urllib.parse.quote(path)}', 'GET', timeout=8)
+    if status >= 400:
+        try:
+            fallback_json = json.loads(data) if data else {}
+        except Exception:
+            fallback_json = {}
+        if not isinstance(fallback_json, dict):
+            fallback_json = {}
+        fallback_json.setdefault('ok', False)
+        fallback_json.setdefault('path', path)
+        fallback_json.setdefault('device_id', device_id)
+        remote_error = None
+        if isinstance(remote_data, dict):
+            remote_error = remote_data.get('error') or remote_data.get('msg')
+        if remote_error:
+            fallback_json.setdefault('remote_error', remote_error)
+        if 'error' not in fallback_json:
+            fallback_json['error'] = f'device fs_list failed (mqtt/http), http_status={status}'
+        return jsonify(fallback_json), status
     from flask import Response
     return Response(data, status=status,
                     content_type=ct or 'application/json')
@@ -3396,10 +3536,36 @@ def device_remote_rules():
     if request.method == 'GET':
         if ok:
             try:
-                return jsonify(json.loads(payload['content'].decode('utf-8', errors='ignore') or '{}'))
+                data = json.loads(payload['content'].decode('utf-8', errors='ignore') or '{}')
+                if not isinstance(data, dict):
+                    data = {'version': 1, 'rules': []}
+                data.setdefault('version', 1)
+                data.setdefault('rules', [])
+                data.setdefault('ok', True)
+                data.setdefault('source', 'device')
+                data.setdefault('path', target_path)
+                data.setdefault('device_id', device_id)
+                return jsonify(data)
             except Exception as exc:
-                return jsonify({'ok': False, 'error': f'invalid rules json: {exc}'})
-        return jsonify({'version': 1, 'rules': []})
+                return jsonify({
+                    'ok': False,
+                    'error': f'invalid rules json: {exc}',
+                    'version': 1,
+                    'rules': [],
+                    'source': 'device_invalid',
+                    'path': target_path,
+                    'device_id': device_id,
+                })
+        err = payload.get('error') if isinstance(payload, dict) else 'file not found'
+        return jsonify({
+            'ok': False,
+            'error': err or 'device rules not found',
+            'version': 1,
+            'rules': [],
+            'source': 'default',
+            'path': target_path,
+            'device_id': device_id,
+        })
 
     body = request.get_json(silent=True) or {}
     if not isinstance(body, dict):

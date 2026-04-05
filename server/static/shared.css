@@ -25,12 +25,13 @@
 }
 
 .app-header__inner{
-  max-width: 1280px;
+  max-width: 1360px;
   margin: 0 auto;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+  flex-wrap: wrap;
 }
 
 .app-brand{
@@ -91,6 +92,7 @@
   justify-content: flex-end;
   gap: 8px;
   min-width: 280px;
+  flex-wrap: wrap;
 }
 
 .app-pill{
@@ -104,6 +106,19 @@
   color: var(--app-muted);
   font-size: 12px;
   white-space: nowrap;
+}
+
+.app-pill--debug{
+  max-width: 320px;
+  border-color: rgba(125,211,252,0.28);
+  background: rgba(2,132,199,0.14);
+  color: #dbeafe;
+  cursor: help;
+}
+
+.app-pill--debug span{
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .app-dot{
@@ -147,6 +162,5 @@
   .app-status{ min-width: auto; }
   .app-brand__title{ max-width: 180px; }
 }
-
 
 

@@ -14,6 +14,8 @@ body{background:var(--bg);color:var(--txt);font-family:'Segoe UI',system-ui,sans
 .device-sel{display:flex;align-items:center;gap:8px;margin-left:auto}
 .device-sel label{color:var(--txt2);font-size:13px}
 .device-sel input{background:var(--bg3);border:1px solid #475569;color:var(--txt);padding:5px 10px;border-radius:6px;font-size:13px;width:160px}
+.build-chip{display:inline-flex;align-items:center;gap:8px;padding:5px 10px;border-radius:999px;border:1px solid #36537f;background:#111c30;color:var(--txt2);font-size:12px;max-width:360px}
+.build-chip .v{color:var(--txt);font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .status-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0}
 .dok{background:var(--ok)}.derr{background:var(--err)}.dwarn{background:var(--warn)}
 .badge{display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600}
@@ -71,6 +73,10 @@ table tr:hover td{background:#1e293b55}
     <select id="device-id" onchange="onDeviceChange()" style="width:220px"></select>
     <button class="btn btn-s" onclick="refreshDeviceList()" style="padding:5px 12px">Refresh</button>
     <button class="btn btn-s" onclick="connectDevice()" style="padding:5px 12px">Connect</button>
+  </div>
+  <div id="build-info" class="build-chip" title="部署版本检查中">
+    <span>Build</span>
+    <span class="v" id="build-info-text">checking...</span>
   </div>
   <div id="dev-info" style="font-size:12px;color:var(--txt2);margin-left:8px"></div>
 </div>
@@ -327,6 +333,37 @@ function api(path, opts) {
   if(url.charAt(0) !== '/') url = '/api/device/remote/' + path;
   if(gDeviceId) url += (url.indexOf('?') >= 0 ? '&' : '?') + 'device_id=' + encodeURIComponent(gDeviceId);
   return fetch(url, opts || {});
+}
+
+function setBuildInfo(server) {
+  var box = document.getElementById('build-info');
+  var txt = document.getElementById('build-info-text');
+  if(!box || !txt) return;
+  server = server || {};
+  var build = String(server.build_tag || '').trim();
+  var commit = String(server.git_commit || '').trim();
+  var started = String(server.process_started_at || '').trim();
+  var host = String(server.hostname || '').trim();
+  var pid = server.pid != null ? String(server.pid) : '';
+  var label = [build, commit].filter(Boolean).join(' / ') || 'unknown';
+  txt.textContent = label;
+  var tips = [];
+  if(build) tips.push('Build: ' + build);
+  if(commit) tips.push('Commit: ' + commit);
+  if(started) tips.push('Started: ' + started);
+  if(host) tips.push('Host: ' + host);
+  if(pid) tips.push('PID: ' + pid);
+  box.title = tips.join('\n') || '部署版本未知';
+}
+
+async function loadBuildInfo() {
+  try {
+    var r = await fetch('/api/version', {cache:'no-store'});
+    var d = await r.json();
+    setBuildInfo(d.server || {});
+  } catch(e) {
+    setBuildInfo({});
+  }
 }
 
 function onDeviceChange() {
@@ -610,10 +647,19 @@ async function saveNet() {
 async function loadRules() {
   try {
     var r = await api('rules'), d = await r.json();
-    gr = d;
+    gr = (d && typeof d === 'object') ? d : {version:1,rules:[]};
+    if(!Array.isArray(gr.rules)) gr.rules = [];
     document.getElementById('rule-count').textContent = (gr.rules||[]).length;
+    if(d && d.ok === false) {
+      var extra = d.source ? (' [' + d.source + ']') : '';
+      sm('rules-msg', false, (d.error || '规则读取失败') + extra);
+    } else if(d && d.source) {
+      sm('rules-msg', true, '规则来源: ' + d.source + (d.path ? (' (' + d.path + ')') : ''));
+    }
     renderRules();
-  } catch(e) {}
+  } catch(e) {
+    sm('rules-msg', false, '请求失败');
+  }
 }
 
 function renderRules() {
@@ -773,6 +819,7 @@ async function pollMon() {
 
 /* 初始化 */
 window.onload = async function(){
+  await loadBuildInfo();
   await refreshDeviceList();
   connectDevice();
 };

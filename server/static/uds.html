@@ -159,13 +159,30 @@
     const blkEl = qs('blk');
 
     let BASE_DIR = '';
+    let CURRENT_DEVICE_ID = '';
     let stateTimer = null;
     let stateBusy = false;
     let _canCfg = { can0_bitrate: 500000, can1_bitrate: 500000 };
 
+    function apiUrl(path) {
+      if (!CURRENT_DEVICE_ID) return path;
+      return path + (path.indexOf('?') >= 0 ? '&' : '?') + 'device_id=' + encodeURIComponent(CURRENT_DEVICE_ID);
+    }
+
+    async function resolveDeviceId() {
+      try {
+        const r = await fetch('/api/status_fast', { cache: 'no-store' });
+        const j = await r.json().catch(() => ({}));
+        const hub = (j && j.hub) || {};
+        CURRENT_DEVICE_ID = String(hub.client_id || (Array.isArray(hub.devices) && hub.devices[0]) || '').trim();
+      } catch (e) {
+        CURRENT_DEVICE_ID = '';
+      }
+    }
+
     async function fetchCanConfig() {
       try {
-        const r = await fetch('/api/device/can_config');
+        const r = await fetch(apiUrl('/api/device/can_config'));
         const j = await r.json().catch(() => ({}));
         if (j && j.ok && j.config) {
           _canCfg = j.config;
@@ -274,7 +291,7 @@
       if (stateBusy) return;
       stateBusy = true;
       try {
-        const r = await fetch('/api/uds/state');
+        const r = await fetch(apiUrl('/api/uds/state'));
         const j = await r.json().catch(() => ({}));
         if (j && j.ok && j.state) {
           applyState(j.state);
@@ -301,7 +318,7 @@
         rx_id: (rxIdEl.value || '7FB').trim(),
         block_size: parseInt(blkEl.value || '256', 10)
       };
-      const r = await fetch('/api/uds/config', {
+      const r = await fetch(apiUrl('/api/uds/config'), {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify(body)
@@ -338,7 +355,7 @@
 
       await new Promise((resolve) => {
         const xhr = new XMLHttpRequest();
-        xhr.open('POST', '/api/uds/upload', true);
+        xhr.open('POST', apiUrl('/api/uds/upload'), true);
         xhr.upload.onprogress = (evt) => {
           if (!evt.lengthComputable) return;
           const pct = Math.max(0, Math.min(100, Math.round((evt.loaded / evt.total) * 100)));
@@ -373,7 +390,7 @@
         qs('pathMsg').textContent = '请输入设备文件路径';
         return false;
       }
-      const r = await fetch('/api/uds/set_file', {
+      const r = await fetch(apiUrl('/api/uds/set_file'), {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({ path })
@@ -394,7 +411,8 @@
         qs('pickerList').innerHTML = '';
         showPicker(true);
         const url = BASE_DIR ? ('/api/uds/list?base=' + encodeURIComponent(BASE_DIR)) : '/api/uds/list';
-        const r = await fetch(url);
+        const finalUrl = apiUrl(url);
+        const r = await fetch(finalUrl);
         const j = await r.json().catch(() => ({}));
         const files = (j && j.data && j.data.files) || j.files || [];
         if (!j || !j.ok) {
@@ -431,7 +449,7 @@
     async function startDownload() {
       const okSet = await setPath();
       if (!okSet) return;
-      const r = await fetch('/api/uds/start', { method: 'POST' });
+      const r = await fetch(apiUrl('/api/uds/start'), { method: 'POST' });
       const j = await r.json().catch(() => ({}));
       if (j && j.ok) {
         qs('pathMsg').textContent = '已开始下载';
@@ -443,7 +461,7 @@
     }
 
     async function stopDownload() {
-      const r = await fetch('/api/uds/stop', { method: 'POST' });
+      const r = await fetch(apiUrl('/api/uds/stop'), { method: 'POST' });
       const j = await r.json().catch(() => ({}));
       if (j && j.ok) {
         qs('pathMsg').textContent = '已停止下载';
@@ -460,7 +478,7 @@
     let _firstSync = false;
 
     async function getBase() {
-      const r = await fetch('/api/fs/base').catch(() => null);
+      const r = await fetch(apiUrl('/api/fs/base')).catch(() => null);
       const j = r ? await r.json().catch(() => ({})) : {};
       if (j && j.ok && j.base) BASE_DIR = j.base;
     }
@@ -470,7 +488,7 @@
       const syncMsg = qs('applyMsg');
       if (syncMsg) syncMsg.textContent = '正在从设备同步配置...';
       try {
-        const r = await fetch('/api/uds/state');
+        const r = await fetch(apiUrl('/api/uds/state'));
         const j = await r.json().catch(() => ({}));
         const state = j && j.ok && j.state ? j.state : null;
         if (state) {
@@ -496,7 +514,7 @@
       } catch (e) {}
       /* 如果设备不可达，从服务端缓存加载 */
       try {
-        const r2 = await fetch('/api/uds/config');
+        const r2 = await fetch(apiUrl('/api/uds/config'));
         const j2 = await r2.json().catch(() => ({}));
         const c = j2 && j2.ok && j2.config ? j2.config : null;
         if (c) {
@@ -529,6 +547,7 @@
     });
 
     (async () => {
+      await resolveDeviceId();
       await getBase();
       await fetchCanConfig();   /* 先拉 CAN 配置，供接口切换使用 */
       await syncFromDevice();   /* 再用设备 UDS state 覆盖（包含实际在用值） */

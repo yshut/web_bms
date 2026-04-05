@@ -63,6 +63,12 @@
       const deviceDot = el("span", { class: "app-dot warn", id: "appDotDevice" });
       const serverText = el("span", { id: "appTxtServer", text: "服务器：检查中" });
       const deviceText = el("span", { id: "appTxtDevice", text: "设备：检查中" });
+      const buildText = el("span", { id: "appTxtBuild", text: "版本：检查中" });
+      const buildPill = el("span", {
+        class: "app-pill app-pill--debug",
+        id: "appPillBuild",
+        title: "部署版本检查中",
+      }, [buildText]);
       if (!hideRefresh) {
         btn = el("button", { class: "app-btn secondary", id: "appBtnRefresh", text: "刷新" });
       }
@@ -70,6 +76,7 @@
       const children = [
         el("span", { class: "app-pill" }, [serverDot, serverText]),
         el("span", { class: "app-pill" }, [deviceDot, deviceText]),
+        buildPill,
       ];
       if (btn) children.push(btn);
       status = el("div", { class: "app-status" }, children);
@@ -117,12 +124,15 @@
       const dotD = document.getElementById("appDotDevice");
       const txtS = document.getElementById("appTxtServer");
       const txtD = document.getElementById("appTxtDevice");
+      const txtB = document.getElementById("appTxtBuild");
+      const pillB = document.getElementById("appPillBuild");
       if (!dotS || !dotD || !txtS || !txtD) return;
 
       let okServer = false;
       let okDevice = false;
       let deviceAddr = "";
       let deviceId = "";
+      let serverInfo = {};
 
       try {
         // 使用 fast 状态接口：不做 ping，不阻塞，刷新页面时不会卡 UI
@@ -132,6 +142,7 @@
         okDevice = !!(j && j.hub && j.hub.connected);
         deviceAddr = (j && j.hub && j.hub.client_addr) ? String(j.hub.client_addr) : "";
         deviceId = (j && j.hub && j.hub.client_id) ? String(j.hub.client_id) : "";
+        serverInfo = (j && j.server) ? j.server : {};
       } catch (e) {
         okServer = false;
       }
@@ -146,6 +157,25 @@
       } else {
         txtD.textContent = "设备：未连接";
       }
+
+      if (txtB) {
+        const buildTag = String((serverInfo && serverInfo.build_tag) || "").trim();
+        const gitCommit = String((serverInfo && serverInfo.git_commit) || "").trim();
+        const startedAt = String((serverInfo && serverInfo.process_started_at) || "").trim();
+        const hostname = String((serverInfo && serverInfo.hostname) || "").trim();
+        const pid = String((serverInfo && serverInfo.pid) || "").trim();
+        const shortLabel = [buildTag, gitCommit].filter(Boolean).join(" / ") || "unknown";
+        txtB.textContent = "版本：" + shortLabel;
+        if (pillB) {
+          const tips = [];
+          if (buildTag) tips.push("Build: " + buildTag);
+          if (gitCommit) tips.push("Commit: " + gitCommit);
+          if (startedAt) tips.push("Started: " + startedAt);
+          if (hostname) tips.push("Host: " + hostname);
+          if (pid) tips.push("PID: " + pid);
+          pillB.title = tips.join("\n") || "部署版本未知";
+        }
+      }
     } finally {
       inFlight = false;
     }
@@ -157,5 +187,4 @@
     insertHeader();
   }
 })();
-
 
