@@ -40,6 +40,12 @@ class MQTTHub:
         self._connected = False
         self._device_connected = False
         self._startup_error: Optional[str] = None
+        self._last_connect_attempt_ts: float = 0.0
+        self._last_message_ts: float = 0.0
+        self._retry_interval_s: float = 3.0
+        self._ever_connected = False
+        self._stop_event = threading.Event()
+        self._maintain_thread: Optional[threading.Thread] = None
         self._device_id: Optional[str] = None
         self._last_events: Dict[str, dict] = {}
         self._device_events: Dict[str, Dict[str, dict]] = {}
@@ -78,7 +84,7 @@ class MQTTHub:
         return self._startup_error
 
     def is_serving(self) -> bool:
-        return self._client is not None and self._startup_error is None
+        return bool(self._enabled and self._client is not None)
 
     def is_connected(self) -> bool:
         return bool(self._connected and self._device_connected)
@@ -150,6 +156,12 @@ class MQTTHub:
         return {
             "connected": connected,
             "broker_connected": bool(self._connected),
+            "serving": self.is_serving(),
+            "startup_error": self._startup_error,
+            "enabled": self._enabled,
+            "host": self._host,
+            "port": self._port,
+            "last_message_ts": self._last_message_ts or None,
             "client_addr": None,
             "device_id": resolved_device_id,
             "events": selected_events,
@@ -409,6 +421,7 @@ class MQTTHub:
         topic = str(getattr(msg, "topic", "") or "")
         if not topic.startswith(f"{self._topic_prefix}/device/"):
             return
+        self._last_message_ts = time.time()
 
         parts = topic.split("/")
         if len(parts) < 4:
@@ -481,6 +494,35 @@ class MQTTHub:
                 self._emit_event("mqtt_event", obj, device_id=device_id)
             return
 
+    def _schedule_connect_attempt(self, force: bool = False) -> None:
+        client = self._client
+        if client is None:
+            return
+
+        now = time.time()
+        if not force and (now - float(self._last_connect_attempt_ts or 0.0)) < self._retry_interval_s:
+            return
+
+        self._last_connect_attempt_ts = now
+        try:
+            if self._ever_connected:
+                rc = client.reconnect()
+            else:
+                rc = client.connect_async(self._host, self._port, keepalive=self._keepalive_s)
+            mqtt_ok = getattr(mqtt, "MQTT_ERR_SUCCESS", 0) if mqtt else 0
+            if rc not in (0, mqtt_ok):
+                self._startup_error = f"connect attempt failed rc={rc}"
+            else:
+                self._startup_error = None
+        except Exception as e:
+            self._startup_error = f"{type(e).__name__}: {e}"
+
+    def _maintain_connection_loop(self) -> None:
+        while not self._stop_event.wait(2.0):
+            if not self._enabled or self._client is None or self._connected:
+                continue
+            self._schedule_connect_attempt()
+
     def start(self) -> bool:
         if not self._enabled:
             self._startup_error = "mqtt disabled"
@@ -493,7 +535,7 @@ class MQTTHub:
                 pass
             return False
         if self._client is not None:
-            return self._startup_error is None
+            return True
 
         try:
             client = mqtt.Client(client_id=self._client_id, clean_session=True)
@@ -501,12 +543,15 @@ class MQTTHub:
                 client.username_pw_set(self._username, self._password or None)
             if self._use_tls:
                 client.tls_set()
+            if hasattr(client, "reconnect_delay_set"):
+                client.reconnect_delay_set(min_delay=1, max_delay=15)
 
             def on_connect(_client, _userdata, _flags, rc):
                 self._connected = (int(rc) == 0)
                 if not self._connected:
                     self._startup_error = f"connect failed rc={rc}"
                     return
+                self._ever_connected = True
                 self._startup_error = None
                 subs = [
                     (f"{self._topic_prefix}/device/+/status", self._qos),
@@ -527,6 +572,8 @@ class MQTTHub:
             def on_disconnect(_client, _userdata, rc):
                 self._connected = False
                 self._device_connected = False
+                if int(rc or 0) != 0:
+                    self._startup_error = f"disconnected rc={rc}, retrying"
                 try:
                     with self._lock:
                         for did in list(self._device_states.keys()):
@@ -548,9 +595,17 @@ class MQTTHub:
             client.on_connect = on_connect
             client.on_disconnect = on_disconnect
             client.on_message = on_message
-            client.connect(self._host, self._port, keepalive=self._keepalive_s)
             client.loop_start()
             self._client = client
+            self._stop_event.clear()
+            if self._maintain_thread is None or not self._maintain_thread.is_alive():
+                self._maintain_thread = threading.Thread(
+                    target=self._maintain_connection_loop,
+                    name="mqtt-hub-maintainer",
+                    daemon=True,
+                )
+                self._maintain_thread.start()
+            self._schedule_connect_attempt(force=True)
             return True
         except Exception as e:
             self._startup_error = f"{type(e).__name__}: {e}"

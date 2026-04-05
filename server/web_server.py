@@ -251,17 +251,18 @@ UDISK_DIR = BASE_DIR
 def qt_request(payload: dict, timeout: float = None, device_id: Optional[str] = None) -> dict:
     if timeout is None:
         timeout = cfg.SOCKET_TIMEOUT
-    if _mqtt_hub and _mqtt_hub.is_connected():
+    mqtt_diag = _get_mqtt_runtime_diag(device_id)
+    if _mqtt_hub and _mqtt_hub.is_broker_connected():
         try:
             return _mqtt_hub.request(payload, timeout=timeout, device_id=device_id)
         except Exception as e:
-            return {"ok": False, "error": f"MQTT request failed: {e}"}
+            return {"ok": False, "error": f"MQTT request failed: {e}", "mqtt": mqtt_diag}
     if False:
         try:
             return _mqtt_hub.request(payload, timeout=timeout, device_id=device_id)
         except Exception as e:
             return {"ok": False, "error": f"WebSocket request failed: {e}"}
-    return {"ok": False, "error": "Device not connected via MQTT/WebSocket"}
+    return {"ok": False, "error": "Device not connected via MQTT/WebSocket", "mqtt": mqtt_diag}
 
 
 def _get_requested_device_id(default: Optional[str] = None) -> Optional[str]:
@@ -277,6 +278,19 @@ def _get_mqtt_device_info(device_id: Optional[str] = None) -> dict:
         return _mqtt_hub.info(device_id=device_id) if _mqtt_hub else {"connected": False}
     except Exception:
         return {"connected": False}
+
+
+def _get_mqtt_runtime_diag(device_id: Optional[str] = None) -> dict:
+    info = _get_mqtt_device_info(device_id)
+    return {
+        "enabled": bool(getattr(cfg, 'MQTT_ENABLE', False)),
+        "serving": bool((info or {}).get("serving")),
+        "broker_connected": bool((info or {}).get("broker_connected")),
+        "startup_error": (info or {}).get("startup_error"),
+        "host": (info or {}).get("host") or getattr(cfg, 'MQTT_HOST', '127.0.0.1'),
+        "port": int((info or {}).get("port") or getattr(cfg, 'MQTT_PORT', 1883)),
+        "last_message_ts": (info or {}).get("last_message_ts"),
+    }
 
 
 def _unwrap_remote_data(resp: dict):
@@ -443,6 +457,21 @@ def _get_realtime_cache_hub():
     except Exception:
         pass
     return _mqtt_hub, "mqtt_cache"
+
+
+@app.after_request
+def _apply_common_response_headers(resp):
+    try:
+        path = str(getattr(request, 'path', '') or '')
+        if path.startswith('/api/') or path in ('/device_config', '/files'):
+            resp.headers.setdefault('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0')
+            resp.headers.setdefault('Pragma', 'no-cache')
+            resp.headers.setdefault('Expires', '0')
+        if path == '/api/fs/download':
+            resp.headers.setdefault('X-Accel-Buffering', 'no')
+    except Exception:
+        pass
+    return resp
 
 
 @app.route('/api/realtime/config', methods=['GET'])
@@ -1045,6 +1074,7 @@ def api_status():
     hub_info, protocol = _get_preferred_hub_info()
     ws_info = {"connected": False, "removed": True}
     mqtt_info = _mqtt_hub.info() if _mqtt_hub else {"connected": False}
+    mqtt_diag = _get_mqtt_runtime_diag()
 
     # 获取WebSocket连接地址
     client_addr = (hub_info or {}).get("client_addr")
@@ -1103,6 +1133,12 @@ def api_status():
             "protocol": protocol,
             "ws_connected": ws_connected,
             "mqtt_connected": mqtt_connected,
+            "mqtt_serving": mqtt_diag.get("serving"),
+            "mqtt_enabled": mqtt_diag.get("enabled"),
+            "mqtt_host": mqtt_diag.get("host"),
+            "mqtt_port": mqtt_diag.get("port"),
+            "mqtt_startup_error": mqtt_diag.get("startup_error"),
+            "mqtt_last_message_ts": mqtt_diag.get("last_message_ts"),
             # UI 前端（/ui）连接数：用于区分“服务端在线但设备未连”的情况
             "ui_clients": (ws_info or {}).get("ui_clients"),
             "events": cached or {},
@@ -1139,6 +1175,7 @@ def api_status_fast():
     hub_info, protocol = _get_preferred_hub_info()
     ws_info = {"connected": False, "removed": True}
     mqtt_info = _mqtt_hub.info() if _mqtt_hub else {"connected": False}
+    mqtt_diag = _get_mqtt_runtime_diag()
 
     client_addr = (hub_info or {}).get("client_addr")
     device_id = None
@@ -1180,6 +1217,12 @@ def api_status_fast():
             "protocol": protocol,
             "ws_connected": bool(ws_connected),
             "mqtt_connected": bool(mqtt_connected),
+            "mqtt_serving": mqtt_diag.get("serving"),
+            "mqtt_enabled": mqtt_diag.get("enabled"),
+            "mqtt_host": mqtt_diag.get("host"),
+            "mqtt_port": mqtt_diag.get("port"),
+            "mqtt_startup_error": mqtt_diag.get("startup_error"),
+            "mqtt_last_message_ts": mqtt_diag.get("last_message_ts"),
             "ui_clients": (ws_info or {}).get("ui_clients"),
             "events": cached or {},
             "devices": devices,
@@ -2426,7 +2469,7 @@ def _api_uds_upload_old_unused():
 def api_uds_list():
     """列出设备 /mnt/SDCARD 目录下的固件文件（.s19/.hex/.bin/.mot）。"""
     import urllib.parse
-    device_ip = request.args.get('device', DEVICE_DEFAULT_IP)
+    device_ip = _normalize_device_ip(request.args.get('device', DEVICE_DEFAULT_IP))
     base = request.args.get('base', DEVICE_FS_DEFAULT)
     exts = {'.s19', '.hex', '.bin', '.mot', '.srec'}
     status, data, _ = _device_proxy(device_ip,
@@ -2516,12 +2559,12 @@ DEVICE_DEFAULT_IP = '192.168.100.100'
 
 
 def _fs_device_ip():
-    return request.args.get('device', DEVICE_DEFAULT_IP)
+    return _normalize_device_ip(request.args.get('device', DEVICE_DEFAULT_IP))
 
 
 def _device_proxy_json(device_ip, path, method='GET', body=None, content_type=None, timeout=8):
     """向设备发起请求，返回 (ok, json_dict)。失败时返回 (False, {'error':...})。"""
-    status, data, _ = _device_proxy(device_ip, path, method, body, content_type)
+    status, data, _ = _device_proxy(device_ip, path, method, body, content_type, timeout=timeout)
     try:
         j = json.loads(data) if data else {}
     except Exception:
@@ -2659,12 +2702,13 @@ def api_fs_download():
     headers = {
         'Content-Disposition': cd,
         'Content-Type': 'application/octet-stream',
+        'Cache-Control': 'no-store',
     }
-    cl = resp_dev.headers.get('Content-Length')
-    if cl:
-        headers['Content-Length'] = cl
-    return Response(stream_with_context(stream_body()), status=200,
-                    headers=headers, direct_passthrough=True)
+    return Response(
+        stream_with_context(stream_body()),
+        status=200,
+        headers=headers,
+    )
 
 # ==================== 高级控制API ====================
 
@@ -2869,21 +2913,56 @@ def print_startup_info():
 import urllib.request
 import urllib.error
 
+_DEVICE_PROXY_RETRYABLE_METHODS = {'GET', 'HEAD'}
+
+
+def _normalize_device_ip(device_ip: Optional[str]) -> str:
+    return str(device_ip or DEVICE_DEFAULT_IP).strip() or DEVICE_DEFAULT_IP
+
 def _device_proxy(device_ip: str, path: str, method: str, body: bytes = None,
                   content_type: str = None, timeout: int = 8):
     """向设备发起 HTTP 请求并返回 (status, data, content_type)"""
+    import socket
+
+    device_ip = _normalize_device_ip(device_ip)
+    method = str(method or 'GET').upper()
     url = f"http://{device_ip}:8080/{path.lstrip('/')}"
-    req = urllib.request.Request(url, data=body, method=method)
-    if content_type:
-        req.add_header('Content-Type', content_type)
-    req.add_header('Connection', 'close')
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            return resp.status, resp.read(), resp.headers.get('Content-Type', 'application/json')
-    except urllib.error.HTTPError as e:
-        return e.code, e.read(), 'application/json'
-    except Exception as exc:
-        return 502, json.dumps({"error": str(exc)}).encode(), 'application/json'
+    timeout_s = max(1.0, float(timeout or 8))
+    attempts = 2 if method in _DEVICE_PROXY_RETRYABLE_METHODS else 1
+    last_error = None
+
+    for attempt in range(attempts):
+        req = urllib.request.Request(url, data=body, method=method)
+        if content_type:
+            req.add_header('Content-Type', content_type)
+        if body is not None:
+            req.add_header('Content-Length', str(len(body)))
+        req.add_header('Connection', 'close')
+        req.add_header('Cache-Control', 'no-cache')
+        req.add_header('Pragma', 'no-cache')
+        req.add_header('User-Agent', 'app-lvgl-server/1.0')
+        try:
+            with urllib.request.urlopen(req, timeout=timeout_s) as resp:
+                return resp.status, resp.read(), resp.headers.get('Content-Type', 'application/json')
+        except urllib.error.HTTPError as e:
+            return e.code, e.read(), e.headers.get('Content-Type', 'application/json')
+        except (urllib.error.URLError, socket.timeout, TimeoutError) as exc:
+            last_error = exc
+            if attempt + 1 < attempts:
+                time.sleep(0.15)
+                continue
+            break
+        except Exception as exc:
+            last_error = exc
+            break
+
+    return 502, json.dumps({
+        "ok": False,
+        "error": str(last_error or 'device proxy failed'),
+        "device_ip": device_ip,
+        "path": path,
+        "method": method,
+    }, ensure_ascii=False).encode('utf-8'), 'application/json; charset=utf-8'
 
 @app.route('/device_config')
 def device_config_page():
@@ -2895,11 +2974,12 @@ def file_manager_page():
 
 @app.route('/api/device/proxy/<path:subpath>', methods=['GET', 'POST', 'PUT', 'DELETE'])
 def device_api_proxy(subpath):
-    device_ip = request.args.get('device', '192.168.100.100')
+    device_ip = _normalize_device_ip(request.args.get('device', DEVICE_DEFAULT_IP))
+    timeout = _to_int(request.args.get('timeout'), 8)
     body = request.get_data() if request.method in ('POST', 'PUT') else None
     ct   = request.content_type if request.method in ('POST', 'PUT') else None
     status, data, resp_ct = _device_proxy(device_ip, f'/api/{subpath}',
-                                          request.method, body, ct)
+                                          request.method, body, ct, timeout=timeout)
     from flask import Response
     return Response(data, status=status, content_type=resp_ct)
 
@@ -2908,10 +2988,12 @@ def device_list():
     """???????????? MQTT hub ????/?????"""
     try:
         hub_info = _get_mqtt_device_info()
+        mqtt_diag = _get_mqtt_runtime_diag()
         devices = [str(x).strip() for x in (hub_info or {}).get('devices', []) if str(x).strip()]
         history = [str(x).strip() for x in (hub_info or {}).get('history', []) if str(x).strip()]
         current_device_id = str((hub_info or {}).get('device_id') or '').strip() or None
     except Exception:
+        mqtt_diag = _get_mqtt_runtime_diag()
         devices = []
         history = []
         current_device_id = None
@@ -2930,6 +3012,13 @@ def device_list():
         "history": merged,
         "current_device_id": current_device_id,
         "default_ip": default_ip,
+        "mqtt_enabled": mqtt_diag.get("enabled"),
+        "mqtt_serving": mqtt_diag.get("serving"),
+        "mqtt_connected": mqtt_diag.get("broker_connected"),
+        "mqtt_host": mqtt_diag.get("host"),
+        "mqtt_port": mqtt_diag.get("port"),
+        "mqtt_startup_error": mqtt_diag.get("startup_error"),
+        "mqtt_last_message_ts": mqtt_diag.get("last_message_ts"),
     })
 
 
@@ -2937,6 +3026,7 @@ def device_list():
 def device_remote_status():
     device_id = _get_requested_device_id()
     info = _get_mqtt_device_info(device_id)
+    mqtt_diag = _get_mqtt_runtime_diag(device_id)
     events = (info or {}).get('events') or {}
     status = dict(events.get('device_status') or {}) if isinstance(events.get('device_status'), dict) else {}
     hardware = dict(events.get('hardware_status') or {}) if isinstance(events.get('hardware_status'), dict) else {}
@@ -2949,6 +3039,11 @@ def device_remote_status():
     status.setdefault('rule_count', 0)
     status['devices'] = (info or {}).get('devices') or []
     status['history'] = (info or {}).get('history') or []
+    status['mqtt_serving'] = bool(mqtt_diag.get('serving'))
+    status['mqtt_host'] = mqtt_diag.get('host')
+    status['mqtt_port'] = mqtt_diag.get('port')
+    status['mqtt_startup_error'] = mqtt_diag.get('startup_error')
+    status['mqtt_last_message_ts'] = mqtt_diag.get('last_message_ts')
     status['ok'] = bool(status.get('connected'))
     if not status['ok'] and not status.get('error'):
         status['error'] = 'Device not connected'
@@ -3100,7 +3195,7 @@ def device_can_config():
     - GET  : 从设备读取 CAN 配置，缓存到 state_store 后返回
     - POST : 将 CAN 配置写入设备，同时更新 state_store 缓存
     """
-    device_ip = request.args.get('device', DEVICE_DEFAULT_IP)
+    device_ip = _normalize_device_ip(request.args.get('device', DEVICE_DEFAULT_IP))
 
     if request.method == 'GET':
         # 1. 先读设备
