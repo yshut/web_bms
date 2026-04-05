@@ -15,6 +15,16 @@
     "port": 18080,
     "debug": false
   },
+
+  "auth": {
+    "_comment": "登录认证配置。推荐使用 pbkdf2_sha256 哈希，格式: pbkdf2_sha256$迭代次数$salt$hex摘要",
+    "enable": true,
+    "username": "admin",
+    "password_hash": "",
+    "viewer_username": "viewer",
+    "viewer_password_hash": "",
+    "secret_key": "change-this-session-secret-in-production"
+  },
   
   "tcp_hub": {
     "_comment": "TCP Hub配置（QT客户端反向连接到服务器）",

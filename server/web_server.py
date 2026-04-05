@@ -11,6 +11,8 @@ import signal
 import posixpath
 import socket
 import subprocess
+import hashlib
+import hmac
 from datetime import timedelta
 from flask import Flask, request, jsonify, send_from_directory, Response, stream_with_context, session, redirect, url_for
 import re
@@ -1277,14 +1279,48 @@ def _is_write_request() -> bool:
 
 
 def _viewer_account_enabled() -> bool:
-    return bool(str(getattr(cfg, 'AUTH_VIEWER_PASSWORD', '') or '').strip())
+    return bool(
+        str(getattr(cfg, 'AUTH_VIEWER_PASSWORD', '') or '').strip()
+        or str(getattr(cfg, 'AUTH_VIEWER_PASSWORD_HASH', '') or '').strip()
+    )
+
+
+def _verify_password(raw_password: str, password_plain: str, password_hash: str) -> bool:
+    raw_password = str(raw_password or '')
+    password_hash = str(password_hash or '').strip()
+    if password_hash:
+        try:
+            parts = password_hash.split('$', 3)
+            if len(parts) == 4 and parts[0] == 'pbkdf2_sha256':
+                iterations = max(1, int(parts[1]))
+                salt = parts[2]
+                expected = parts[3]
+                digest = hashlib.pbkdf2_hmac(
+                    'sha256',
+                    raw_password.encode('utf-8'),
+                    salt.encode('utf-8'),
+                    iterations,
+                ).hex()
+                return hmac.compare_digest(digest, expected)
+        except Exception:
+            return False
+        return False
+    return hmac.compare_digest(raw_password, str(password_plain or ''))
 
 
 def _authenticate_credentials(username: str, password: str) -> Tuple[bool, str]:
-    if username == getattr(cfg, 'AUTH_USERNAME', 'admin') and password == getattr(cfg, 'AUTH_PASSWORD', 'yst123456.'):
+    if username == getattr(cfg, 'AUTH_USERNAME', 'admin') and _verify_password(
+        password,
+        getattr(cfg, 'AUTH_PASSWORD', 'yst123456.'),
+        getattr(cfg, 'AUTH_PASSWORD_HASH', ''),
+    ):
         return True, 'admin'
     if _viewer_account_enabled():
-        if username == getattr(cfg, 'AUTH_VIEWER_USERNAME', 'viewer') and password == getattr(cfg, 'AUTH_VIEWER_PASSWORD', ''):
+        if username == getattr(cfg, 'AUTH_VIEWER_USERNAME', 'viewer') and _verify_password(
+            password,
+            getattr(cfg, 'AUTH_VIEWER_PASSWORD', ''),
+            getattr(cfg, 'AUTH_VIEWER_PASSWORD_HASH', ''),
+        ):
             return True, 'viewer'
     return False, ''
 
