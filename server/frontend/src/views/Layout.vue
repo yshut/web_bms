@@ -59,7 +59,7 @@
           <span v-if="systemStore.deviceId" class="device-info">
             {{ systemStore.deviceId }}
           </span>
-          <el-button size="small" plain @click="openWallboard">大屏</el-button>
+          <el-button size="small" plain :disabled="!canWallboard" @click="openWallboard">大屏</el-button>
           <el-button size="small" @click="logout">退出</el-button>
         </div>
       </el-header>
@@ -96,6 +96,7 @@ const currentPageTitle = computed(() => {
 
 const authRole = computed(() => authStore.role);
 const authName = computed(() => authStore.username);
+const canWallboard = computed(() => authStore.can('wallboard'));
 
 const roleText = computed(() => {
   if (authRole.value === 'super_admin') return '超级管理员';

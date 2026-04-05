@@ -2,8 +2,15 @@
   <div class="dbc-page">
     <el-card shadow="hover">
       <div class="toolbar">
-        <el-upload action="/api/dbc/upload" :show-file-list="false" :on-success="onUploadSuccess" accept=".dbc,.kcd">
-          <el-button type="primary">上传 DBC</el-button>
+        <el-upload
+          action="/api/dbc/upload"
+          :show-file-list="false"
+          :on-success="onUploadSuccess"
+          :headers="uploadHeaders"
+          :disabled="!canManage"
+          accept=".dbc,.kcd"
+        >
+          <el-button type="primary" :disabled="!canManage">上传 DBC</el-button>
         </el-upload>
         <el-button :loading="loading" @click="handleReloadMappings">刷新映射</el-button>
         <el-input v-model="mappingPrefix" placeholder="ID 前缀过滤，如 188" style="width: 180px" />
@@ -21,7 +28,7 @@
           <el-table-column label="操作" width="160">
             <template #default="{ row }">
               <el-button link type="primary" @click="loadSignals(row.name)">信号</el-button>
-              <el-button link type="danger" @click="deleteFile(row.name)">删除</el-button>
+              <el-button link type="danger" :disabled="!canManage" @click="deleteFile(row.name)">删除</el-button>
             </template>
           </el-table-column>
         </el-table>
@@ -80,10 +87,12 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import { ElMessage } from 'element-plus';
 import { dbcApi } from '@/api';
+import { useAuthStore } from '@/stores/auth';
 
+const authStore = useAuthStore();
 const dbcFiles = ref<any[]>([]);
 const mappings = ref<any[]>([]);
 const signals = ref<any[]>([]);
@@ -93,6 +102,14 @@ const mappingPrefix = ref('');
 const selectedDbc = ref('');
 const parseInput = ref('');
 const parseRows = ref<any[]>([]);
+const canManage = computed(() => authStore.isAdmin && authStore.can('dbc'));
+const uploadHeaders = computed(() => {
+  const token = document.cookie
+    .split('; ')
+    .find((item) => item.startsWith('app_lvgl_csrf='))
+    ?.split('=')[1];
+  return token ? { 'X-CSRF-Token': decodeURIComponent(token) } : {};
+});
 
 function formatSize(size: number) {
   if (size < 1024) return `${size} B`;

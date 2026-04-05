@@ -35,10 +35,10 @@
 
           <div class="toolbar toolbar--actions">
             <el-switch v-model="autoRefresh" active-text="自动刷新" />
-            <el-button type="primary" :loading="running" @click="startMonitor">启动</el-button>
-            <el-button @click="stopMonitor">停止</el-button>
+            <el-button type="primary" :loading="running" :disabled="!canManage" @click="startMonitor">启动</el-button>
+            <el-button :disabled="!canManage" @click="stopMonitor">停止</el-button>
             <el-button @click="refreshFrames">刷新</el-button>
-            <el-button @click="clearFrames">清空</el-button>
+            <el-button :disabled="!canManage" @click="clearFrames">清空</el-button>
           </div>
         </div>
 
@@ -76,8 +76,8 @@
           <h2>CAN 通道记录</h2>
         </div>
         <div class="toolbar toolbar--actions">
-          <el-button type="primary" :disabled="recording" @click="startRecord">开始记录</el-button>
-          <el-button :disabled="!recording" @click="stopRecord">停止记录</el-button>
+          <el-button type="primary" :disabled="recording || !canManage" @click="startRecord">开始记录</el-button>
+          <el-button :disabled="!recording || !canManage" @click="stopRecord">停止记录</el-button>
         </div>
       </div>
       <div class="stats-grid">
@@ -145,6 +145,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { ElMessage } from 'element-plus';
 import { useRoute, useRouter } from 'vue-router';
 import { canApi, deviceApi } from '@/api';
+import { useAuthStore } from '@/stores/auth';
 import { useSystemStore } from '@/stores/system';
 
 type DeviceListResponse = {
@@ -156,6 +157,7 @@ type DeviceListResponse = {
 const route = useRoute();
 const router = useRouter();
 const systemStore = useSystemStore();
+const authStore = useAuthStore();
 const loading = ref(false);
 const running = ref(false);
 const autoRefresh = ref(true);
@@ -175,6 +177,7 @@ const deviceOptions = computed(() => {
 });
 
 const activeDeviceId = computed(() => selectedDeviceId.value.trim() || '');
+const canManage = computed(() => authStore.isAdmin && authStore.can('can'));
 const recording = computed(() => !!recordStats.value.recording);
 const recordFile = computed(() => String(recordStats.value.current_file || ''));
 

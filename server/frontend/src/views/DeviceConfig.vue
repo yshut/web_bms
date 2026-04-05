@@ -45,7 +45,7 @@
               <p class="section-kicker">传输与 CAN</p>
               <span>传输与 CAN</span>
             </div>
-            <el-button type="primary" :loading="saving.config" @click="saveConfig">保存</el-button>
+            <el-button type="primary" :loading="saving.config" :disabled="!canManage" @click="saveConfig">保存</el-button>
           </div>
         </template>
 
@@ -130,7 +130,7 @@
               <p class="section-kicker">网络配置</p>
               <span>网络配置</span>
             </div>
-            <el-button type="primary" :loading="saving.network" @click="saveNetwork">保存</el-button>
+            <el-button type="primary" :loading="saving.network" :disabled="!canManage" @click="saveNetwork">保存</el-button>
           </div>
         </template>
 
@@ -165,10 +165,10 @@
             <span>WiFi</span>
           </div>
           <div class="wifi-actions">
-            <el-button :loading="saving.wifiScan" @click="scanWifi">扫描</el-button>
-            <el-button :loading="saving.wifiSave" @click="saveWifi(false)">仅保存</el-button>
-            <el-button type="primary" :loading="saving.wifiSave" @click="saveWifi(true)">保存并连接</el-button>
-            <el-button type="danger" plain :loading="saving.wifiDisconnect" @click="disconnectWifi">断开</el-button>
+            <el-button :loading="saving.wifiScan" :disabled="!canManage" @click="scanWifi">扫描</el-button>
+            <el-button :loading="saving.wifiSave" :disabled="!canManage" @click="saveWifi(false)">仅保存</el-button>
+            <el-button type="primary" :loading="saving.wifiSave" :disabled="!canManage" @click="saveWifi(true)">保存并连接</el-button>
+            <el-button type="danger" plain :loading="saving.wifiDisconnect" :disabled="!canManage" @click="disconnectWifi">断开</el-button>
           </div>
         </div>
       </template>
@@ -206,7 +206,7 @@
         </el-table-column>
         <el-table-column label="操作" width="100">
           <template #default="{ row }">
-            <el-button link type="primary" @click="pickWifi(row.ssid)">使用</el-button>
+            <el-button link type="primary" :disabled="!canManage" @click="pickWifi(row.ssid)">使用</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -219,6 +219,7 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
 import { ElMessage } from 'element-plus';
 import { useRoute, useRouter } from 'vue-router';
 import { deviceApi, remoteConfigApi } from '@/api';
+import { useAuthStore } from '@/stores/auth';
 import { useSystemStore } from '@/stores/system';
 
 type DeviceListResponse = {
@@ -230,6 +231,7 @@ type DeviceListResponse = {
 const route = useRoute();
 const router = useRouter();
 const systemStore = useSystemStore();
+const authStore = useAuthStore();
 const loading = ref(false);
 const selectedDeviceId = ref('');
 const deviceMeta = reactive({
@@ -293,6 +295,7 @@ const deviceOptions = computed(() => {
 });
 
 const activeDeviceId = computed(() => selectedDeviceId.value.trim() || '');
+const canManage = computed(() => authStore.isAdmin && authStore.can('device_config'));
 const sortedWifiNetworks = computed(() => [...wifiNetworks.value].sort((a: any, b: any) => Number(b?.signal || -999) - Number(a?.signal || -999)));
 
 const wifiStatusText = computed(() => {

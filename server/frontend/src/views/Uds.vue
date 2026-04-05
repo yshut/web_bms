@@ -3,7 +3,7 @@
     <el-card shadow="hover">
       <div class="toolbar">
         <el-button type="primary" :loading="loading" @click="handleReload">刷新</el-button>
-        <el-button @click="pickFirmware">上传固件</el-button>
+        <el-button :disabled="!canManage" @click="pickFirmware">上传固件</el-button>
         <input ref="fileInput" type="file" class="hidden-input" @change="onUpload" />
       </div>
     </el-card>
@@ -13,7 +13,7 @@
         <template #header>
           <div class="card-head">
             <span>UDS 参数</span>
-            <el-button type="primary" @click="saveConfig">保存</el-button>
+            <el-button type="primary" :disabled="!canManage" @click="saveConfig">保存</el-button>
           </div>
         </template>
         <el-form label-position="top">
@@ -45,8 +45,8 @@
           <div class="card-head">
             <span>刷写状态</span>
             <div class="actions">
-              <el-button type="primary" :loading="running" @click="start">开始</el-button>
-              <el-button @click="stop">停止</el-button>
+              <el-button type="primary" :loading="running" :disabled="!canManage" @click="start">开始</el-button>
+              <el-button :disabled="!canManage" @click="stop">停止</el-button>
             </div>
           </div>
         </template>
@@ -69,7 +69,7 @@
         </el-table-column>
         <el-table-column label="操作" width="100">
           <template #default="{ row }">
-            <el-button link type="primary" @click="selectFile(row.path)">选择</el-button>
+            <el-button link type="primary" :disabled="!canManage" @click="selectFile(row.path)">选择</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -83,10 +83,12 @@
 </template>
 
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, reactive, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
 import { ElMessage } from 'element-plus';
 import { udsApi } from '@/api';
+import { useAuthStore } from '@/stores/auth';
 
+const authStore = useAuthStore();
 const loading = ref(false);
 const running = ref(false);
 const progress = ref(0);
@@ -103,6 +105,7 @@ const config = reactive({
   block_size: 256,
 });
 const baudrates = [10000, 20000, 50000, 100000, 125000, 250000, 500000, 800000, 1000000];
+const canManage = computed(() => authStore.isAdmin && authStore.can('uds'));
 
 function formatBytes(value: number | string) {
   const num = Number(value ?? 0);

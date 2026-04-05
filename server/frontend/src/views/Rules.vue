@@ -44,7 +44,7 @@
 
           <div class="toolbar toolbar--actions">
             <el-button type="primary" @click="reload">查询</el-button>
-            <el-button :loading="loadingSync" @click="syncRemoteRules">同步设备规则</el-button>
+            <el-button :loading="loadingSync" :disabled="!canManage" @click="syncRemoteRules">同步设备规则</el-button>
             <el-button @click="resetFilters">重置</el-button>
           </div>
         </div>
@@ -89,11 +89,11 @@
               accept=".xlsx"
               :on-change="onSelectExcel"
             >
-              <el-button>导入 Excel</el-button>
+              <el-button :disabled="!canManage">导入 Excel</el-button>
             </el-upload>
             <el-button :href="rulesApi.templateUrl" tag="a">模板</el-button>
             <el-button :href="rulesApi.exportExcelUrl(activeDeviceId || undefined)" tag="a">导出</el-button>
-            <el-button @click="pushLocalCache">推送本地缓存</el-button>
+            <el-button :disabled="!canManage" @click="pushLocalCache">推送本地缓存</el-button>
           </div>
         </div>
       </template>
@@ -104,8 +104,8 @@
           <span>{{ Math.ceil((selectedExcel.size || 0) / 1024) }} KB</span>
         </div>
         <div class="excel-actions">
-          <el-button size="small" @click="importExcel(false)">仅转换</el-button>
-          <el-button size="small" type="primary" @click="importExcel(true)">转换并推送</el-button>
+          <el-button size="small" :disabled="!canManage" @click="importExcel(false)">仅转换</el-button>
+          <el-button size="small" type="primary" :disabled="!canManage" @click="importExcel(true)">转换并推送</el-button>
         </div>
       </div>
 
@@ -238,6 +238,7 @@ import { ElMessage } from 'element-plus';
 import type { UploadFile } from 'element-plus';
 import { useRoute, useRouter } from 'vue-router';
 import { deviceApi, rulesApi } from '@/api';
+import { useAuthStore } from '@/stores/auth';
 import { useSystemStore } from '@/stores/system';
 
 type DeviceListResponse = {
@@ -247,6 +248,7 @@ type DeviceListResponse = {
 };
 
 const systemStore = useSystemStore();
+const authStore = useAuthStore();
 const route = useRoute();
 const router = useRouter();
 const loading = ref(false);
@@ -281,6 +283,7 @@ const deviceOptions = computed(() => {
 });
 
 const activeDeviceId = computed(() => selectedDeviceId.value.trim() || '');
+const canManage = computed(() => authStore.isAdmin && authStore.can('rules'));
 
 const sourceLabel = computed(() => source.value || 'db');
 

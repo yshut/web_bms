@@ -20,8 +20,8 @@
         <el-input v-model="currentPath" class="grow" />
         <el-button type="primary" :loading="loading" @click="listDir()">浏览</el-button>
         <el-button @click="goUp">上一级</el-button>
-        <el-button @click="mkdirDialog">新建文件夹</el-button>
-        <el-button @click="pickUpload">上传</el-button>
+        <el-button :disabled="!canManage" @click="mkdirDialog">新建文件夹</el-button>
+        <el-button :disabled="!canManage" @click="pickUpload">上传</el-button>
         <input ref="fileInput" type="file" multiple class="hidden-input" @change="onSelectFiles" />
       </div>
 
@@ -63,7 +63,7 @@
             <div class="actions row-actions">
               <el-button v-if="row.is_dir" link type="primary" @click="enterDir(row)">进入</el-button>
               <el-button v-else link type="primary" @click="download(row)">下载</el-button>
-              <el-dropdown trigger="click">
+              <el-dropdown trigger="click" :disabled="!canManage">
                 <el-button link class="more-action">更多</el-button>
                 <template #dropdown>
                   <el-dropdown-menu>
@@ -96,6 +96,7 @@ import { computed, onMounted, ref } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { useRoute, useRouter } from 'vue-router';
 import { deviceApi, filesApi } from '@/api';
+import { useAuthStore } from '@/stores/auth';
 import { useSystemStore } from '@/stores/system';
 
 type DeviceListResponse = {
@@ -107,6 +108,7 @@ type DeviceListResponse = {
 const route = useRoute();
 const router = useRouter();
 const systemStore = useSystemStore();
+const authStore = useAuthStore();
 const fileInput = ref<HTMLInputElement | null>(null);
 const loading = ref(false);
 const uploading = ref(false);
@@ -124,6 +126,7 @@ const deviceOptions = computed(() => {
 });
 
 const activeDeviceId = computed(() => selectedDeviceId.value.trim() || '');
+const canManage = computed(() => authStore.isAdmin && authStore.can('files'));
 
 function joinPath(base: string, name: string) {
   return base.endsWith('/') ? `${base}${name}` : `${base}/${name}`;
@@ -244,6 +247,7 @@ function download(row: any) {
 }
 
 function pickUpload() {
+  if (!canManage.value) return;
   fileInput.value?.click();
 }
 
