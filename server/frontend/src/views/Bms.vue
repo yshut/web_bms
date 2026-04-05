@@ -1,69 +1,136 @@
 <template>
   <div class="bms-page">
-    <el-card shadow="hover">
-      <div class="toolbar">
-        <el-button type="primary" :loading="loading" @click="reload">刷新</el-button>
-        <el-button :href="bmsApi.exportUrl" tag="a">导出 CSV</el-button>
-        <span class="meta">最后更新 {{ lastUpdatedText }}</span>
-        <span class="meta">更新间隔 {{ lastAgeText }}</span>
-        <span class="meta">实时流 {{ streamConnected ? '已连接' : '重连中' }}</span>
-      </div>
-    </el-card>
-
-    <div class="grid">
-      <el-card shadow="hover"><div class="metric"><span>记录数</span><strong>{{ stats.total_records ?? '-' }}</strong></div></el-card>
-      <el-card shadow="hover"><div class="metric"><span>消息数</span><strong>{{ Object.keys(messages).length }}</strong></div></el-card>
-      <el-card shadow="hover"><div class="metric"><span>信号数</span><strong>{{ signalRows.length }}</strong></div></el-card>
-      <el-card shadow="hover"><div class="metric"><span>告警数</span><strong>{{ alerts.length }}</strong></div></el-card>
-    </div>
-
-    <el-card v-if="lifeSignal" shadow="hover">
-      <template #header><span>关键实时信号</span></template>
-      <div class="live-grid">
-        <div class="live-card">
-          <span class="live-label">Local_LifeSignal</span>
-          <strong class="live-value">{{ lifeSignal.value }}</strong>
-          <span class="live-meta">{{ lifeSignal.ts_text }}</span>
-          <span class="live-meta">距今 {{ formatAge(lifeSignal.ts) }}</span>
+    <section class="hero-panel">
+      <div class="hero-copy">
+        <p class="eyebrow">BMS Command View</p>
+        <h1>把实时信号、消息分组和告警流压缩成一个值守画面。</h1>
+        <p class="hero-desc">
+          参考优化指南里对缓存、增量刷新和状态可见性的要求，页面优先显示 freshness、关键信号和异常。
+        </p>
+        <div class="hero-actions">
+          <el-button type="primary" :loading="loading" @click="reload">立即刷新</el-button>
+          <el-button :href="bmsApi.exportUrl" tag="a">导出 CSV</el-button>
         </div>
       </div>
-    </el-card>
 
-    <el-card shadow="hover">
-      <template #header><span>最新信号</span></template>
-      <el-table :key="signalTableKey" :data="signalRows" size="small" max-height="320" :row-key="signalRowKey">
+      <div class="hero-side">
+        <div class="stream-card" :class="{ 'stream-card--live': streamConnected }">
+          <span class="stream-label">实时流</span>
+          <strong>{{ streamConnected ? 'Streaming' : 'Reconnecting' }}</strong>
+          <p>{{ lastUpdatedText }}</p>
+          <span class="stream-age">数据年龄 {{ lastAgeText }}</span>
+        </div>
+
+        <div class="stats-grid">
+          <article v-for="item in statCards" :key="item.label" class="stat-card">
+            <span>{{ item.label }}</span>
+            <strong>{{ item.value }}</strong>
+            <p>{{ item.detail }}</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="signal-grid">
+      <article class="section-card section-card--signal">
+        <div class="section-head">
+          <div>
+            <p class="section-kicker">Signal Focus</p>
+            <h2>关键实时信号</h2>
+          </div>
+        </div>
+
+        <div v-if="lifeSignal" class="focus-signal">
+          <span class="focus-label">{{ lifeSignal.signal_name }}</span>
+          <strong>{{ lifeSignal.value }}</strong>
+          <p>{{ lifeSignal.ts_text }} · 距今 {{ formatAge(lifeSignal.ts) }}</p>
+        </div>
+
+        <div class="focus-list">
+          <div v-for="row in latestSignals" :key="signalRowKey(row)" class="focus-item">
+            <div>
+              <span>{{ row.signal_name }}</span>
+              <p>{{ row.msg_name }} · {{ row.channel }}</p>
+            </div>
+            <strong>{{ row.value }}{{ row.unit ? ` ${row.unit}` : '' }}</strong>
+          </div>
+        </div>
+      </article>
+
+      <article class="section-card section-card--alert">
+        <div class="section-head">
+          <div>
+            <p class="section-kicker">Alert Feed</p>
+            <h2>活动告警</h2>
+          </div>
+        </div>
+
+        <div class="alert-list">
+          <div v-for="row in topAlerts" :key="alertRowKey(row)" class="alert-item">
+            <span :class="['alert-level', alertLevelClass(row.level)]">{{ row.level }}</span>
+            <div>
+              <strong>{{ row.signal_name }}</strong>
+              <p>{{ row.message }}</p>
+            </div>
+            <time>{{ row.ts_text }}</time>
+          </div>
+          <div v-if="!topAlerts.length" class="empty-state">当前没有活动告警</div>
+        </div>
+      </article>
+    </section>
+
+    <section class="section-card">
+      <div class="section-head">
+        <div>
+          <p class="section-kicker">Recent Stream</p>
+          <h2>最新信号</h2>
+        </div>
+      </div>
+      <el-table :key="signalTableKey" :data="signalRows" size="small" max-height="360" :row-key="signalRowKey">
         <el-table-column prop="signal_name" label="信号" min-width="220" />
         <el-table-column prop="value" label="值" width="120" />
         <el-table-column prop="unit" label="单位" width="100" />
         <el-table-column prop="channel" label="通道" width="100" />
-        <el-table-column prop="ts_text" label="时间" width="110" />
+        <el-table-column prop="ts_text" label="时间" width="120" />
       </el-table>
-    </el-card>
+    </section>
 
-    <el-card shadow="hover">
-      <template #header><span>消息分组</span></template>
-      <el-collapse :key="messageTableKey">
-        <el-collapse-item v-for="(rows, name) in messages" :key="name" :title="`${name} (${rows.length})`" :name="name">
-          <el-table :data="rows" size="small" :row-key="signalRowKey">
-            <el-table-column prop="signal_name" label="信号" min-width="180" />
-            <el-table-column prop="value" label="值" width="120" />
-            <el-table-column prop="unit" label="单位" width="100" />
-            <el-table-column prop="channel" label="通道" width="100" />
-            <el-table-column prop="ts_text" label="时间" width="110" />
-          </el-table>
-        </el-collapse-item>
-      </el-collapse>
-    </el-card>
+    <section class="group-grid">
+      <article class="section-card">
+        <div class="section-head">
+          <div>
+            <p class="section-kicker">Message Groups</p>
+            <h2>消息分组</h2>
+          </div>
+        </div>
+        <el-collapse :key="messageTableKey">
+          <el-collapse-item v-for="(rows, name) in messages" :key="name" :title="`${name} (${rows.length})`" :name="name">
+            <el-table :data="rows" size="small" :row-key="signalRowKey">
+              <el-table-column prop="signal_name" label="信号" min-width="180" />
+              <el-table-column prop="value" label="值" width="120" />
+              <el-table-column prop="unit" label="单位" width="100" />
+              <el-table-column prop="channel" label="通道" width="100" />
+              <el-table-column prop="ts_text" label="时间" width="110" />
+            </el-table>
+          </el-collapse-item>
+        </el-collapse>
+      </article>
 
-    <el-card shadow="hover">
-      <template #header><span>告警</span></template>
-      <el-table :key="alertTableKey" :data="alerts" size="small" max-height="240" :row-key="alertRowKey">
-        <el-table-column prop="signal_name" label="信号" min-width="180" />
-        <el-table-column prop="level" label="等级" width="120" />
-        <el-table-column prop="message" label="描述" min-width="220" />
-        <el-table-column prop="ts_text" label="时间" width="110" />
-      </el-table>
-    </el-card>
+      <article class="section-card">
+        <div class="section-head">
+          <div>
+            <p class="section-kicker">Alert Archive</p>
+            <h2>告警明细</h2>
+          </div>
+        </div>
+        <el-table :key="alertTableKey" :data="alerts" size="small" max-height="420" :row-key="alertRowKey">
+          <el-table-column prop="signal_name" label="信号" min-width="180" />
+          <el-table-column prop="level" label="等级" width="120" />
+          <el-table-column prop="message" label="描述" min-width="220" />
+          <el-table-column prop="ts_text" label="时间" width="120" />
+        </el-table>
+      </article>
+    </section>
   </div>
 </template>
 
@@ -93,6 +160,31 @@ const signalRows = computed(() => {
 });
 
 const lifeSignal = computed(() => signalRows.value.find((row: any) => row?.signal_name === 'Local_LifeSignal') || null);
+const latestSignals = computed(() => signalRows.value.slice(0, 6));
+const topAlerts = computed(() => alerts.value.slice(0, 6));
+
+const statCards = computed(() => ([
+  {
+    label: '记录数',
+    value: String(stats.value.total_records ?? 0),
+    detail: '累计写入的 BMS 时序记录',
+  },
+  {
+    label: '消息组',
+    value: String(Object.keys(messages.value).length),
+    detail: '按报文名称聚合后的分组数',
+  },
+  {
+    label: '信号数',
+    value: String(signalRows.value.length),
+    detail: '当前处于最新状态的信号条目',
+  },
+  {
+    label: '告警数',
+    value: String(alerts.value.length),
+    detail: streamConnected.value ? '流式告警正在更新' : '等待流连接恢复',
+  },
+]));
 
 const lastUpdatedText = computed(() => {
   if (!lastUpdated.value) return '-';
@@ -135,22 +227,6 @@ function normalizeSignalRows(value: any): any[] {
   }));
 }
 
-function normalizeMessageGroups(value: any): Record<string, any[]> {
-  const groups = (value && typeof value === 'object') ? value : {};
-  return Object.fromEntries(
-    Object.entries(groups)
-      .map(([name, rows]) => [
-        name,
-        normalizeSignalRows(Array.isArray(rows) ? rows : []).sort((a, b) => Number(b?.ts || 0) - Number(a?.ts || 0)),
-      ])
-      .sort((a, b) => {
-        const aTs = Number(a[1]?.[0]?.ts || 0);
-        const bTs = Number(b[1]?.[0]?.ts || 0);
-        return bTs - aTs;
-      }),
-  );
-}
-
 function buildMessageGroupsFromSignals(rows: any[]): Record<string, any[]> {
   const groups: Record<string, any[]> = {};
   for (const row of rows) {
@@ -183,6 +259,13 @@ function signalRowKey(row: any) {
 
 function alertRowKey(row: any) {
   return `${row?.signal_name || '-'}:${row?.ts || 0}:${row?.message || ''}`;
+}
+
+function alertLevelClass(level: string) {
+  const text = String(level || '').toLowerCase();
+  if (text.includes('high') || text.includes('critical') || text.includes('error')) return 'danger';
+  if (text.includes('warn')) return 'warning';
+  return 'info';
 }
 
 function buildSignature(nextSignals: any[], nextMessages: Record<string, any[]>, nextAlerts: any[]) {
@@ -320,64 +403,283 @@ onBeforeUnmount(() => {
 <style scoped>
 .bms-page {
   display: grid;
-  gap: 16px;
+  gap: 20px;
 }
 
-.toolbar,
-.metric {
+.hero-panel {
+  display: flex;
+  gap: 20px;
+  flex-wrap: wrap;
+  padding: 28px;
+  border-radius: 28px;
+  border: 1px solid rgba(136, 176, 255, 0.14);
+  background:
+    linear-gradient(135deg, rgba(14, 30, 50, 0.95), rgba(8, 17, 29, 0.92)),
+    radial-gradient(circle at top right, rgba(74, 198, 255, 0.14), transparent 32%);
+  box-shadow: var(--app-shadow);
+}
+
+.hero-copy {
+  flex: 1.1;
+  min-width: 320px;
+}
+
+.eyebrow,
+.section-kicker {
+  margin: 0 0 10px;
+  color: #72a2cf;
+  font-size: 12px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+}
+
+.hero-copy h1,
+.section-head h2 {
+  margin: 0;
+  color: #f3f8ff;
+}
+
+.hero-copy h1 {
+  max-width: 11em;
+  font-size: clamp(34px, 4vw, 52px);
+  line-height: 1.04;
+}
+
+.hero-desc,
+.stat-card p,
+.focus-item p,
+.alert-item p,
+.stream-age {
+  color: #91a7c8;
+}
+
+.hero-desc {
+  margin-top: 16px;
+  max-width: 42rem;
+  line-height: 1.8;
+}
+
+.hero-actions {
   display: flex;
   gap: 12px;
-  align-items: center;
   flex-wrap: wrap;
+  margin-top: 24px;
 }
 
-.meta {
-  color: #606266;
+.hero-side {
+  flex: 1;
+  min-width: 320px;
+  display: grid;
+  gap: 14px;
+}
+
+.stream-card,
+.stat-card,
+.section-card,
+.focus-signal {
+  border-radius: 24px;
+}
+
+.stream-card {
+  display: grid;
+  gap: 8px;
+  padding: 18px;
+  border: 1px solid rgba(136, 176, 255, 0.12);
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.stream-card--live {
+  border-color: rgba(25, 211, 162, 0.24);
+  box-shadow: inset 0 0 0 1px rgba(25, 211, 162, 0.1);
+}
+
+.stream-label,
+.stat-card span,
+.focus-label,
+.focus-item span {
+  color: #7d95b8;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.stream-card strong,
+.stat-card strong,
+.focus-signal strong,
+.focus-item strong,
+.alert-item strong {
+  color: #f4f8ff;
+}
+
+.stream-card strong {
+  font-size: 26px;
+}
+
+.stats-grid,
+.signal-grid,
+.group-grid {
+  display: grid;
+  gap: 20px;
+}
+
+.stats-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.stat-card,
+.section-card {
+  padding: 18px;
+  border: 1px solid rgba(136, 176, 255, 0.12);
+  background: linear-gradient(180deg, rgba(14, 28, 47, 0.8), rgba(8, 18, 31, 0.76));
+  box-shadow: var(--app-shadow);
+}
+
+.stat-card strong {
+  display: block;
+  margin-top: 12px;
+  font-size: 30px;
+  line-height: 1.08;
+}
+
+.stat-card p {
+  margin-top: 10px;
+  line-height: 1.6;
   font-size: 13px;
 }
 
-.live-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 12px;
+.signal-grid {
+  grid-template-columns: minmax(0, 1.1fr) minmax(320px, 0.9fr);
 }
 
-.live-card {
-  display: grid;
-  gap: 6px;
-  padding: 14px;
-  border-radius: 10px;
-  background: #f5f7fa;
+.section-card--signal {
+  background:
+    linear-gradient(180deg, rgba(16, 32, 51, 0.84), rgba(8, 18, 31, 0.84)),
+    radial-gradient(circle at top right, rgba(74, 198, 255, 0.1), transparent 36%);
 }
 
-.live-label {
-  color: #606266;
-  font-size: 13px;
+.section-card--alert {
+  background:
+    linear-gradient(180deg, rgba(34, 23, 33, 0.76), rgba(14, 17, 26, 0.84)),
+    radial-gradient(circle at top right, rgba(255, 107, 125, 0.1), transparent 34%);
 }
 
-.live-value {
-  font-size: 32px;
+.section-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+  margin-bottom: 18px;
+}
+
+.focus-signal {
+  padding: 18px;
+  border: 1px solid rgba(74, 198, 255, 0.16);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.focus-signal strong {
+  display: block;
+  margin: 12px 0 8px;
+  font-size: clamp(34px, 3vw, 48px);
   line-height: 1;
 }
 
-.live-meta {
-  color: #909399;
-  font-size: 12px;
+.focus-signal p {
+  color: #95a9c6;
 }
 
-.metric {
-  justify-content: space-between;
-}
-
-.grid {
+.focus-list,
+.alert-list {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 16px;
+  gap: 12px;
+  margin-top: 14px;
 }
 
-@media (max-width: 900px) {
-  .grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+.focus-item,
+.alert-item {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: center;
+  padding: 14px 16px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(136, 176, 255, 0.08);
+}
+
+.focus-item strong {
+  text-align: right;
+}
+
+.alert-item {
+  align-items: flex-start;
+}
+
+.alert-level {
+  min-width: 72px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  text-align: center;
+  font-size: 12px;
+  border: 1px solid rgba(136, 176, 255, 0.12);
+}
+
+.alert-level.danger {
+  color: #ffe7ea;
+  background: rgba(255, 107, 125, 0.14);
+  border-color: rgba(255, 107, 125, 0.24);
+}
+
+.alert-level.warning {
+  color: #ffecc9;
+  background: rgba(255, 179, 71, 0.14);
+  border-color: rgba(255, 179, 71, 0.24);
+}
+
+.alert-level.info {
+  color: #def6ff;
+  background: rgba(74, 198, 255, 0.12);
+  border-color: rgba(74, 198, 255, 0.24);
+}
+
+.alert-item time,
+.empty-state {
+  color: #7f95b7;
+}
+
+.empty-state {
+  padding: 16px;
+  border-radius: 18px;
+  text-align: center;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.group-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+:deep(.el-collapse) {
+  border-top: 0;
+  border-bottom: 0;
+}
+
+:deep(.el-collapse-item__header),
+:deep(.el-collapse-item__wrap) {
+  background: transparent;
+  color: var(--app-text);
+  border-bottom-color: rgba(136, 176, 255, 0.08);
+}
+
+@media (max-width: 1180px) {
+  .signal-grid,
+  .group-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 760px) {
+  .stats-grid {
+    grid-template-columns: 1fr;
   }
 }
 </style>
