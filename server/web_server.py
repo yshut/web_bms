@@ -17,7 +17,7 @@ import secrets
 from datetime import timedelta
 from flask import Flask, request, jsonify, send_from_directory, Response, stream_with_context, session, redirect, url_for
 import re
-from typing import Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 from urllib.parse import quote
 from werkzeug.middleware.proxy_fix import ProxyFix
 
@@ -1269,6 +1269,39 @@ _AUTH_PERMISSION_KEYS = [
     'wallboard',
     'user_admin',
 ]
+_AUTH_SHARED_API_PATHS = [
+    '/api/auth/status',
+    '/api/device/list',
+    '/api/device/remote/status',
+    '/api/ping',
+    '/api/realtime/config',
+    '/api/status',
+    '/api/status_fast',
+    '/api/system/info',
+    '/api/version',
+]
+_AUTH_PERMISSION_RULES = [
+    ('/api/auth/users', ['user_admin']),
+    ('/api/bms/', ['bms', 'wallboard']),
+    ('/api/can/', ['can']),
+    ('/api/dbc/', ['dbc']),
+    ('/api/device/can_config', ['can', 'device_config']),
+    ('/api/device/remote/config', ['device_config']),
+    ('/api/device/remote/hardware', ['hardware', 'wallboard']),
+    ('/api/device/remote/network', ['device_config']),
+    ('/api/device/remote/rules', ['rules']),
+    ('/api/device/remote/wifi', ['device_config']),
+    ('/api/file/', ['files']),
+    ('/api/fs/', ['files']),
+    ('/api/hardware/', ['hardware']),
+    ('/api/rules/', ['rules']),
+    ('/api/system/logs', ['hardware']),
+    ('/api/system/reboot', ['hardware']),
+    ('/api/uds/', ['uds']),
+    ('/api/ui/', ['hardware']),
+    ('/api/wifi/', ['device_config']),
+    ('/api/ws/', ['devices']),
+]
 
 
 def _all_permissions() -> List[str]:
@@ -1394,6 +1427,49 @@ def _current_user_can(permission_key: str) -> bool:
     if _current_auth_role() == 'super_admin':
         return True
     return permission_key in _current_auth_permissions()
+
+
+def _path_matches_prefix(path: str, prefix: str) -> bool:
+    path = str(path or '').strip()
+    prefix = str(prefix or '').strip()
+    if not path or not prefix:
+        return False
+    if prefix.endswith('/'):
+        return path.startswith(prefix)
+    return path == prefix or path.startswith(prefix + '/')
+
+
+def _request_permission_keys(path: str) -> List[str]:
+    path = str(path or '').strip()
+    if not path.startswith('/api/'):
+        return []
+    for shared_path in _AUTH_SHARED_API_PATHS:
+        if _path_matches_prefix(path, shared_path):
+            return []
+    for prefix, permissions in _AUTH_PERMISSION_RULES:
+        if _path_matches_prefix(path, prefix):
+            return list(permissions)
+    return []
+
+
+def _sync_current_session_user(users: Optional[Dict[str, dict]] = None) -> None:
+    if not _is_authenticated():
+        return
+    username = str(session.get(_AUTH_SESSION_KEY) or '').strip()
+    if not username:
+        return
+    current_users = users or _get_auth_users()
+    current = current_users.get(username)
+    if not current:
+        session.pop(_AUTH_SESSION_KEY, None)
+        session.pop(_AUTH_ROLE_SESSION_KEY, None)
+        session.pop(_AUTH_PERMISSIONS_SESSION_KEY, None)
+        session.pop(_AUTH_CSRF_SESSION_KEY, None)
+        return
+    session[_AUTH_ROLE_SESSION_KEY] = str(current.get('role') or 'user')
+    session[_AUTH_PERMISSIONS_SESSION_KEY] = _normalize_permissions(
+        current.get('permissions') or _permission_default_for_role(current.get('role') or 'user')
+    )
 
 
 def _require_super_admin() -> Optional[Tuple[Response, int]]:
@@ -1580,6 +1656,14 @@ def require_login():
     if _is_public_request_path(request.path):
         return None
     if _is_authenticated():
+        required_permissions = _request_permission_keys(request.path)
+        if required_permissions and not any(_current_user_can(item) for item in required_permissions):
+            return jsonify({
+                'ok': False,
+                'error': 'permission denied',
+                'required_permissions': required_permissions,
+                'role': _current_auth_role(),
+            }), 403
         if _is_write_request() and _current_auth_role() not in ('super_admin', 'admin'):
             return jsonify({
                 'ok': False,
@@ -1704,10 +1788,13 @@ def auth_users():
         username = str(body.get('username') or '').strip()
         if not username:
             return jsonify({'ok': False, 'error': 'missing username'}), 400
+        if username == str(session.get(_AUTH_SESSION_KEY) or '').strip():
+            return jsonify({'ok': False, 'error': 'cannot delete current user'}), 400
         if username not in users or users[username].get('builtin'):
             return jsonify({'ok': False, 'error': 'cannot delete builtin user'}), 400
         del users[username]
         _save_auth_users_file(users)
+        _sync_current_session_user(users)
         return jsonify({'ok': True})
 
     body = request.get_json(silent=True) or {}
@@ -1724,9 +1811,13 @@ def auth_users():
         return jsonify({'ok': False, 'error': 'cannot modify builtin user'}), 400
     updated = dict(current)
     updated['username'] = username
-    updated['role'] = role
-    updated['permissions'] = permissions
     updated['builtin'] = bool(current.get('builtin', False))
+    if updated['builtin']:
+        updated['role'] = str(current.get('role') or 'super_admin')
+        updated['permissions'] = _normalize_permissions(current.get('permissions') or _all_permissions())
+    else:
+        updated['role'] = role
+        updated['permissions'] = permissions
     if password:
         salt = secrets.token_hex(8)
         iterations = 120000
@@ -1736,10 +1827,11 @@ def auth_users():
         return jsonify({'ok': False, 'error': 'missing password'}), 400
     users[username] = updated
     _save_auth_users_file(users)
+    _sync_current_session_user(users)
     return jsonify({'ok': True, 'item': {
         'username': username,
-        'role': role,
-        'permissions': permissions,
+        'role': updated.get('role'),
+        'permissions': _normalize_permissions(updated.get('permissions') or []),
         'builtin': updated.get('builtin', False),
     }})
 

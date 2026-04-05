@@ -18,9 +18,10 @@
         </el-table-column>
         <el-table-column label="权限" min-width="360">
           <template #default="{ row }">
-            <div class="perm-list">
+            <div v-if="row.permissions?.length" class="perm-list">
               <el-tag v-for="item in row.permissions" :key="item" size="small" effect="plain">{{ permissionLabel(item) }}</el-tag>
             </div>
+            <span v-else class="empty-text">无</span>
           </template>
         </el-table-column>
         <el-table-column label="内置" width="90">
@@ -51,6 +52,11 @@
           <el-input v-model="form.password" show-password placeholder="编辑时留空则不修改密码" />
         </el-form-item>
         <el-form-item label="页面权限">
+          <div class="perm-actions">
+            <el-button link type="primary" @click="applyRoleDefaults">套用角色默认权限</el-button>
+            <el-button link @click="toggleAllPermissions(true)">全选</el-button>
+            <el-button link @click="toggleAllPermissions(false)">清空</el-button>
+          </div>
           <el-checkbox-group v-model="form.permissions" class="perm-grid">
             <el-checkbox v-for="item in allPermissions" :key="item" :label="item">
               {{ permissionLabel(item) }}
@@ -70,6 +76,7 @@
 import { onMounted, reactive, ref } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { authApi } from '@/api';
+import { useAuthStore } from '@/stores/auth';
 
 const loading = ref(false);
 const saving = ref(false);
@@ -77,6 +84,7 @@ const dialogVisible = ref(false);
 const editing = ref(false);
 const items = ref<any[]>([]);
 const allPermissions = ref<string[]>([]);
+const authStore = useAuthStore();
 const form = reactive({
   username: '',
   role: 'user',
@@ -116,6 +124,20 @@ function resetForm() {
   form.permissions = [];
 }
 
+function defaultPermissions(role: string) {
+  if (role === 'super_admin') return [...allPermissions.value];
+  if (role === 'admin') return allPermissions.value.filter((item) => item !== 'user_admin');
+  return ['home', 'hardware', 'devices', 'bms', 'wallboard'].filter((item) => allPermissions.value.includes(item));
+}
+
+function applyRoleDefaults() {
+  form.permissions = defaultPermissions(form.role);
+}
+
+function toggleAllPermissions(enabled: boolean) {
+  form.permissions = enabled ? [...allPermissions.value] : [];
+}
+
 async function reload() {
   loading.value = true;
   try {
@@ -130,6 +152,7 @@ async function reload() {
 function openCreate() {
   editing.value = false;
   resetForm();
+  applyRoleDefaults();
   dialogVisible.value = true;
 }
 
@@ -153,6 +176,9 @@ async function saveUser() {
     });
     ElMessage.success('用户已保存');
     dialogVisible.value = false;
+    if (form.username === authStore.username) {
+      await authStore.load(true);
+    }
     await reload();
   } finally {
     saving.value = false;
@@ -211,8 +237,19 @@ onMounted(() => {
   gap: 8px 12px;
 }
 
+.perm-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
 .user-form {
   display: grid;
   gap: 10px;
+}
+
+.empty-text {
+  color: #8fa0ba;
 }
 </style>

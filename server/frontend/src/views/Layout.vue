@@ -44,7 +44,11 @@
         <div class="header-right">
           <div class="header-metric">
             <span>会话</span>
-            <strong>{{ authRole === 'admin' ? '管理员' : '只读访客' }}</strong>
+            <strong>{{ roleText }}</strong>
+          </div>
+          <div v-if="authName" class="header-metric">
+            <span>用户</span>
+            <strong>{{ authName }}</strong>
           </div>
           <div class="header-metric">
             <span>连接</span>
@@ -68,7 +72,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useSystemStore } from '@/stores/system';
 import { useAuthStore } from '@/stores/auth';
@@ -78,7 +82,6 @@ const route = useRoute();
 const router = useRouter();
 const systemStore = useSystemStore();
 const authStore = useAuthStore();
-const authRole = ref('');
 
 const routes = computed(() => {
   const layoutRoute = router.options.routes.find((item) => item.name === 'Layout');
@@ -89,6 +92,16 @@ const activeMenu = computed(() => route.path);
 
 const currentPageTitle = computed(() => {
   return route.meta?.title as string || '控制台';
+});
+
+const authRole = computed(() => authStore.role);
+const authName = computed(() => authStore.username);
+
+const roleText = computed(() => {
+  if (authRole.value === 'super_admin') return '超级管理员';
+  if (authRole.value === 'admin') return '管理员';
+  if (authRole.value === 'user') return '用户';
+  return '未登录';
 });
 
 function openWallboard() {
@@ -115,9 +128,8 @@ async function logout() {
 onMounted(async () => {
   try {
     await authStore.load(true);
-    authRole.value = authStore.role;
   } catch (error) {
-    authRole.value = '';
+    // noop
   }
 });
 </script>
