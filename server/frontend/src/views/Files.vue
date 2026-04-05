@@ -63,7 +63,16 @@
               <el-button v-if="row.is_dir" link type="primary" @click="enterDir(row)">进入</el-button>
               <el-button v-else link type="primary" @click="download(row)">下载</el-button>
               <el-button link @click="renamePath(row)">重命名</el-button>
-              <el-button link type="danger" @click="removePath(row)">删除</el-button>
+              <el-popconfirm
+                title="确认删除该文件或目录？"
+                confirm-button-text="删除"
+                cancel-button-text="取消"
+                @confirm="removePath(row)"
+              >
+                <template #reference>
+                  <el-button link type="danger">删除</el-button>
+                </template>
+              </el-popconfirm>
             </div>
           </template>
         </el-table-column>
@@ -209,19 +218,13 @@ async function renamePath(row: any) {
 async function removePath(row: any) {
   try {
     const path = row.path || joinPath(currentPath.value, row.name);
-    await ElMessageBox.confirm(`确认删除 ${row.name} ?`, '删除确认', {
-      type: 'warning',
-      confirmButtonText: '删除',
-      cancelButtonText: '取消',
-      distinguishCancelAndClose: true,
-    });
     const result: any = await filesApi.remove(path, activeDeviceId.value || undefined);
     if (result?.ok !== false) {
       ElMessage.success('已删除');
       await listDir();
     }
   } catch (error) {
-    if (error !== 'cancel' && error !== 'close') ElMessage.error('删除失败');
+    ElMessage.error('删除失败');
   }
 }
 
