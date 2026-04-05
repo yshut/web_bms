@@ -1,99 +1,143 @@
 <template>
-  <div class="dbc-manager">
+  <div class="dbc-page">
     <el-card shadow="hover">
-      <template #header>
-        <div class="card-header">
-          <span>DBC文件管理</span>
-          <el-upload
-            action="/api/dbc/upload"
-            :show-file-list="false"
-            :on-success="handleUploadSuccess"
-            accept=".dbc,.kcd"
-          >
-            <el-button type="primary">上传DBC</el-button>
-          </el-upload>
-        </div>
-      </template>
+      <div class="toolbar">
+        <el-upload action="/api/dbc/upload" :show-file-list="false" :on-success="reload" accept=".dbc,.kcd">
+          <el-button type="primary">上传 DBC</el-button>
+        </el-upload>
+        <el-button @click="reloadMappings">刷新映射</el-button>
+        <el-input v-model="mappingPrefix" placeholder="ID 前缀过滤，如 188" style="width: 180px" />
+      </div>
+    </el-card>
 
-      <el-table :data="dbcFiles" style="width: 100%">
-        <el-table-column prop="name" label="文件名" />
-        <el-table-column prop="size" label="大小" width="120">
-          <template #default="{ row }">
-            {{ formatSize(row.size) }}
-          </template>
-        </el-table-column>
-        <el-table-column prop="mtime" label="修改时间" width="180">
-          <template #default="{ row }">
-            {{ formatTime(row.mtime) }}
-          </template>
-        </el-table-column>
-        <el-table-column label="操作" width="150">
-          <template #default="{ row }">
-            <el-button type="danger" size="small" @click="deleteFile(row.name)">
-              删除
-            </el-button>
-          </template>
-        </el-table-column>
+    <div class="grid">
+      <el-card shadow="hover">
+        <template #header><span>文件列表</span></template>
+        <el-table :data="dbcFiles" size="small">
+          <el-table-column prop="name" label="文件名" min-width="220" />
+          <el-table-column label="大小" width="120">
+            <template #default="{ row }">{{ formatSize(row.size) }}</template>
+          </el-table-column>
+          <el-table-column label="操作" width="160">
+            <template #default="{ row }">
+              <el-button link type="primary" @click="loadSignals(row.name)">信号</el-button>
+              <el-button link type="danger" @click="deleteFile(row.name)">删除</el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+      </el-card>
+
+      <el-card shadow="hover">
+        <template #header><span>统计</span></template>
+        <div class="metric"><span>总映射</span><strong>{{ stats.total_mappings ?? '-' }}</strong></div>
+        <div class="metric"><span>已解析帧</span><strong>{{ stats.global_stats?.parsed_frames ?? '-' }}</strong></div>
+        <div class="metric"><span>解析失败</span><strong>{{ stats.global_stats?.parse_errors ?? '-' }}</strong></div>
+      </el-card>
+    </div>
+
+    <el-card shadow="hover">
+      <template #header><span>映射</span></template>
+      <el-table :data="mappings" size="small" max-height="320">
+        <el-table-column prop="id_hex" label="CAN ID" width="120" />
+        <el-table-column prop="name" label="消息名" min-width="180" />
+        <el-table-column prop="file" label="文件" min-width="180" />
+      </el-table>
+    </el-card>
+
+    <el-card shadow="hover">
+      <template #header><span>信号定义</span></template>
+      <el-table :data="signals" size="small" max-height="360">
+        <el-table-column prop="message_name" label="消息" min-width="180" />
+        <el-table-column prop="signal_name" label="信号" min-width="180" />
+        <el-table-column prop="unit" label="单位" width="100" />
+        <el-table-column prop="message_id" label="ID" width="120" />
       </el-table>
     </el-card>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
-import { dbcApi } from '@/api';
+import { onMounted, ref } from 'vue';
 import { ElMessage } from 'element-plus';
+import { dbcApi } from '@/api';
 
 const dbcFiles = ref<any[]>([]);
+const mappings = ref<any[]>([]);
+const signals = ref<any[]>([]);
+const stats = ref<Record<string, any>>({});
+const mappingPrefix = ref('');
 
-async function loadFiles() {
-  try {
-    const result: any = await dbcApi.list();
-    if (result.ok) {
-      dbcFiles.value = result.data?.items || [];
-    }
-  } catch (error) {
-    ElMessage.error('加载失败');
-  }
+function formatSize(size: number) {
+  if (size < 1024) return `${size} B`;
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
+  return `${(size / 1024 / 1024).toFixed(1)} MB`;
 }
 
-function handleUploadSuccess() {
-  ElMessage.success('上传成功');
-  loadFiles();
+async function reload() {
+  const [list, statsResp] = await Promise.all([
+    dbcApi.list(),
+    dbcApi.stats(),
+  ]) as any[];
+  dbcFiles.value = list?.data?.items || [];
+  stats.value = statsResp || {};
+  await reloadMappings();
+}
+
+async function reloadMappings() {
+  const result: any = await dbcApi.mappings(mappingPrefix.value || undefined);
+  mappings.value = result?.mappings || [];
+}
+
+async function loadSignals(name: string) {
+  const result: any = await dbcApi.signals(name);
+  const nextSignals = result?.signals || {};
+  signals.value = Object.values(nextSignals);
 }
 
 async function deleteFile(name: string) {
-  try {
-    const result: any = await dbcApi.delete(name);
-    if (result.ok) {
-      ElMessage.success('删除成功');
-      loadFiles();
-    }
-  } catch (error) {
-    ElMessage.error('删除失败');
+  const result: any = await dbcApi.delete(name);
+  if (result?.ok) {
+    ElMessage.success('删除成功');
+    await reload();
   }
 }
 
-function formatSize(size: number): string {
-  if (size < 1024) return `${size} B`;
-  if (size < 1024 * 1024) return `${(size / 1024).toFixed(2)} KB`;
-  return `${(size / (1024 * 1024)).toFixed(2)} MB`;
-}
-
-function formatTime(timestamp: number): string {
-  return new Date(timestamp * 1000).toLocaleString();
-}
-
-onMounted(() => {
-  loadFiles();
-});
+onMounted(reload);
 </script>
 
 <style scoped>
-.card-header {
+.dbc-page {
+  display: grid;
+  gap: 16px;
+}
+
+.toolbar,
+.metric {
   display: flex;
-  justify-content: space-between;
+  gap: 12px;
   align-items: center;
+  flex-wrap: wrap;
+}
+
+.metric {
+  justify-content: space-between;
+  padding: 10px 0;
+  border-bottom: 1px solid #ebeef5;
+}
+
+.metric:last-child {
+  border-bottom: none;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+@media (max-width: 900px) {
+  .grid {
+    grid-template-columns: 1fr;
+  }
 }
 </style>
-

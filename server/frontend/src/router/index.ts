@@ -6,8 +6,14 @@ const routes: RouteRecordRaw[] = [
     path: '/',
     name: 'Layout',
     component: () => import('@/views/Layout.vue'),
-    redirect: '/can',
+    redirect: '/home',
     children: [
+      {
+        path: '/home',
+        name: 'Home',
+        component: () => import('@/views/Home.vue'),
+        meta: { title: '控制台首页', icon: 'House' },
+      },
       {
         path: '/hardware',
         name: 'Hardware',
@@ -55,6 +61,12 @@ const routes: RouteRecordRaw[] = [
         name: 'RulesV2',
         component: () => import('@/views/Rules.vue'),
         meta: { title: '规则管理', icon: 'Document' },
+      },
+      {
+        path: '/bms',
+        name: 'Bms',
+        component: () => import('@/views/Bms.vue'),
+        meta: { title: 'BMS 看板', icon: 'DataAnalysis' },
       },
     ],
   },

@@ -52,6 +52,8 @@ export default api;
 // API methods
 export const statusApi = {
   getStatus: () => api.get('/status'),
+  getFastStatus: () => api.get('/status_fast'),
+  getVersion: () => api.get('/version'),
   ping: () => api.get('/ping'),
 };
 
@@ -87,6 +89,10 @@ export const dbcApi = {
   },
   list: () => api.get('/dbc/list'),
   delete: (name: string) => api.post('/dbc/delete', { name }),
+  reload: () => api.post('/dbc/reload'),
+  stats: () => api.get('/dbc/stats'),
+  mappings: (prefix?: string) => api.get('/dbc/mappings', { params: prefix ? { prefix } : undefined }),
+  signals: (name: string) => api.get('/dbc/signals', { params: { name } }),
 };
 
 export const udsApi = {
@@ -100,6 +106,9 @@ export const udsApi = {
     });
   },
   list: () => api.get('/uds/list'),
+  config: () => api.get('/uds/config'),
+  saveConfig: (body: Record<string, any>) => api.post('/uds/config', body),
+  state: () => api.get('/uds/state'),
   start: () => api.post('/uds/start'),
   stop: () => api.post('/uds/stop'),
   getProgress: () => api.get('/uds/progress'),
@@ -114,6 +123,7 @@ export const wsApi = {
 
 export const deviceApi = {
   list: () => api.get('/device/list'),
+  remoteStatus: (deviceId?: string) => api.get('/device/remote/status', { params: deviceId ? { device_id: deviceId } : undefined }),
 };
 
 export const hardwareApi = {
@@ -146,6 +156,14 @@ export const filesApi = {
   },
   downloadUrl: (path: string, deviceId?: string) =>
     `/api/fs/download?path=${encodeURIComponent(path)}${deviceId ? `&device_id=${encodeURIComponent(deviceId)}` : ''}`,
+};
+
+export const bmsApi = {
+  stats: () => api.get('/bms/stats'),
+  signals: () => api.get('/bms/signals'),
+  messages: () => api.get('/bms/messages'),
+  alerts: (limit = 100) => api.get('/bms/alerts', { params: { limit } }),
+  exportUrl: '/api/bms/export',
 };
 
 export const remoteConfigApi = {

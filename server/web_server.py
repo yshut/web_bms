@@ -4326,10 +4326,7 @@ def device_can_config():
 
 @app.route('/bms')
 def bms_dashboard():
-    """BMS 时序数据看板"""
-    resp = send_from_directory(app.static_folder, 'bms_dashboard.html')
-    resp.headers['Cache-Control'] = 'no-store, no-cache'
-    return resp
+    return redirect('/console/bms')
 
 @app.route('/api/bms/stats', methods=['GET'])
 def api_bms_stats():
