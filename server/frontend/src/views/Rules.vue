@@ -39,6 +39,7 @@
           <el-option label="ANY ID" value="any_id" />
         </el-select>
         <el-button type="primary" @click="reload">查询</el-button>
+        <el-button :loading="loadingSync" @click="syncRemoteRules">同步设备规则</el-button>
         <el-button @click="resetFilters">重置</el-button>
       </div>
 
@@ -178,6 +179,7 @@ const systemStore = useSystemStore();
 const route = useRoute();
 const router = useRouter();
 const loading = ref(false);
+const loadingSync = ref(false);
 const items = ref<any[]>([]);
 const total = ref(0);
 const page = ref(1);
@@ -278,13 +280,6 @@ async function loadDevices() {
 async function reload() {
   loading.value = true;
   try {
-    if (activeDeviceId.value) {
-      try {
-        await rulesApi.getRemote(activeDeviceId.value);
-      } catch {
-        // Keep showing the last indexed snapshot when device pull fails.
-      }
-    }
     const result: any = await rulesApi.query({
       device_id: activeDeviceId.value || undefined,
       q: filters.q || undefined,
@@ -302,6 +297,25 @@ async function reload() {
     Object.assign(stats, result.stats || {});
   } finally {
     loading.value = false;
+  }
+}
+
+async function syncRemoteRules() {
+  if (!activeDeviceId.value) {
+    ElMessage.warning('请先选择设备');
+    return;
+  }
+  loadingSync.value = true;
+  try {
+    const result: any = await rulesApi.getRemote(activeDeviceId.value);
+    if (result?.ok === false) {
+      ElMessage.error(result.error || '同步设备规则失败');
+      return;
+    }
+    ElMessage.success(`已同步设备规则，当前 ${result?.rules?.length || 0} 条`);
+    await reload();
+  } finally {
+    loadingSync.value = false;
   }
 }
 
