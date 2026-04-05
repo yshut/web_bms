@@ -415,6 +415,46 @@ def _remote_fs_write(path: str, content: bytes, device_id: Optional[str] = None)
     return qt_request({'cmd': 'fs_upload', 'path': path, 'data': b64}, timeout=15.0, device_id=device_id)
 
 
+def _remote_fs_json(cmd: str, payload: Optional[dict] = None, timeout: float = 8.0,
+                    device_id: Optional[str] = None) -> Tuple[bool, dict]:
+    req = {'cmd': cmd}
+    if isinstance(payload, dict):
+        req.update(payload)
+    resp = qt_request(req, timeout=timeout, device_id=device_id)
+    if isinstance(resp, dict) and resp.get('ok'):
+        data = resp.get('data')
+        if isinstance(data, dict):
+            return True, data
+        return True, {'value': data}
+    if isinstance(resp, dict):
+        return False, resp
+    return False, {'ok': False, 'error': 'remote fs request failed'}
+
+
+def _remote_fs_stream(path: str, chunk_size: int = 131072, device_id: Optional[str] = None):
+    offset = 0
+    chunk_size = max(16384, min(int(chunk_size or 131072), 262144))
+    while True:
+        ok, payload = _remote_fs_json(
+            'fs_read_range',
+            {'path': path, 'offset': offset, 'length': chunk_size},
+            timeout=max(10.0, getattr(cfg, 'SOCKET_TIMEOUT', 3.0)),
+            device_id=device_id,
+        )
+        if not ok:
+            raise RuntimeError((payload or {}).get('error') or 'fs_read_range failed')
+        encoded = str((payload or {}).get('data') or '')
+        try:
+            chunk = base64.b64decode(encoded.encode('ascii')) if encoded else b''
+        except Exception as exc:
+            raise RuntimeError(f'base64 decode failed: {exc}')
+        if chunk:
+            yield chunk
+            offset += len(chunk)
+        if (payload or {}).get('eof') or not chunk:
+            break
+
+
 def _load_remote_config_map(paths: list, defaults: dict, device_id: Optional[str] = None, allow_legacy: bool = False):
     ok, payload = _remote_fs_read_best(paths, device_id=device_id)
     if ok:
@@ -577,7 +617,8 @@ def _guess_device_base_dir() -> dict:
     return {"ok": True, "base": UDISK_DIR, "source": "server_default"}
 
 
-def _device_write_file_chunked(dst_path: str, file_obj, total_size: int, chunk_size: int = 131072) -> dict:
+def _device_write_file_chunked(dst_path: str, file_obj, total_size: int, chunk_size: int = 131072,
+                               device_id: Optional[str] = None) -> dict:
     """
     将 HTTP 上传的文件分块写入到设备端文件系统。
     依赖设备端支持命令：fs_write_range(path, offset, truncate, data[b64])
@@ -603,7 +644,7 @@ def _device_write_file_chunked(dst_path: str, file_obj, total_size: int, chunk_s
         last_error = "write failed"
         for attempt in range(3):
             resp = qt_request({"cmd": "fs_write_range", "path": dst_path, "offset": int(offset), "truncate": bool(truncate), "data": b64},
-                              timeout=max(getattr(cfg, 'SOCKET_TIMEOUT', 3.0), 10.0))
+                              timeout=max(getattr(cfg, 'SOCKET_TIMEOUT', 3.0), 10.0), device_id=device_id)
             if resp and resp.get("ok"):
                 break
             last_error = (resp.get("error") if isinstance(resp, dict) else "no response") or "write failed"
@@ -1392,11 +1433,26 @@ def api_can_record_stop():
 
 @app.route('/api/can/config', methods=['GET'])
 def api_can_config():
-    """获取CAN配置信息 — 优先直连设备 HTTP /api/config"""
-    ok, j = _device_proxy_json(DEVICE_DEFAULT_IP, '/api/config', 'GET', timeout=3)
-    if ok and j:
-        return jsonify({"ok": True, "data": j})
-    return jsonify(qt_request({"cmd": "can_get_config"}, timeout=2.0))
+    """获取 CAN 配置信息，优先读取设备远程配置文件。"""
+    device_id = _get_requested_device_id()
+    current, _target_path, source = _load_remote_config_map(_DEVICE_WS_CONFIG_PATHS, _DEVICE_CONFIG_DEFAULTS, device_id=device_id, allow_legacy=True)
+    data = {
+        "can0_bitrate": _to_int(current.get('can0_bitrate'), 500000),
+        "can1_bitrate": _to_int(current.get('can1_bitrate'), 500000),
+        "can_record_dir": current.get('can_record_dir', _DEVICE_CONFIG_DEFAULTS['can_record_dir']),
+        "can_record_max_mb": _to_int(current.get('can_record_max_mb'), 40),
+        "source": source,
+    }
+    if source != 'device':
+        fallback = qt_request({"cmd": "can_get_config"}, timeout=2.0, device_id=device_id)
+        if isinstance(fallback, dict) and fallback.get('ok') and isinstance(fallback.get('data'), dict):
+            fd = fallback.get('data') or {}
+            data.update({
+                "can0_bitrate": int(fd.get("can0_bitrate", fd.get("can0", data["can0_bitrate"])) or data["can0_bitrate"]),
+                "can1_bitrate": int(fd.get("can1_bitrate", fd.get("can1", data["can1_bitrate"])) or data["can1_bitrate"]),
+                "source": "mqtt_runtime",
+            })
+    return jsonify({"ok": True, "data": data})
 
 @app.route('/api/can/set_bitrates', methods=['POST'])
 def api_can_set_bitrates():
@@ -2268,7 +2324,12 @@ def _normalize_uds_state_response(resp: dict) -> dict:
 
 
 def _query_uds_state(timeout: float = 2.0) -> dict:
-    """优先走设备 HTTP API，失败时回退 MQTT。"""
+    """优先走 MQTT 远程命令，失败时回退设备 HTTP。"""
+    device_id = _get_requested_device_id()
+    resp = qt_request({"cmd": "uds_state"}, timeout=timeout, device_id=device_id)
+    normalized = _normalize_uds_state_response(resp)
+    if normalized.get("ok"):
+        return normalized
     try:
         status, data, _ = _device_proxy(DEVICE_DEFAULT_IP, '/api/uds/state', 'GET',
                                          timeout=int(timeout) + 1)
@@ -2277,22 +2338,22 @@ def _query_uds_state(timeout: float = 2.0) -> dict:
             return _normalize_uds_state_response(j)
     except Exception:
         pass
-    return _normalize_uds_state_response(qt_request({"cmd": "uds_state"}, timeout=timeout))
+    return normalized
 
 
 @app.route('/api/uds/set_file', methods=['POST'])
 def api_uds_set_file():
+    device_id = _get_requested_device_id()
     data = request.get_json(silent=True) or {}
     path = (data.get('path') or '').strip()
     if not path:
         return jsonify({"ok": False, "error": "empty path"}), 400
-    # ensure_ascii=False 保留中文原始 UTF-8，避免 \u 转义导致设备 access() 校验失败
-    body = json.dumps({"path": path}, ensure_ascii=False).encode('utf-8')
-    ok, j = _device_proxy_json(DEVICE_DEFAULT_IP, '/api/uds/set_file', 'POST', body,
-                                'application/json; charset=utf-8')
-    if not ok:
-        # MQTT 兜底（不含中文路径的兼容情况）
-        j = qt_request({"cmd": "uds_click_select_file", "path": path})
+    j = qt_request({"cmd": "uds_click_select_file", "path": path}, timeout=5.0, device_id=device_id)
+    if not (isinstance(j, dict) and j.get('ok')):
+        # ensure_ascii=False 保留中文原始 UTF-8，避免 \u 转义导致设备 access() 校验失败
+        body = json.dumps({"path": path}, ensure_ascii=False).encode('utf-8')
+        _ok, j = _device_proxy_json(DEVICE_DEFAULT_IP, '/api/uds/set_file', 'POST', body,
+                                    'application/json; charset=utf-8', timeout=5)
     return jsonify(j)
 
 @app.route('/api/uds/can_apply', methods=['POST'])
@@ -2349,6 +2410,7 @@ def api_uds_config():
         return jsonify({"ok": True, "config": default})
 
     data = request.get_json(silent=True) or {}
+    device_id = _get_requested_device_id()
     iface = str(data.get("iface", default["iface"])).strip() or default["iface"]
     bitrate = int(data.get("bitrate", default["bitrate"]) or default["bitrate"])
     tx_id_str = str(data.get("tx_id", default["tx_id"])).strip().lower().replace("0x", "")
@@ -2364,16 +2426,17 @@ def api_uds_config():
     block_size = int(data.get("block_size", default["block_size"]) or default["block_size"])
     block_size = max(8, min(block_size, 4096))
 
-    # 1) 下发 UDS 参数 — 优先走设备 HTTP API
-    params_body = json.dumps({
-        "iface": iface, "bitrate": bitrate,
-        "tx_id": f"{tx_id:X}", "rx_id": f"{rx_id:X}", "block_size": block_size
-    }).encode()
-    ok1, r1 = _device_proxy_json(DEVICE_DEFAULT_IP, '/api/uds/set_params', 'POST',
-                                   params_body, 'application/json')
-    if not ok1:
-        r1 = qt_request({"cmd": "uds_set_params", "iface": iface,
-                          "tx_id": tx_id, "rx_id": rx_id, "block_size": block_size}, timeout=3.0)
+    # 1) 下发 UDS 参数 — 优先走 MQTT 远程命令
+    r1 = qt_request({"cmd": "uds_set_params", "iface": iface,
+                     "tx_id": tx_id, "rx_id": rx_id, "block_size": block_size},
+                    timeout=3.0, device_id=device_id)
+    if not (isinstance(r1, dict) and r1.get('ok')):
+        params_body = json.dumps({
+            "iface": iface, "bitrate": bitrate,
+            "tx_id": f"{tx_id:X}", "rx_id": f"{rx_id:X}", "block_size": block_size
+        }).encode()
+        _ok1, r1 = _device_proxy_json(DEVICE_DEFAULT_IP, '/api/uds/set_params', 'POST',
+                                      params_body, 'application/json')
     r2 = {"ok": True}  # bitrate handled inside set_params on device
 
     cfg_out = {"iface": iface, "bitrate": bitrate, "tx_id": f"{tx_id:X}", "rx_id": f"{rx_id:X}", "block_size": block_size}
@@ -2398,32 +2461,97 @@ def api_uds_config():
 
 @app.route('/api/uds/upload', methods=['POST'])
 def api_uds_upload():
-    # 将固件文件保存到服务器本地 uploads 目录
+    device_id = _get_requested_device_id()
+    device_ip = _normalize_device_ip(request.form.get('device', DEVICE_DEFAULT_IP))
     if 'file' not in request.files:
         return jsonify({"ok": False, "error": "no file"}), 400
     f = request.files['file']
     name = f.filename or 'firmware.s19'
     safe_name = _sanitize_filename_ascii(name, default_name="firmware.s19")
-    local_path = os.path.join(LOCAL_FS_ROOT, safe_name)
+
+    base = (request.form.get('base') or '').replace('\\', '/').strip()
+    if not base or base.rstrip('/') == '/mnt':
+        gb = _guess_device_base_dir()
+        base = gb.get("base") or DEVICE_FS_DEFAULT
+    if not base.startswith('/mnt'):
+        base = DEVICE_FS_DEFAULT
+    remote_path = posixpath.join(base, safe_name)
+
     try:
-        os.makedirs(LOCAL_FS_ROOT, exist_ok=True)
-        f.save(local_path)
-        size = os.path.getsize(local_path)
-        print(f"UDS固件已保存到服务器: {local_path} ({size/(1024*1024):.2f} MB)")
-        # 尝试通知设备设置文件路径（非关键，失败不影响上传结果）
+        total = 0
         try:
-            setr = qt_request({"cmd": "uds_set_file", "path": local_path}, timeout=3.0)
+            total = int(getattr(f, 'content_length', 0) or 0)
         except Exception:
-            setr = {"ok": False}
-        return jsonify({
-            "ok": True,
-            "path": local_path,
+            total = 0
+        if not total:
+            try:
+                pos = f.stream.tell()
+                f.stream.seek(0, 2)
+                total = int(f.stream.tell())
+                f.stream.seek(pos, 0)
+            except Exception:
+                total = 0
+
+        f.stream.seek(0)
+        resp = _device_write_file_chunked(remote_path, f.stream, total_size=total, chunk_size=128 * 1024, device_id=device_id)
+        if not resp.get('ok'):
+            raise RuntimeError(resp.get('error') or 'remote upload failed')
+
+        setr = qt_request({"cmd": "uds_set_file", "path": remote_path}, timeout=5.0, device_id=device_id)
+        out = dict(resp)
+        out.update({
             "name": safe_name,
-            "size": size,
-            "auto_set_file": bool(setr and setr.get("ok")),
+            "path": remote_path,
+            "size": int(resp.get("written") or total or 0),
+            "auto_set_file": bool(isinstance(setr, dict) and setr.get("ok")),
+            "storage": "device",
         })
-    except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
+        if not out["auto_set_file"]:
+            out["auto_set_error"] = setr.get("error") if isinstance(setr, dict) else "uds_set_file failed"
+        return jsonify(out)
+    except Exception:
+        try:
+            f.stream.seek(0)
+            data = f.read()
+        except Exception as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 500
+        b64 = base64.b64encode(data).decode('ascii')
+        resp = qt_request({"cmd": "fs_upload", "path": remote_path, "data": b64},
+                          timeout=max(getattr(cfg, 'SOCKET_TIMEOUT', 3.0), 30.0),
+                          device_id=device_id)
+        if isinstance(resp, dict) and resp.get('ok'):
+            setr = qt_request({"cmd": "uds_set_file", "path": remote_path}, timeout=5.0, device_id=device_id)
+            return jsonify({
+                "ok": True,
+                "name": safe_name,
+                "path": remote_path,
+                "size": len(data),
+                "auto_set_file": bool(isinstance(setr, dict) and setr.get("ok")),
+                "storage": "device",
+                "fallback": "fs_upload",
+            })
+        # 最后仅在本地可直连设备 HTTP 时兜底
+        try:
+            url = f'http://{device_ip}:8080/api/files/upload'
+            req = urllib.request.Request(url, data=data, method='POST')
+            req.add_header('Content-Type', 'application/octet-stream')
+            req.add_header('Content-Length', str(len(data)))
+            req.add_header('X-File-Path', urllib.parse.quote(remote_path, safe='/:'))
+            req.add_header('Connection', 'close')
+            with urllib.request.urlopen(req, timeout=60) as dev_resp:
+                _ = dev_resp.read()
+            setr = qt_request({"cmd": "uds_set_file", "path": remote_path}, timeout=5.0, device_id=device_id)
+            return jsonify({
+                "ok": True,
+                "name": safe_name,
+                "path": remote_path,
+                "size": len(data),
+                "auto_set_file": bool(isinstance(setr, dict) and setr.get("ok")),
+                "storage": "device",
+                "fallback": "device_http",
+            })
+        except Exception as exc:
+            return jsonify({"ok": False, "error": str(exc), "path": remote_path}), 502
 
 def _api_uds_upload_old_unused():
     # 以下为旧的设备端写入逻辑，已替换为本地保存，保留供参考
@@ -2490,9 +2618,25 @@ def _api_uds_upload_old_unused():
 def api_uds_list():
     """列出设备 /mnt/SDCARD 目录下的固件文件（.s19/.hex/.bin/.mot）。"""
     import urllib.parse
+    device_id = _get_requested_device_id()
     device_ip = _normalize_device_ip(request.args.get('device', DEVICE_DEFAULT_IP))
     base = request.args.get('base', DEVICE_FS_DEFAULT)
     exts = {'.s19', '.hex', '.bin', '.mot', '.srec'}
+    ok_remote, remote_data = _remote_fs_json('uds_list', {'dir': base}, timeout=6.0, device_id=device_id)
+    if ok_remote:
+        files = []
+        for item in (remote_data.get('files') or []):
+            name = str(item or '').strip()
+            if not name:
+                continue
+            files.append({
+                "name": os.path.basename(name),
+                "path": posixpath.join(base, name),
+                "size": 0,
+                "mtime": 0,
+                "source": "device_mqtt",
+            })
+        return jsonify({"ok": True, "files": files, "data": {"files": files}})
     status, data, _ = _device_proxy(device_ip,
         f'/api/files/list?path={urllib.parse.quote(base)}', 'GET', timeout=8)
     try:
@@ -2535,19 +2679,22 @@ def api_uds_state():
 
 @app.route('/api/uds/start', methods=['POST'])
 def api_uds_start():
-    ok, j = _device_proxy_json(DEVICE_DEFAULT_IP, '/api/uds/start', 'POST', b'{}',
-                                'application/json', timeout=15)
-    if not ok:
-        j = qt_request({"cmd": "uds_click_start"},
-                        timeout=max(getattr(cfg, 'SOCKET_TIMEOUT', 3.0), 10.0))
+    device_id = _get_requested_device_id()
+    j = qt_request({"cmd": "uds_click_start"},
+                   timeout=max(getattr(cfg, 'SOCKET_TIMEOUT', 3.0), 10.0),
+                   device_id=device_id)
+    if not (isinstance(j, dict) and j.get('ok')):
+        _ok, j = _device_proxy_json(DEVICE_DEFAULT_IP, '/api/uds/start', 'POST', b'{}',
+                                    'application/json', timeout=15)
     return jsonify(j)
 
 @app.route('/api/uds/stop', methods=['POST'])
 def api_uds_stop():
-    ok, j = _device_proxy_json(DEVICE_DEFAULT_IP, '/api/uds/stop', 'POST', b'{}',
-                                'application/json')
-    if not ok:
-        j = qt_request({"cmd": "uds_click_stop"})
+    device_id = _get_requested_device_id()
+    j = qt_request({"cmd": "uds_click_stop"}, timeout=5.0, device_id=device_id)
+    if not (isinstance(j, dict) and j.get('ok')):
+        _ok, j = _device_proxy_json(DEVICE_DEFAULT_IP, '/api/uds/stop', 'POST', b'{}',
+                                    'application/json')
     return jsonify(j)
 
 @app.route('/api/uds/progress', methods=['GET'])
@@ -2597,13 +2744,24 @@ def _device_proxy_json(device_ip, path, method='GET', body=None, content_type=No
 
 @app.route('/api/fs/base', methods=['GET'])
 def api_fs_base():
-    return jsonify({"ok": True, "base": DEVICE_FS_DEFAULT, "source": "device"})
+    base = _guess_device_base_dir()
+    return jsonify({
+        "ok": True,
+        "base": base.get("base") or DEVICE_FS_DEFAULT,
+        "source": base.get("source") or "device",
+    })
 
 
 @app.route('/api/fs/list', methods=['GET'])
 def api_fs_list():
+    device_id = _get_requested_device_id()
     device_ip = _fs_device_ip()
     path = request.args.get('path', DEVICE_FS_DEFAULT)
+    ok_remote, remote_data = _remote_fs_json('fs_list', {'path': path}, timeout=8.0, device_id=device_id)
+    if ok_remote:
+        if 'path' not in remote_data:
+            remote_data['path'] = path
+        return jsonify(remote_data)
     import urllib.parse
     status, data, ct = _device_proxy(device_ip,
         f'/api/files/list?path={urllib.parse.quote(path)}', 'GET', timeout=8)
@@ -2614,6 +2772,7 @@ def api_fs_list():
 
 @app.route('/api/fs/mkdir', methods=['POST'])
 def api_fs_mkdir():
+    device_id = _get_requested_device_id()
     device_ip = _fs_device_ip()
     req_data = request.get_json(silent=True) or {}
     name = (req_data.get('name') or '').strip()
@@ -2621,41 +2780,50 @@ def api_fs_mkdir():
     if not name:
         return jsonify({"ok": False, "error": "empty name"}), 400
     path = base + '/' + name
-    body = json.dumps({"path": path}, ensure_ascii=False).encode('utf-8')
-    ok, j = _device_proxy_json(device_ip, '/api/files/mkdir', 'POST', body,
-                                'application/json; charset=utf-8')
+    ok, j = _remote_fs_json('fs_mkdir', {'path': path}, timeout=8.0, device_id=device_id)
+    if not ok:
+        body = json.dumps({"path": path}, ensure_ascii=False).encode('utf-8')
+        _ok, j = _device_proxy_json(device_ip, '/api/files/mkdir', 'POST', body,
+                                    'application/json; charset=utf-8')
     return jsonify(j)
 
 
 @app.route('/api/fs/delete', methods=['POST'])
 def api_fs_delete():
+    device_id = _get_requested_device_id()
     device_ip = _fs_device_ip()
     req_data = request.get_json(silent=True) or {}
     path = (req_data.get('path') or '').strip()
     if not path:
         return jsonify({"ok": False, "error": "no path"}), 400
-    body = json.dumps({"path": path}, ensure_ascii=False).encode('utf-8')
-    ok, j = _device_proxy_json(device_ip, '/api/files/delete', 'POST', body,
-                                'application/json; charset=utf-8')
+    ok, j = _remote_fs_json('fs_delete', {'path': path}, timeout=8.0, device_id=device_id)
+    if not ok:
+        body = json.dumps({"path": path}, ensure_ascii=False).encode('utf-8')
+        _ok, j = _device_proxy_json(device_ip, '/api/files/delete', 'POST', body,
+                                    'application/json; charset=utf-8')
     return jsonify(j)
 
 
 @app.route('/api/fs/rename', methods=['POST'])
 def api_fs_rename():
+    device_id = _get_requested_device_id()
     device_ip = _fs_device_ip()
     req_data = request.get_json(silent=True) or {}
     path = (req_data.get('path') or '').strip()
     new_name = (req_data.get('new_name') or '').strip()
     if not path or not new_name:
         return jsonify({"ok": False, "error": "invalid args"}), 400
-    body = json.dumps({"path": path, "new_name": new_name}, ensure_ascii=False).encode('utf-8')
-    ok, j = _device_proxy_json(device_ip, '/api/files/rename', 'POST', body,
-                                'application/json; charset=utf-8')
+    ok, j = _remote_fs_json('fs_rename', {'path': path, 'new_name': new_name}, timeout=8.0, device_id=device_id)
+    if not ok:
+        body = json.dumps({"path": path, "new_name": new_name}, ensure_ascii=False).encode('utf-8')
+        _ok, j = _device_proxy_json(device_ip, '/api/files/rename', 'POST', body,
+                                    'application/json; charset=utf-8')
     return jsonify(j)
 
 
 @app.route('/api/fs/upload', methods=['POST'])
 def api_fs_upload():
+    device_id = _get_requested_device_id()
     device_ip = _fs_device_ip()
     base = (request.form.get('base') or request.form.get('path') or DEVICE_FS_DEFAULT).rstrip('/')
     if 'file' not in request.files:
@@ -2664,6 +2832,24 @@ def api_fs_upload():
     name = os.path.basename((f.filename or 'upload.bin').replace('\\', '/')) or 'upload.bin'
     file_path = base + '/' + name
     try:
+        total = 0
+        try:
+            total = int(getattr(f, 'content_length', 0) or 0)
+        except Exception:
+            total = 0
+        if not total:
+            try:
+                pos = f.stream.tell()
+                f.stream.seek(0, 2)
+                total = int(f.stream.tell())
+                f.stream.seek(pos, 0)
+            except Exception:
+                total = 0
+        f.stream.seek(0)
+        resp = _device_write_file_chunked(file_path, f.stream, total_size=total, chunk_size=128 * 1024, device_id=device_id)
+        if isinstance(resp, dict) and resp.get('ok'):
+            return jsonify(resp)
+        f.stream.seek(0)
         data = f.read()
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
@@ -2688,11 +2874,32 @@ def api_fs_upload():
 def api_fs_download():
     from flask import Response
     import urllib.parse, urllib.request, urllib.error
+    device_id = _get_requested_device_id()
     device_ip = _fs_device_ip()
     path = request.args.get('path', '').strip()
     if not path:
         return jsonify({"ok": False, "error": "no path"}), 400
     fname = os.path.basename(path)
+    ok_stat, stat_data = _remote_fs_json('fs_stat', {'path': path}, timeout=6.0, device_id=device_id)
+    if ok_stat:
+        try:
+            headers = {'Content-Type': 'application/octet-stream', 'Cache-Control': 'no-store'}
+            try:
+                fname.encode('latin-1')
+                headers['Content-Disposition'] = f'attachment; filename="{fname}"'
+            except (UnicodeEncodeError, AttributeError):
+                fname_encoded = urllib.parse.quote(fname, safe='')
+                headers['Content-Disposition'] = f"attachment; filename*=UTF-8''{fname_encoded}"
+            size_value = stat_data.get('size')
+            if isinstance(size_value, int) and size_value >= 0:
+                headers['Content-Length'] = str(size_value)
+            return Response(
+                stream_with_context(_remote_fs_stream(path, device_id=device_id)),
+                status=200,
+                headers=headers,
+            )
+        except Exception:
+            pass
     url = f"http://{device_ip}:8080/api/files/download?path={urllib.parse.quote(path)}"
     req = urllib.request.Request(url, method='GET')
     req.add_header('Connection', 'close')
@@ -2933,6 +3140,7 @@ def print_startup_info():
 
 import urllib.request
 import urllib.error
+import urllib.parse
 
 _DEVICE_PROXY_RETRYABLE_METHODS = {'GET', 'HEAD'}
 
@@ -3216,10 +3424,26 @@ def device_can_config():
     - GET  : 从设备读取 CAN 配置，缓存到 state_store 后返回
     - POST : 将 CAN 配置写入设备，同时更新 state_store 缓存
     """
+    device_id = _get_requested_device_id()
     device_ip = _normalize_device_ip(request.args.get('device', DEVICE_DEFAULT_IP))
 
     if request.method == 'GET':
-        # 1. 先读设备
+        current, _target_path, source = _load_remote_config_map(_DEVICE_WS_CONFIG_PATHS, _DEVICE_CONFIG_DEFAULTS, device_id=device_id, allow_legacy=True)
+        if source == 'device':
+            cfg = {
+                "can0_bitrate": _to_int(current.get("can0_bitrate"), _CAN_CONFIG_DEFAULTS["can0_bitrate"]),
+                "can1_bitrate": _to_int(current.get("can1_bitrate"), _CAN_CONFIG_DEFAULTS["can1_bitrate"]),
+                "can_record_dir": current.get("can_record_dir", _CAN_CONFIG_DEFAULTS["can_record_dir"]),
+                "can_record_max_mb": _to_int(current.get("can_record_max_mb"), _CAN_CONFIG_DEFAULTS["can_record_max_mb"]),
+            }
+            try:
+                if _state_store:
+                    _state_store.set("device.can_config", cfg)
+            except Exception:
+                pass
+            return jsonify({"ok": True, "config": cfg, "source": source})
+
+        # 1. 退回设备 HTTP /api/config
         ok, j = _device_proxy_json(device_ip, '/api/config', 'GET', timeout=4)
         if ok and isinstance(j, dict):
             cfg = {
@@ -3233,7 +3457,7 @@ def device_can_config():
                     _state_store.set("device.can_config", cfg)
             except Exception:
                 pass
-            return jsonify({"ok": True, "config": cfg, "source": "device"})
+            return jsonify({"ok": True, "config": cfg, "source": "device_http"})
 
         # 2. 设备不可达 — 返回缓存
         try:
@@ -3254,26 +3478,38 @@ def device_can_config():
         "can_record_dir":   str(data.get("can_record_dir",   _CAN_CONFIG_DEFAULTS["can_record_dir"])),
         "can_record_max_mb":int(data.get("can_record_max_mb") or _CAN_CONFIG_DEFAULTS["can_record_max_mb"]),
     }
-    body = json.dumps(cfg).encode()
-    ok, j = _device_proxy_json(device_ip, '/api/config', 'POST', body, 'application/json', timeout=6)
-    if ok:
-        # 成功后回读实际值
-        ok2, j2 = _device_proxy_json(device_ip, '/api/config', 'GET', timeout=4)
-        if ok2 and isinstance(j2, dict):
-            cfg.update({
-                "can0_bitrate":     int(j2.get("can0_bitrate") or cfg["can0_bitrate"]),
-                "can1_bitrate":     int(j2.get("can1_bitrate") or cfg["can1_bitrate"]),
-                "can_record_dir":   j2.get("can_record_dir",   cfg["can_record_dir"]),
-                "can_record_max_mb":int(j2.get("can_record_max_mb") or cfg["can_record_max_mb"]),
-            })
+    current, target_path, _source = _load_remote_config_map(_DEVICE_WS_CONFIG_PATHS, _DEVICE_CONFIG_DEFAULTS, device_id=device_id, allow_legacy=True)
+    updated = dict(current)
+    updated['can0_bitrate'] = str(cfg['can0_bitrate'])
+    updated['can1_bitrate'] = str(cfg['can1_bitrate'])
+    updated['can_record_dir'] = cfg['can_record_dir']
+    updated['can_record_max_mb'] = str(cfg['can_record_max_mb'])
+    ordered_keys = [
+        'transport_mode', 'ws_host', 'ws_port', 'ws_path', 'mqtt_host', 'mqtt_port',
+        'mqtt_client_id', 'mqtt_username', 'mqtt_password', 'mqtt_keepalive_s', 'mqtt_qos',
+        'mqtt_topic_prefix', 'can0_bitrate', 'can1_bitrate', 'can_record_dir', 'can_record_max_mb'
+    ]
+    content = _serialize_kv_config(updated, ordered_keys).encode('utf-8')
+    remote_resp = _remote_fs_write(target_path, content, device_id=device_id)
+    ok = bool(isinstance(remote_resp, dict) and remote_resp.get('ok'))
+    can_restart_resp = qt_request({"cmd": "can_set_bitrates", "can1": cfg["can0_bitrate"], "can2": cfg["can1_bitrate"]},
+                                  timeout=4.0, device_id=device_id)
+    can_restarted = bool(isinstance(can_restart_resp, dict) and can_restart_resp.get('ok'))
+    if ok or can_restarted:
         try:
             if _state_store:
                 _state_store.set("device.can_config", cfg)
         except Exception:
             pass
-    can_restarted = bool(j.get("can_restarted")) if isinstance(j, dict) else False
+    if not ok:
+        body = json.dumps(cfg).encode()
+        _http_ok, http_resp = _device_proxy_json(device_ip, '/api/config', 'POST', body, 'application/json', timeout=6)
+        if _http_ok:
+            ok = True
+            remote_resp = http_resp
+            can_restarted = bool(http_resp.get("can_restarted")) if isinstance(http_resp, dict) else can_restarted
     return jsonify({"ok": ok, "config": cfg, "can_restarted": can_restarted,
-                    "device": j})
+                    "device": remote_resp, "can_apply": can_restart_resp})
 
 # ===========================================================
 
@@ -3439,20 +3675,20 @@ def api_rules_import_excel():
     push = request.args.get('push', '1') != '0'
 
     if push:
-        # 推送到设备
-        device_ip = getattr(cfg, 'DEVICE_IP', '192.168.100.100')
-        json_str  = json.dumps(rules_obj, ensure_ascii=False)
-        ok, resp = _device_proxy_json(
-            device_ip, '/api/rules',
-            method='POST',
-            body=json_str.encode('utf-8'),
-            content_type='application/json'
-        )
+        device_id = _get_requested_device_id()
+        json_str  = json.dumps(rules_obj, ensure_ascii=False, indent=2)
+        target_path = _DEVICE_RULES_PATHS[0]
+        ok_read, payload = _remote_fs_read_best(_DEVICE_RULES_PATHS, device_id=device_id)
+        if ok_read and isinstance(payload, dict) and payload.get('path'):
+            target_path = payload['path']
+        resp = _remote_fs_write(target_path, json_str.encode('utf-8'), device_id=device_id)
+        ok = bool(isinstance(resp, dict) and resp.get('ok'))
         if ok:
             return jsonify({
                 "ok": True,
                 "rule_count": rule_count,
                 "device_response": resp,
+                "saved_path": target_path,
                 "message": f"已成功导入 {rule_count} 条规则并推送到设备"
             })
         else:
@@ -3492,11 +3728,14 @@ def api_rules_export_excel():
         with open(cache, 'r', encoding='utf-8') as rf:
             rules_obj = json.load(rf)
     else:
-        # 尝试从设备获取
-        device_ip = getattr(cfg, 'DEVICE_IP', '192.168.100.100')
-        ok, rules_obj = _device_proxy_json(device_ip, '/api/rules', method='GET')
+        device_id = _get_requested_device_id()
+        ok, payload = _remote_fs_read_best(_DEVICE_RULES_PATHS, device_id=device_id)
         if not ok:
             return jsonify({"ok": False, "error": "本地无规则缓存且设备不可达"}), 503
+        try:
+            rules_obj = json.loads(payload['content'].decode('utf-8', errors='ignore') or '{}')
+        except Exception as exc:
+            return jsonify({"ok": False, "error": f"设备规则文件无效: {exc}"}), 500
 
     import tempfile
     with tempfile.NamedTemporaryFile(suffix='.xlsx', delete=False) as tmp:
@@ -3529,14 +3768,16 @@ def api_rules_push_local():
         return jsonify({"ok": False, "error": "本地无规则缓存"}), 404
     with open(cache, 'r', encoding='utf-8') as rf:
         rules_obj = json.load(rf)
-    device_ip = getattr(cfg, 'DEVICE_IP', '192.168.100.100')
-    ok, resp = _device_proxy_json(
-        device_ip, '/api/rules', method='POST',
-        body=json.dumps(rules_obj, ensure_ascii=False).encode('utf-8'),
-        content_type='application/json'
-    )
+    device_id = _get_requested_device_id()
+    target_path = _DEVICE_RULES_PATHS[0]
+    ok_read, payload = _remote_fs_read_best(_DEVICE_RULES_PATHS, device_id=device_id)
+    if ok_read and isinstance(payload, dict) and payload.get('path'):
+        target_path = payload['path']
+    resp = _remote_fs_write(target_path, json.dumps(rules_obj, ensure_ascii=False, indent=2).encode('utf-8'), device_id=device_id)
+    ok = bool(isinstance(resp, dict) and resp.get('ok'))
     return jsonify({"ok": ok, "device_response": resp,
-                    "rule_count": len(rules_obj.get("rules", []))})
+                    "rule_count": len(rules_obj.get("rules", [])),
+                    "saved_path": target_path})
 
 @app.route('/rules')
 def rules_page():

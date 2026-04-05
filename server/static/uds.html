@@ -353,7 +353,7 @@
           try { j = JSON.parse(xhr.responseText || '{}'); } catch (e) {}
           if (j && j.ok) {
             const sizeMB = j.size ? (' (' + (j.size/1024/1024).toFixed(2) + ' MB)') : '';
-            qs('uploadMsg').textContent = '上传成功，已保存到服务器' + sizeMB;
+            qs('uploadMsg').textContent = '上传成功，已保存到设备存储' + sizeMB;
             if (j.path) {
               s19PathEl.value = String(j.path);
             }
@@ -401,9 +401,9 @@
           qs('pickerInfo').textContent = '获取文件列表失败：' + JSON.stringify(j);
           return;
         }
-        qs('pickerInfo').textContent = files.length ? ('共找到 ' + files.length + ' 个固件文件') : '服务器 uploads 目录暂无固件文件';
+        qs('pickerInfo').textContent = files.length ? ('共找到 ' + files.length + ' 个固件文件') : '设备存储中暂无固件文件';
         if (!files.length) {
-          qs('pickerList').innerHTML = '<div class="picker-empty">请先通过"选择固件"上传 .s19/.hex/.bin 文件</div>';
+          qs('pickerList').innerHTML = '<div class="picker-empty">请先上传 .s19/.hex/.bin 文件到设备存储</div>';
           return;
         }
         const listEl = qs('pickerList');
