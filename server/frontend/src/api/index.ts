@@ -50,7 +50,13 @@ export const canApi = {
   sendFrame: (text: string) => api.post('/can/send', { text }),
   setForward: (enabled: boolean) => api.post('/can/forward', { enabled }),
   setServer: (host: string, port: number) => api.post('/can/server', { host, port }),
-  getFrames: (limit = 50) => api.get(`/can/frames?limit=${limit}`),
+  getFrames: (limit = 50, deviceId?: string) =>
+    api.get('/can/frames', {
+      params: {
+        limit,
+        ...(deviceId ? { device_id: deviceId } : {}),
+      },
+    }),
   getLiveData: () => api.get('/can/live_data'),
   clearCache: () => api.post('/can/cache/clear'),
   getCacheStatus: () => api.get('/can/cache/status'),

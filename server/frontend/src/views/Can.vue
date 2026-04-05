@@ -1,53 +1,223 @@
 <template>
-  <div class="can-monitor">
+  <div class="can-page">
+    <el-card shadow="hover">
+      <div class="toolbar">
+        <el-select
+          v-model="selectedDeviceId"
+          clearable
+          filterable
+          placeholder="选择设备"
+          class="device-select"
+          @change="onDeviceChange"
+        >
+          <el-option
+            v-for="device in deviceOptions"
+            :key="device"
+            :label="device"
+            :value="device"
+          />
+        </el-select>
+        <el-select v-model="limit" style="width: 120px" @change="refreshFrames">
+          <el-option label="50 帧" :value="50" />
+          <el-option label="100 帧" :value="100" />
+          <el-option label="200 帧" :value="200" />
+          <el-option label="500 帧" :value="500" />
+        </el-select>
+        <el-input
+          v-model="filterText"
+          placeholder="过滤 ID / 接口 / 数据"
+          clearable
+          class="grow"
+        />
+        <el-switch v-model="autoRefresh" active-text="自动刷新" />
+        <el-button type="primary" :loading="running" @click="startMonitor">启动</el-button>
+        <el-button @click="stopMonitor">停止</el-button>
+        <el-button @click="refreshFrames">刷新</el-button>
+        <el-button @click="clearFrames">清空</el-button>
+      </div>
+
+      <div class="status-bar">
+        <el-tag type="info">设备: {{ activeDeviceId || '默认设备' }}</el-tag>
+        <el-tag :type="running ? 'success' : 'info'">{{ running ? '监控中' : '已停止' }}</el-tag>
+        <el-tag type="info">来源 {{ source }}</el-tag>
+        <span class="meta">显示 {{ filteredFrames.length }} / 缓存 {{ frames.length }}</span>
+        <span class="meta">最后刷新 {{ lastUpdatedText }}</span>
+      </div>
+    </el-card>
+
     <el-card shadow="hover">
       <template #header>
-        <div class="card-header">
-          <span>CAN监控</span>
-          <div>
-            <el-button type="primary" @click="startMonitor">启动</el-button>
-            <el-button @click="stopMonitor">停止</el-button>
-            <el-button @click="clearFrames">清空</el-button>
-          </div>
+        <div class="card-head">
+          <span>CAN 帧</span>
+          <span class="meta">最多保留 500 行，避免浏览器堆积</span>
         </div>
       </template>
-      
-      <el-table :data="frames" style="width: 100%" max-height="600">
-        <el-table-column prop="timestamp" label="时间" width="180" />
-        <el-table-column prop="id" label="ID" width="120" />
-        <el-table-column prop="data" label="数据" />
-        <el-table-column prop="channel" label="通道" width="100" />
+
+      <el-table
+        :data="filteredFrames"
+        v-loading="loading"
+        size="small"
+        style="width: 100%"
+        max-height="720"
+      >
+        <el-table-column prop="timestamp" label="时间" min-width="160">
+          <template #default="{ row }">{{ formatTimestamp(row.timestamp) }}</template>
+        </el-table-column>
+        <el-table-column label="接口" width="90">
+          <template #default="{ row }">{{ row.iface || row.channel || '-' }}</template>
+        </el-table-column>
+        <el-table-column label="ID" width="120">
+          <template #default="{ row }">{{ formatId(row.id) }}</template>
+        </el-table-column>
+        <el-table-column label="DLC" width="70">
+          <template #default="{ row }">{{ frameBytes(row).length }}</template>
+        </el-table-column>
+        <el-table-column label="数据" min-width="320">
+          <template #default="{ row }">{{ formatData(row) }}</template>
+        </el-table-column>
       </el-table>
     </el-card>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue';
-import { canApi } from '@/api';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { ElMessage } from 'element-plus';
+import { useRoute, useRouter } from 'vue-router';
+import { canApi, deviceApi } from '@/api';
+import { useSystemStore } from '@/stores/system';
 
+type DeviceListResponse = {
+  devices?: string[];
+  history?: string[];
+  current_device_id?: string | null;
+};
+
+const route = useRoute();
+const router = useRouter();
+const systemStore = useSystemStore();
+const loading = ref(false);
+const running = ref(false);
+const autoRefresh = ref(true);
+const limit = ref(100);
+const filterText = ref('');
+const source = ref('device_cmd');
+const lastUpdated = ref(0);
 const frames = ref<any[]>([]);
+const selectedDeviceId = ref('');
+const devices = ref<string[]>([]);
+let timer: number | null = null;
+
+const deviceOptions = computed(() => {
+  const merged = [...devices.value, ...(systemStore.history || [])];
+  return merged.filter((device, index) => merged.indexOf(device) === index);
+});
+
+const activeDeviceId = computed(() => selectedDeviceId.value.trim() || '');
+
+const filteredFrames = computed(() => {
+  const keyword = filterText.value.trim().toUpperCase();
+  if (!keyword) return frames.value;
+  return frames.value.filter((row) => {
+    const iface = String(row.iface || row.channel || '').toUpperCase();
+    const id = formatId(row.id).toUpperCase();
+    const data = formatData(row).toUpperCase();
+    return iface.includes(keyword) || id.includes(keyword) || data.includes(keyword);
+  });
+});
+
+const lastUpdatedText = computed(() => {
+  if (!lastUpdated.value) return '-';
+  return new Date(lastUpdated.value).toLocaleTimeString();
+});
+
+function frameBytes(row: any): number[] {
+  if (Array.isArray(row?.data)) return row.data;
+  if (typeof row?.data === 'string') {
+    return row.data.split(/\s+/).filter(Boolean).map((item: string) => Number.parseInt(item, 16)).filter((item: number) => Number.isFinite(item));
+  }
+  return [];
+}
+
+function formatId(id: string | number) {
+  const num = typeof id === 'string' && id.startsWith('0x')
+    ? Number.parseInt(id, 16)
+    : Number(id || 0);
+  return `0x${(num >>> 0).toString(16).toUpperCase()}`;
+}
+
+function formatData(row: any) {
+  return frameBytes(row)
+    .map((item) => item.toString(16).toUpperCase().padStart(2, '0'))
+    .join(' ');
+}
+
+function formatTimestamp(value: number | string) {
+  const num = Number(value || 0);
+  if (!num) return '-';
+  const ts = num > 1e12 ? num : num * 1000;
+  return new Date(ts).toLocaleTimeString();
+}
+
+async function syncRoute(deviceId: string) {
+  const query = { ...route.query } as Record<string, string>;
+  if (deviceId) query.device_id = deviceId;
+  else delete query.device_id;
+  await router.replace({ query });
+}
+
+async function loadDevices() {
+  const result = await deviceApi.list() as DeviceListResponse;
+  devices.value = [...(result.devices || []), ...(result.history || [])];
+  if (!selectedDeviceId.value) {
+    selectedDeviceId.value = String(route.query.device_id || result.current_device_id || systemStore.deviceId || '').trim();
+    if (selectedDeviceId.value) await syncRoute(selectedDeviceId.value);
+  }
+}
+
+async function refreshFrames() {
+  loading.value = true;
+  try {
+    const result: any = await canApi.getFrames(limit.value, activeDeviceId.value || undefined);
+    const nextFrames = result?.data?.frames || result?.frames || [];
+    frames.value = Array.isArray(nextFrames) ? nextFrames.slice(-500).reverse() : [];
+    source.value = result?.source || 'device_cmd';
+    lastUpdated.value = Date.now();
+  } finally {
+    loading.value = false;
+  }
+}
+
+function stopPolling() {
+  if (timer != null) {
+    window.clearInterval(timer);
+    timer = null;
+  }
+}
+
+function startPolling() {
+  stopPolling();
+  timer = window.setInterval(() => {
+    if (autoRefresh.value) refreshFrames();
+  }, 1000);
+}
 
 async function startMonitor() {
-  try {
-    const result: any = await canApi.start();
-    if (result.ok) {
-      ElMessage.success('CAN监控已启动');
-    }
-  } catch (error) {
-    ElMessage.error('启动失败');
+  const result: any = await canApi.start();
+  if (result?.ok) {
+    running.value = true;
+    ElMessage.success('CAN 监控已启动');
+    await refreshFrames();
+    startPolling();
   }
 }
 
 async function stopMonitor() {
-  try {
-    const result: any = await canApi.stop();
-    if (result.ok) {
-      ElMessage.success('CAN监控已停止');
-    }
-  } catch (error) {
-    ElMessage.error('停止失败');
+  stopPolling();
+  const result: any = await canApi.stop();
+  if (result?.ok) {
+    running.value = false;
+    ElMessage.success('CAN 监控已停止');
   }
 }
 
@@ -55,13 +225,60 @@ async function clearFrames() {
   frames.value = [];
   await canApi.clearCache();
 }
+
+async function onDeviceChange(value: string) {
+  selectedDeviceId.value = value || '';
+  await syncRoute(selectedDeviceId.value);
+  await refreshFrames();
+}
+
+watch(autoRefresh, (enabled) => {
+  if (!running.value) return;
+  if (enabled) startPolling();
+  else stopPolling();
+});
+
+onMounted(async () => {
+  selectedDeviceId.value = String(route.query.device_id || systemStore.deviceId || '').trim();
+  await loadDevices();
+  await refreshFrames();
+});
+
+onBeforeUnmount(() => {
+  stopPolling();
+});
 </script>
 
 <style scoped>
-.card-header {
+.can-page {
+  display: grid;
+  gap: 16px;
+}
+
+.toolbar,
+.status-bar,
+.card-head {
   display: flex;
-  justify-content: space-between;
+  gap: 12px;
   align-items: center;
+  flex-wrap: wrap;
+}
+
+.card-head {
+  justify-content: space-between;
+}
+
+.device-select {
+  width: 260px;
+}
+
+.grow {
+  min-width: 240px;
+  flex: 1 1 280px;
+}
+
+.meta {
+  color: #6b7280;
+  font-size: 13px;
 }
 </style>
-

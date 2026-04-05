@@ -446,6 +446,16 @@ table tr:hover td{background:#1e293b55}
 
 <!-- ===== CAN 监控 ===== -->
 <div id="tab-mon" class="tab">
+  <div class="card">
+    <h3>监控页迁移中</h3>
+    <p style="color:var(--txt2);line-height:1.7;margin-bottom:12px">
+      新版 CAN 监控页已迁移到前后端分离控制台，支持设备切换、受控轮询和表格虚拟滚动，避免旧页面持续追加 DOM 导致浏览器卡顿。
+    </p>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn btn-p" onclick="openConsoleCan()">打开新 CAN 监控页</button>
+      <button class="btn btn-s" onclick="toggleMon()">继续使用旧版监控</button>
+    </div>
+  </div>
   <div style="display:flex;gap:8px;margin-bottom:12px;align-items:center;flex-wrap:wrap">
     <button class="btn btn-p" id="mon-btn" onclick="toggleMon()">▶ 开始监控</button>
     <button class="btn btn-s" onclick="clearMon()">清空</button>
@@ -504,6 +514,12 @@ function openConsoleRules() {
 }
 function openConsoleConfig() {
   var url = '/console/device-config-v2';
+  if(gDeviceId) url += '?device_id=' + encodeURIComponent(gDeviceId);
+  if(gDeviceIp) url += (url.indexOf('?') >= 0 ? '&' : '?') + 'device=' + encodeURIComponent(gDeviceIp);
+  window.location.href = url;
+}
+function openConsoleCan() {
+  var url = '/console/can';
   if(gDeviceId) url += '?device_id=' + encodeURIComponent(gDeviceId);
   if(gDeviceIp) url += (url.indexOf('?') >= 0 ? '&' : '?') + 'device=' + encodeURIComponent(gDeviceIp);
   window.location.href = url;
@@ -613,7 +629,7 @@ function sw(n, b) {
   if(n==='net') loadNet();
   if(n==='wifi') loadWifi();
   if(n==='rules' && gLegacyRulesEnabled) loadRules();
-  if(n==='mon') startMon();
+  if(n==='mon') stopMon();
 }
 
 function tDhcp() {
@@ -1319,10 +1335,17 @@ async function delRule(i) {
 
 /* ===== CAN 监控 ===== */
 var gMonSeen = 0;
+function stopMon() {
+  if(gMonRunning) {
+    clearInterval(gMonTimer);
+    gMonTimer = null;
+    gMonRunning = false;
+  }
+  document.getElementById('mon-btn').textContent='▶ 开始监控';
+}
 function toggleMon() {
   if(gMonRunning) {
-    clearInterval(gMonTimer); gMonTimer=null; gMonRunning=false;
-    document.getElementById('mon-btn').textContent='▶ 开始监控';
+    stopMon();
   } else {
     gMonRunning=true;
     document.getElementById('mon-btn').textContent='⏹ 停止监控';
