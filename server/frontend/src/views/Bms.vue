@@ -5,6 +5,7 @@
         <el-button type="primary" :loading="loading" @click="reload">刷新</el-button>
         <el-button :href="bmsApi.exportUrl" tag="a">导出 CSV</el-button>
         <span class="meta">最后更新 {{ lastUpdatedText }}</span>
+        <span class="meta">更新间隔 {{ lastAgeText }}</span>
         <span class="meta">实时流 {{ streamConnected ? '已连接' : '重连中' }}</span>
       </div>
     </el-card>
@@ -15,6 +16,18 @@
       <el-card shadow="hover"><div class="metric"><span>信号数</span><strong>{{ signalRows.length }}</strong></div></el-card>
       <el-card shadow="hover"><div class="metric"><span>告警数</span><strong>{{ alerts.length }}</strong></div></el-card>
     </div>
+
+    <el-card v-if="lifeSignal" shadow="hover">
+      <template #header><span>关键实时信号</span></template>
+      <div class="live-grid">
+        <div class="live-card">
+          <span class="live-label">Local_LifeSignal</span>
+          <strong class="live-value">{{ lifeSignal.value }}</strong>
+          <span class="live-meta">{{ lifeSignal.ts_text }}</span>
+          <span class="live-meta">距今 {{ formatAge(lifeSignal.ts) }}</span>
+        </div>
+      </div>
+    </el-card>
 
     <el-card shadow="hover">
       <template #header><span>最新信号</span></template>
@@ -79,16 +92,33 @@ const signalRows = computed(() => {
   return [...rows].sort((a: any, b: any) => Number(b?.ts || 0) - Number(a?.ts || 0));
 });
 
+const lifeSignal = computed(() => signalRows.value.find((row: any) => row?.signal_name === 'Local_LifeSignal') || null);
+
 const lastUpdatedText = computed(() => {
   if (!lastUpdated.value) return '-';
-  return new Date(lastUpdated.value).toLocaleTimeString();
+  return formatTs(lastUpdated.value, true);
 });
 
-function formatTs(value: any) {
+const lastAgeText = computed(() => formatAge(lastUpdated.value > 0 ? lastUpdated.value / 1000 : 0));
+
+function formatTs(value: any, isMs = false) {
   const num = Number(value || 0);
   if (!num) return '-';
-  const ts = num > 1e12 ? num : num * 1000;
-  return new Date(ts).toLocaleTimeString();
+  const ts = isMs ? num : (num > 1e12 ? num : num * 1000);
+  const date = new Date(ts);
+  const hh = String(date.getHours()).padStart(2, '0');
+  const mm = String(date.getMinutes()).padStart(2, '0');
+  const ss = String(date.getSeconds()).padStart(2, '0');
+  const mmm = String(date.getMilliseconds()).padStart(3, '0');
+  return `${hh}:${mm}:${ss}.${mmm}`;
+}
+
+function formatAge(tsSeconds: number) {
+  const num = Number(tsSeconds || 0);
+  if (!num) return '-';
+  const diffMs = Math.max(0, Date.now() - num * 1000);
+  if (diffMs < 1000) return `${diffMs} ms`;
+  return `${(diffMs / 1000).toFixed(2)} s`;
 }
 
 function normalizeSignalRows(value: any): any[] {
@@ -277,6 +307,35 @@ onBeforeUnmount(() => {
 .meta {
   color: #606266;
   font-size: 13px;
+}
+
+.live-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.live-card {
+  display: grid;
+  gap: 6px;
+  padding: 14px;
+  border-radius: 10px;
+  background: #f5f7fa;
+}
+
+.live-label {
+  color: #606266;
+  font-size: 13px;
+}
+
+.live-value {
+  font-size: 32px;
+  line-height: 1;
+}
+
+.live-meta {
+  color: #909399;
+  font-size: 12px;
 }
 
 .metric {
