@@ -10,8 +10,7 @@
       </div>
 
       <div class="sidebar-status">
-        <div class="status-chip">
-          <span class="dot" :class="{ online: systemStore.isOnline }"></span>
+        <div class="status-chip status-pulse" :class="systemStore.isOnline ? 'status-pulse--good' : 'status-pulse--danger'">
           <span>{{ systemStore.isOnline ? '设备在线' : '等待设备' }}</span>
         </div>
         <p>{{ systemStore.deviceId || '未绑定设备' }}</p>
@@ -49,7 +48,9 @@
           </div>
           <div class="header-metric">
             <span>连接</span>
-            <strong :class="{ online: systemStore.isOnline }">{{ systemStore.isOnline ? 'ONLINE' : 'OFFLINE' }}</strong>
+            <strong class="status-pulse" :class="systemStore.isOnline ? 'status-pulse--good' : 'status-pulse--danger'">
+              {{ systemStore.isOnline ? 'ONLINE' : 'OFFLINE' }}
+            </strong>
           </div>
           <span v-if="systemStore.deviceId" class="device-info">
             {{ systemStore.deviceId }}
@@ -194,19 +195,6 @@ onMounted(async () => {
   font-size: 13px;
 }
 
-.dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 999px;
-  background: rgba(255, 107, 125, 0.9);
-  box-shadow: 0 0 0 6px rgba(255, 107, 125, 0.12);
-}
-
-.dot.online {
-  background: rgba(25, 211, 162, 0.95);
-  box-shadow: 0 0 0 6px rgba(25, 211, 162, 0.12);
-}
-
 .sidebar-menu {
   border-right: none;
   display: grid;
@@ -283,10 +271,6 @@ onMounted(async () => {
 .header-metric strong {
   color: #eef5ff;
   font-size: 13px;
-}
-
-.header-metric strong.online {
-  color: #42e2bd;
 }
 
 .device-info {

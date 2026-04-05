@@ -28,6 +28,7 @@
       <div class="status-bar">
         <el-tag type="info">设备: {{ activeDeviceId || '默认设备' }}</el-tag>
         <span class="meta">Base {{ baseDir }}</span>
+        <span class="meta">当前 {{ currentPath }}</span>
         <span class="meta" v-if="uploading">{{ uploadStatus }}</span>
       </div>
 
@@ -59,20 +60,29 @@
         </el-table-column>
         <el-table-column label="操作" width="240" fixed="right">
           <template #default="{ row }">
-            <div class="actions">
+            <div class="actions row-actions">
               <el-button v-if="row.is_dir" link type="primary" @click="enterDir(row)">进入</el-button>
               <el-button v-else link type="primary" @click="download(row)">下载</el-button>
-              <el-button link @click="renamePath(row)">重命名</el-button>
-              <el-popconfirm
-                title="确认删除该文件或目录？"
-                confirm-button-text="删除"
-                cancel-button-text="取消"
-                @confirm="removePath(row)"
-              >
-                <template #reference>
-                  <el-button link type="danger">删除</el-button>
+              <el-dropdown trigger="click">
+                <el-button link class="more-action">更多</el-button>
+                <template #dropdown>
+                  <el-dropdown-menu>
+                    <el-dropdown-item @click="renamePath(row)">重命名</el-dropdown-item>
+                    <el-dropdown-item divided class="danger-item">
+                      <el-popconfirm
+                        title="确认删除该文件或目录？"
+                        confirm-button-text="删除"
+                        cancel-button-text="取消"
+                        @confirm="removePath(row)"
+                      >
+                        <template #reference>
+                          <span class="danger-action">删除</span>
+                        </template>
+                      </el-popconfirm>
+                    </el-dropdown-item>
+                  </el-dropdown-menu>
                 </template>
-              </el-popconfirm>
+              </el-dropdown>
             </div>
           </template>
         </el-table-column>
@@ -277,7 +287,7 @@ onMounted(async () => {
 <style scoped>
 .files-page {
   display: grid;
-  gap: 16px;
+  gap: 18px;
 }
 
 .toolbar,
@@ -304,11 +314,39 @@ onMounted(async () => {
 }
 
 .meta {
-  color: #6b7280;
+  color: #8fa3c0;
   font-size: 13px;
 }
 
 .hidden-input {
   display: none;
+}
+
+.row-actions {
+  justify-content: flex-end;
+}
+
+.more-action {
+  color: #9ab0ce;
+}
+
+.danger-action {
+  color: #ff8b98;
+  cursor: pointer;
+}
+
+:deep(.danger-item) {
+  color: #ff8b98;
+}
+
+:deep(.el-table__row:hover .row-actions) {
+  opacity: 1;
+}
+
+@media (min-width: 901px) {
+  .row-actions {
+    opacity: 0.4;
+    transition: opacity 160ms ease;
+  }
 }
 </style>

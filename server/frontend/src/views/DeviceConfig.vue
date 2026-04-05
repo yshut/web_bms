@@ -1,36 +1,58 @@
 <template>
   <div class="device-config-page">
-    <el-card shadow="hover" class="device-card">
-      <div class="device-toolbar">
-        <el-select
-          v-model="selectedDeviceId"
-          clearable
-          filterable
-          placeholder="选择设备"
-          class="device-select"
-          @change="onDeviceChange"
-        >
-          <el-option
-            v-for="device in deviceOptions"
-            :key="device"
-            :label="device"
-            :value="device"
-          />
-        </el-select>
-        <el-button type="primary" :loading="loading" @click="reloadAll">刷新配置</el-button>
+    <section class="hero-panel">
+      <div class="hero-copy">
+        <p class="eyebrow">Device Setup</p>
+        <h1>把网络、传输、CAN 与 WiFi 参数整理成更易校验的配置界面。</h1>
+        <p class="hero-desc">
+          重点优化字段分组、数值控件观感和留白节奏，减少高频参数编辑时的视觉噪声。
+        </p>
       </div>
-      <div class="device-meta">
-        <el-tag type="info">当前设备: {{ activeDeviceId || '未指定，使用服务端默认设备' }}</el-tag>
-        <el-tag :type="deviceMeta.devices.length ? 'success' : 'warning'">在线 {{ deviceMeta.devices.length }}</el-tag>
-        <el-tag type="info">历史 {{ deviceMeta.history.length }}</el-tag>
+
+      <div class="hero-side">
+        <div class="device-toolbar">
+          <el-select
+            v-model="selectedDeviceId"
+            clearable
+            filterable
+            placeholder="选择设备"
+            class="device-select"
+            @change="onDeviceChange"
+          >
+            <el-option
+              v-for="device in deviceOptions"
+              :key="device"
+              :label="device"
+              :value="device"
+            />
+          </el-select>
+          <el-button type="primary" :loading="loading" @click="reloadAll">刷新配置</el-button>
+        </div>
+        <div class="device-meta">
+          <div class="meta-chip">
+            <span>当前设备</span>
+            <strong>{{ activeDeviceId || '使用默认设备' }}</strong>
+          </div>
+          <div class="meta-chip">
+            <span>在线</span>
+            <strong class="status-pulse status-pulse--good">{{ deviceMeta.devices.length }}</strong>
+          </div>
+          <div class="meta-chip">
+            <span>历史</span>
+            <strong>{{ deviceMeta.history.length }}</strong>
+          </div>
+        </div>
       </div>
-    </el-card>
+    </section>
 
     <div class="config-grid">
-      <el-card shadow="hover">
+      <el-card shadow="hover" class="config-card">
         <template #header>
           <div class="card-head">
-            <span>传输与 CAN</span>
+            <div>
+              <p class="section-kicker">Transport + CAN</p>
+              <span>传输与 CAN</span>
+            </div>
             <el-button type="primary" :loading="saving.config" @click="saveConfig">保存</el-button>
           </div>
         </template>
@@ -46,7 +68,7 @@
             <el-input v-model="configForm.mqtt_host" />
           </el-form-item>
           <el-form-item label="MQTT Port">
-            <el-input-number v-model="configForm.mqtt_port" :min="1" :max="65535" />
+            <el-input-number v-model="configForm.mqtt_port" :min="1" :max="65535" class="number-input" />
           </el-form-item>
           <el-form-item label="MQTT Topic Prefix">
             <el-input v-model="configForm.mqtt_topic_prefix" />
@@ -62,7 +84,7 @@
             <el-input v-model="configForm.mqtt_client_id" />
           </el-form-item>
           <el-form-item label="MQTT Keepalive(s)">
-            <el-input-number v-model="configForm.mqtt_keepalive" :min="1" :max="3600" />
+            <el-input-number v-model="configForm.mqtt_keepalive" :min="1" :max="3600" class="number-input" />
           </el-form-item>
           <el-form-item label="MQTT Username">
             <el-input v-model="configForm.mqtt_username" />
@@ -77,7 +99,7 @@
             <el-input v-model="configForm.ws_host" />
           </el-form-item>
           <el-form-item label="WebSocket Port">
-            <el-input-number v-model="configForm.ws_port" :min="1" :max="65535" />
+            <el-input-number v-model="configForm.ws_port" :min="1" :max="65535" class="number-input" />
           </el-form-item>
           <el-form-item label="WebSocket Path">
             <el-input v-model="configForm.ws_path" />
@@ -86,33 +108,36 @@
             <el-switch v-model="configForm.ws_use_ssl" />
           </el-form-item>
           <el-form-item label="WS 重连间隔(ms)">
-            <el-input-number v-model="configForm.ws_reconnect_interval_ms" :min="100" :step="100" />
+            <el-input-number v-model="configForm.ws_reconnect_interval_ms" :min="100" :step="100" class="number-input" />
           </el-form-item>
           <el-form-item label="WS Keepalive(s)">
-            <el-input-number v-model="configForm.ws_keepalive_interval_s" :min="1" :max="3600" />
+            <el-input-number v-model="configForm.ws_keepalive_interval_s" :min="1" :max="3600" class="number-input" />
           </el-form-item>
           <el-form-item label="CAN0 波特率">
-            <el-input-number v-model="configForm.can0_bitrate" :min="0" :step="1000" />
+            <el-input-number v-model="configForm.can0_bitrate" :min="0" :step="1000" class="number-input" />
           </el-form-item>
           <el-form-item label="CAN1 波特率">
-            <el-input-number v-model="configForm.can1_bitrate" :min="0" :step="1000" />
+            <el-input-number v-model="configForm.can1_bitrate" :min="0" :step="1000" class="number-input" />
           </el-form-item>
           <el-form-item label="CAN 记录目录">
             <el-input v-model="configForm.can_record_dir" />
           </el-form-item>
           <el-form-item label="CAN 最大空间(MB)">
-            <el-input-number v-model="configForm.can_record_max_mb" :min="1" />
+            <el-input-number v-model="configForm.can_record_max_mb" :min="1" class="number-input" />
           </el-form-item>
           <el-form-item label="CAN 刷盘间隔(ms)">
-            <el-input-number v-model="configForm.can_record_flush_ms" :min="1" />
+            <el-input-number v-model="configForm.can_record_flush_ms" :min="1" class="number-input" />
           </el-form-item>
         </el-form>
       </el-card>
 
-      <el-card shadow="hover">
+      <el-card shadow="hover" class="config-card">
         <template #header>
           <div class="card-head">
-            <span>网络配置</span>
+            <div>
+              <p class="section-kicker">Network</p>
+              <span>网络配置</span>
+            </div>
             <el-button type="primary" :loading="saving.network" @click="saveNetwork">保存</el-button>
           </div>
         </template>
@@ -140,10 +165,13 @@
       </el-card>
     </div>
 
-    <el-card shadow="hover">
+    <el-card shadow="hover" class="config-card">
       <template #header>
         <div class="card-head">
-          <span>WiFi</span>
+          <div>
+            <p class="section-kicker">WiFi Link</p>
+            <span>WiFi</span>
+          </div>
           <div class="wifi-actions">
             <el-button :loading="saving.wifiScan" @click="scanWifi">扫描</el-button>
             <el-button :loading="saving.wifiSave" @click="saveWifi(false)">仅保存</el-button>
@@ -478,11 +506,59 @@ onBeforeUnmount(() => {
 <style scoped>
 .device-config-page {
   display: grid;
-  gap: 16px;
+  gap: 20px;
+}
+
+.hero-panel {
+  display: flex;
+  gap: 20px;
+  flex-wrap: wrap;
+  padding: 28px;
+  border-radius: var(--app-radius-lg);
+  border: 1px solid rgba(136, 176, 255, 0.14);
+  background:
+    linear-gradient(135deg, rgba(14, 30, 50, 0.95), rgba(8, 17, 29, 0.92)),
+    radial-gradient(circle at top right, rgba(74, 198, 255, 0.14), transparent 32%);
+  box-shadow: var(--app-shadow);
+}
+
+.hero-copy {
+  flex: 1.1;
+  min-width: 320px;
+}
+
+.hero-side {
+  flex: 0.9;
+  min-width: 320px;
+  display: grid;
+  gap: 14px;
+}
+
+.eyebrow,
+.section-kicker {
+  margin: 0 0 10px;
+  color: #72a2cf;
+  font-size: 12px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+}
+
+.hero-copy h1 {
+  margin: 0;
+  max-width: 13em;
+  color: #f3f8ff;
+  font-size: clamp(30px, 3.6vw, 46px);
+  line-height: 1.08;
+}
+
+.hero-desc {
+  margin-top: 16px;
+  max-width: 46rem;
+  color: #96a8c4;
+  line-height: 1.8;
 }
 
 .device-toolbar,
-.device-meta,
 .card-head,
 .wifi-actions {
   display: flex;
@@ -495,20 +571,79 @@ onBeforeUnmount(() => {
   justify-content: space-between;
 }
 
+.card-head > div:first-child > span {
+  color: #f3f8ff;
+  font-size: 18px;
+  font-weight: 700;
+}
+
 .device-select {
   width: 280px;
+}
+
+.device-meta {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.meta-chip,
+.wifi-status {
+  padding: 16px;
+  border-radius: var(--app-radius-md);
+  border: 1px solid rgba(136, 176, 255, 0.12);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.meta-chip span,
+.status-row span {
+  color: #7e95b8;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.meta-chip strong {
+  display: block;
+  margin-top: 10px;
+  color: #f1f7ff;
+  font-size: 18px;
+  word-break: break-all;
 }
 
 .config-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 16px;
+  gap: 20px;
 }
 
 .form-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0 16px;
+  gap: 10px 18px;
+}
+
+.config-card :deep(.el-form-item) {
+  margin-bottom: 18px;
+}
+
+.config-card :deep(.el-form-item__label) {
+  color: #9bb0cc;
+  margin-bottom: 8px;
+}
+
+.number-input {
+  width: 100%;
+}
+
+.number-input :deep(.el-input-number) {
+  width: 100%;
+}
+
+.number-input :deep(.el-input-number__decrease),
+.number-input :deep(.el-input-number__increase) {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(136, 176, 255, 0.12);
 }
 
 .wifi-grid {
@@ -521,10 +656,6 @@ onBeforeUnmount(() => {
 .wifi-status {
   display: grid;
   gap: 12px;
-  padding: 16px;
-  border-radius: 12px;
-  background: #f8fafc;
-  border: 1px solid #e5e7eb;
 }
 
 .status-row {
@@ -533,14 +664,19 @@ onBeforeUnmount(() => {
   gap: 12px;
 }
 
-.status-row span {
-  color: #6b7280;
+.status-row strong {
+  color: #eef5ff;
+  text-align: right;
 }
 
 @media (max-width: 1100px) {
   .config-grid,
   .wifi-grid,
   .form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .device-meta {
     grid-template-columns: 1fr;
   }
 }

@@ -59,6 +59,8 @@ body {
   --app-warning: #ffb347;
   --app-danger: #ff6b7d;
   --app-shadow: 0 18px 48px rgba(3, 10, 18, 0.34);
+  --app-radius-lg: 24px;
+  --app-radius-md: 18px;
   --el-color-primary: var(--app-primary);
   --el-color-success: var(--app-success);
   --el-color-warning: var(--app-warning);
@@ -151,6 +153,52 @@ a {
 
 .el-tag {
   border-color: rgba(255, 255, 255, 0.08);
+}
+
+.status-pulse {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.status-pulse::before {
+  content: '';
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: currentColor;
+  box-shadow: 0 0 0 0 currentColor;
+  animation: statusPulse 1.9s ease-out infinite;
+}
+
+.status-pulse--good {
+  color: var(--app-success);
+}
+
+.status-pulse--warning {
+  color: var(--app-warning);
+}
+
+.status-pulse--danger {
+  color: var(--app-danger);
+}
+
+@keyframes statusPulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(255, 255, 255, 0.45);
+    transform: scale(1);
+  }
+
+  70% {
+    box-shadow: 0 0 0 10px transparent;
+    transform: scale(1.05);
+  }
+
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+    transform: scale(1);
+  }
 }
 </style>
 
