@@ -16,6 +16,12 @@ const routes: RouteRecordRaw[] = [
     redirect: '/home',
     children: [
       {
+        path: '/forbidden',
+        name: 'Forbidden',
+        component: () => import('@/views/Forbidden.vue'),
+        meta: { title: '无权限' },
+      },
+      {
         path: '/home',
         name: 'Home',
         component: () => import('@/views/Home.vue'),
@@ -90,12 +96,24 @@ const router = createRouter({
   routes,
 });
 
+function firstAccessiblePath(authStore: ReturnType<typeof useAuthStore>) {
+  const layoutRoute = routes.find((item) => item.name === 'Layout');
+  const children = layoutRoute?.children || [];
+  const matched = children.find((item) => {
+    const permission = String(item.meta?.permission || '').trim();
+    return permission && authStore.can(permission);
+  });
+  return matched?.path || '/forbidden';
+}
+
 router.beforeEach(async (to) => {
   const authStore = useAuthStore();
   await authStore.load();
   const permission = String(to.meta?.permission || '').trim();
   if (!permission || authStore.can(permission)) return true;
-  return { path: '/home' };
+  const fallbackPath = firstAccessiblePath(authStore);
+  if (fallbackPath === to.path) return true;
+  return { path: fallbackPath };
 });
 
 export default router;
