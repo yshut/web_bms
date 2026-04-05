@@ -50,10 +50,10 @@
     return [
       { href: "/console/", label: "主页" },
       { href: "/console/can", label: "CAN 监控" },
-      { href: "/hardware", label: "硬件监控" },
+      { href: "/console/hardware", label: "硬件监控" },
       { href: "/console/dbc", label: "DBC 解析" },
       { href: "/console/uds", label: "UDS" },
-      { href: "/files", label: "文件管理" },
+      { href: "/console/files", label: "文件管理" },
       { href: "/console/device-config-v2", label: "设备配置" },
     ];
   }

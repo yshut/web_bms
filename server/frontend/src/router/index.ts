@@ -9,6 +9,18 @@ const routes: RouteRecordRaw[] = [
     redirect: '/can',
     children: [
       {
+        path: '/hardware',
+        name: 'Hardware',
+        component: () => import('@/views/Hardware.vue'),
+        meta: { title: '硬件监控', icon: 'Cpu' },
+      },
+      {
+        path: '/files',
+        name: 'Files',
+        component: () => import('@/views/Files.vue'),
+        meta: { title: '文件管理', icon: 'FolderOpened' },
+      },
+      {
         path: '/device-config-v2',
         name: 'DeviceConfigV2',
         component: () => import('@/views/DeviceConfig.vue'),

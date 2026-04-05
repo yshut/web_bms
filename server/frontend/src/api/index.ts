@@ -116,6 +116,38 @@ export const deviceApi = {
   list: () => api.get('/device/list'),
 };
 
+export const hardwareApi = {
+  status: () => api.get('/hardware/status'),
+};
+
+export const filesApi = {
+  base: (deviceId?: string) => api.get('/fs/base', { params: deviceId ? { device_id: deviceId } : undefined }),
+  list: (path: string, deviceId?: string) =>
+    api.get('/fs/list', { params: { path, ...(deviceId ? { device_id: deviceId } : {}) } }),
+  mkdir: (base: string, name: string, deviceId?: string) =>
+    api.post('/fs/mkdir', { base, name }, { params: deviceId ? { device_id: deviceId } : undefined }),
+  rename: (path: string, new_name: string, deviceId?: string) =>
+    api.post('/fs/rename', { path, new_name }, { params: deviceId ? { device_id: deviceId } : undefined }),
+  remove: (path: string, deviceId?: string) =>
+    api.post('/fs/delete', { path }, { params: deviceId ? { device_id: deviceId } : undefined }),
+  upload: (file: File, base: string, deviceId?: string, onUploadProgress?: (percent: number) => void) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('base', base);
+    formData.append('path', base);
+    return api.post('/fs/upload', formData, {
+      params: deviceId ? { device_id: deviceId } : undefined,
+      headers: { 'Content-Type': 'multipart/form-data' },
+      onUploadProgress: (event) => {
+        if (!onUploadProgress || !event.total) return;
+        onUploadProgress(Math.max(0, Math.min(100, Math.round((event.loaded / event.total) * 100))));
+      },
+    });
+  },
+  downloadUrl: (path: string, deviceId?: string) =>
+    `/api/fs/download?path=${encodeURIComponent(path)}${deviceId ? `&device_id=${encodeURIComponent(deviceId)}` : ''}`,
+};
+
 export const remoteConfigApi = {
   getConfig: (deviceId?: string) =>
     api.get('/device/remote/config', {

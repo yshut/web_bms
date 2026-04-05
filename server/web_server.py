@@ -866,21 +866,10 @@ def _sanitize_filename_ascii(name: str, default_name: str = "firmware.s19") -> s
     if not ext:
         ext = os.path.splitext(default_name)[1] or ".s19"
     return base2 + ext
-# 便捷路由：DBC 专用页面
-@app.route('/dbc')
-def dbc_page():
-    try:
-        return send_from_directory(app.static_folder, 'dbc_tool.html')
-    except Exception as e:
-        return f"Failed to load dbc page: {e}", 500
-
 # 便捷路由：硬件监控页面
 @app.route('/hardware')
 def hardware_page():
-    try:
-        return send_from_directory(app.static_folder, 'hardware_monitor.html')
-    except Exception as e:
-        return f"Failed to load hardware monitor page: {e}", 500
+    return redirect('/console/hardware')
 
 # API: 获取硬件状态（从WebSocket Hub缓存中读取）
 @app.route('/api/hardware/status', methods=['GET'])
@@ -3854,7 +3843,7 @@ def device_config_page():
 
 @app.route('/files')
 def file_manager_page():
-    return send_from_directory('static', 'file_manager.html')
+    return redirect('/console/files')
 
 @app.route('/api/device/proxy/<path:subpath>', methods=['GET', 'POST', 'PUT', 'DELETE'])
 def device_api_proxy(subpath):
