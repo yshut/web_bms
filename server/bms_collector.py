@@ -243,12 +243,16 @@ class BmsCollector:
     def query_latest_values(self) -> List[Dict]:
         """返回所有信号的最新一条记录。"""
         sql = """
-            SELECT ts, can_id, msg_name, signal_name, value, unit, channel
-            FROM bms_records
-            WHERE ts IN (
-                SELECT MAX(ts) FROM bms_records GROUP BY signal_name
+            SELECT r.ts, r.can_id, r.msg_name, r.signal_name, r.value, r.unit, r.channel
+            FROM bms_records r
+            WHERE r.rowid = (
+                SELECT rowid
+                FROM bms_records
+                WHERE signal_name = r.signal_name
+                ORDER BY ts DESC, rowid DESC
+                LIMIT 1
             )
-            ORDER BY msg_name, signal_name
+            ORDER BY r.msg_name, r.signal_name
         """
         rows = []
         with sqlite3.connect(self._db_path) as conn:
