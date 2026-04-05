@@ -301,8 +301,22 @@ table tr:hover td{background:#1e293b55}
     <button class="btn btn-p" onclick="addRule()">+ 新增规则</button>
     <button class="btn btn-s" onclick="loadRules()">刷新</button>
     <button class="btn btn-s" onclick="clearRuleFilters()">清空筛选</button>
+    <a class="btn btn-s" href="/api/rules/template">模板</a>
+    <button class="btn btn-s" onclick="pickRulesExcel()">导入 Excel</button>
+    <button class="btn btn-s" onclick="exportRulesExcel()">导出 Excel</button>
     <span style="color:var(--txt2);font-size:12px">共 <b id="rule-count">0</b> 条规则</span>
     <span class="msg" id="rules-msg" style="margin:0;margin-left:auto"></span>
+  </div>
+  <input id="rules-excel-file" type="file" accept=".xlsx" style="display:none" onchange="onRulesExcelSelected(this.files)">
+  <div id="rules-excel-box" class="card" style="display:none">
+    <h3>Excel 导入</h3>
+    <div id="rules-excel-fileinfo" style="color:var(--txt2);font-size:13px;margin-bottom:10px">未选择文件</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn btn-s" id="rules-excel-preview" onclick="previewRulesExcel()" disabled>预览</button>
+      <button class="btn btn-s" id="rules-excel-import" onclick="importRulesExcel(false)" disabled>仅转换</button>
+      <button class="btn btn-p" id="rules-excel-push" onclick="importRulesExcel(true)" disabled>转换并推送</button>
+    </div>
+    <div id="rules-excel-result" style="margin-top:12px;font-size:13px;color:var(--txt2)"></div>
   </div>
   <div class="row" style="margin-bottom:14px">
     <div class="card" style="margin-bottom:0">
@@ -466,6 +480,12 @@ function api(path, opts) {
   if(gDeviceId) url += (url.indexOf('?') >= 0 ? '&' : '?') + 'device_id=' + encodeURIComponent(gDeviceId);
   if(gDeviceIp) url += (url.indexOf('?') >= 0 ? '&' : '?') + 'device=' + encodeURIComponent(gDeviceIp);
   return fetch(url, opts || {});
+}
+function apiUrl(url) {
+  var out = url;
+  if(gDeviceId) out += (out.indexOf('?') >= 0 ? '&' : '?') + 'device_id=' + encodeURIComponent(gDeviceId);
+  if(gDeviceIp) out += (out.indexOf('?') >= 0 ? '&' : '?') + 'device=' + encodeURIComponent(gDeviceIp);
+  return out;
 }
 
 function setBuildInfo(server) {
@@ -989,6 +1009,90 @@ function clearRuleFilters(){
   document.getElementById('rule-filter-enabled').value = '';
   document.getElementById('rule-filter-frame').value = '';
   renderRules();
+}
+var gRulesExcelFile = null;
+function pickRulesExcel() {
+  document.getElementById('rules-excel-file').click();
+}
+function onRulesExcelSelected(files) {
+  var f = files && files[0];
+  if(!f) return;
+  if(!String(f.name || '').toLowerCase().endsWith('.xlsx')) {
+    sm('rules-msg', false, '仅支持 .xlsx 文件');
+    return;
+  }
+  gRulesExcelFile = f;
+  document.getElementById('rules-excel-box').style.display = 'block';
+  document.getElementById('rules-excel-fileinfo').textContent = '已选择: ' + f.name + ' (' + (f.size/1024).toFixed(1) + ' KB)';
+  document.getElementById('rules-excel-preview').disabled = false;
+  document.getElementById('rules-excel-import').disabled = false;
+  document.getElementById('rules-excel-push').disabled = false;
+  document.getElementById('rules-excel-result').textContent = '';
+}
+function renderRulesExcelPreview(obj) {
+  var rules = (obj && obj.rules) || [];
+  if(!rules.length) {
+    document.getElementById('rules-excel-result').innerHTML = '<span style="color:var(--err)">Excel 中没有有效规则</span>';
+    return;
+  }
+  var h = '<div style="color:var(--txt2);margin-bottom:8px">解析到 <b style="color:var(--acc2)">' + rules.length + '</b> 条规则</div>';
+  h += '<div style="overflow:auto;max-height:260px"><table><tr><th>规则ID</th><th>名称</th><th>通道</th><th>CAN ID</th><th>信号</th><th>MQTT Topic</th></tr>';
+  rules.forEach(function(r){
+    h += '<tr>';
+    h += '<td>' + escH(r.id || '') + '</td>';
+    h += '<td>' + escH(r.name || '') + '</td>';
+    h += '<td>' + escH(r.channel || '') + '</td>';
+    h += '<td>' + escH(r.match_any_id ? 'ANY' : ruleHex(r.can_id || 0)) + '</td>';
+    h += '<td>' + escH(r.signal_name || '') + '</td>';
+    h += '<td style="font-family:monospace;font-size:12px">' + escH(((r.mqtt || {}).topic_template) || '') + '</td>';
+    h += '</tr>';
+  });
+  h += '</table></div>';
+  document.getElementById('rules-excel-result').innerHTML = h;
+}
+async function previewRulesExcel() {
+  if(!gRulesExcelFile) return;
+  var fd = new FormData();
+  fd.append('file', gRulesExcelFile);
+  try {
+    var r = await fetch(apiUrl('/api/rules/import_excel?push=0'), {method:'POST', body:fd});
+    var j = await r.json();
+    if(!j.ok) {
+      document.getElementById('rules-excel-result').innerHTML = '<span style="color:var(--err)">解析失败: ' + escH(j.error || '') + '</span>';
+      return;
+    }
+    renderRulesExcelPreview(j.rules);
+  } catch(e) {
+    document.getElementById('rules-excel-result').innerHTML = '<span style="color:var(--err)">请求失败</span>';
+  }
+}
+async function importRulesExcel(push) {
+  if(!gRulesExcelFile) return;
+  var fd = new FormData();
+  fd.append('file', gRulesExcelFile);
+  try {
+    var r = await fetch(apiUrl('/api/rules/import_excel?push=' + (push ? '1' : '0')), {method:'POST', body:fd});
+    var j = await r.json();
+    if(!j.ok) {
+      document.getElementById('rules-excel-result').innerHTML = '<span style="color:var(--err)">导入失败: ' + escH(j.error || '') + '</span>';
+      return;
+    }
+    if(push) {
+      sm('rules-msg', true, j.message || ('已导入 ' + j.rule_count + ' 条规则'));
+      loadRules();
+    } else if(j.rules) {
+      renderRulesExcelPreview(j.rules);
+      sm('rules-msg', true, 'Excel 解析完成，未推送设备');
+    }
+    if(j.push_failed) {
+      document.getElementById('rules-excel-result').innerHTML = '<span style="color:var(--warn)">设备不可达，规则已保存在服务端，可稍后重新推送</span>';
+    }
+  } catch(e) {
+    document.getElementById('rules-excel-result').innerHTML = '<span style="color:var(--err)">请求失败</span>';
+  }
+}
+function exportRulesExcel() {
+  window.open(apiUrl('/api/rules/export_excel'), '_blank');
 }
 async function loadRules() {
   try {
