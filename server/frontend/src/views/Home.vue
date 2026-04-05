@@ -7,10 +7,6 @@
         <p class="hero-desc">
           当前控制台聚焦在线状态、运行版本、硬件健康度和 BMS 数据刷新情况，适合日常调试与值守切换。
         </p>
-        <div class="hero-actions">
-          <el-button type="primary" @click="go('/device-config-v2')">进入设备配置</el-button>
-          <el-button plain @click="openWallboard">打开运行大屏</el-button>
-        </div>
       </div>
 
       <div class="hero-metrics">
@@ -61,16 +57,14 @@
           </div>
         </div>
         <div class="spotlight-list">
-          <button
+          <article
             v-for="item in spotlightCards"
-            :key="item.path"
+            :key="item.title"
             class="spotlight-item"
-            type="button"
-            @click="go(item.path)"
           >
             <strong>{{ item.title }}</strong>
             <span>{{ item.desc }}</span>
-          </button>
+          </article>
         </div>
       </article>
     </section>
@@ -83,13 +77,13 @@
         </div>
       </div>
       <div class="workspace-grid">
-        <button v-for="item in cards" :key="item.path" class="workspace-item" type="button" @click="go(item.path)">
+        <article v-for="item in cards" :key="item.title" class="workspace-item">
           <div>
             <strong>{{ item.title }}</strong>
             <p>{{ item.desc }}</p>
           </div>
-          <span>进入</span>
-        </button>
+          <span>{{ item.group }}</span>
+        </article>
       </div>
     </section>
   </div>
@@ -97,11 +91,9 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
-import { useRouter } from 'vue-router';
 import { bmsApi, hardwareApi, statusApi } from '@/api';
 import { useSystemStore } from '@/stores/system';
 
-const router = useRouter();
 const systemStore = useSystemStore();
 const buildLabel = ref('版本检查中');
 const hardware = ref<Record<string, any>>({});
@@ -110,21 +102,21 @@ const alertCount = ref(0);
 const lastUpdated = ref(0);
 
 const cards = [
-  { path: '/device-config-v2', title: '设备配置', desc: '网络、WiFi、MQTT、CAN 参数' },
-  { path: '/rules-v2', title: '规则管理', desc: 'CAN-MQTT 规则分页、导入导出' },
-  { path: '/can', title: 'CAN 监控', desc: '受控轮询、过滤与缓存查看' },
-  { path: '/hardware', title: '硬件监控', desc: '系统、网络、存储、CAN 状态' },
-  { path: '/dbc', title: 'DBC 管理', desc: '文件、统计、映射和信号定义' },
-  { path: '/uds', title: 'UDS 诊断', desc: '参数、固件选择、进度和日志' },
-  { path: '/files', title: '文件管理', desc: '设备文件浏览、上传、重命名、删除' },
-  { path: '/devices', title: '设备管理', desc: '在线状态、设备历史和远程状态' },
-  { path: '/bms', title: 'BMS 看板', desc: '统计、消息分组、告警和导出' },
+  { title: '设备配置', desc: '网络、WiFi、MQTT、CAN 参数', group: '配置' },
+  { title: '规则管理', desc: 'CAN-MQTT 规则分页、导入导出', group: '规则' },
+  { title: 'CAN 监控', desc: '受控轮询、过滤与缓存查看', group: '总线' },
+  { title: '硬件监控', desc: '系统、网络、存储、CAN 状态', group: '状态' },
+  { title: 'DBC 管理', desc: '文件、统计、映射和信号定义', group: '协议' },
+  { title: 'UDS 诊断', desc: '参数、固件选择、进度和日志', group: '诊断' },
+  { title: '文件管理', desc: '设备文件浏览、上传、重命名、删除', group: '文件' },
+  { title: '设备管理', desc: '在线状态、设备历史和远程状态', group: '设备' },
+  { title: 'BMS 看板', desc: '统计、消息分组、告警和导出', group: '分析' },
 ];
 
 const spotlightCards = [
-  { path: '/hardware', title: '硬件监控', desc: '快速确认 CPU、温度、网络和 CAN 通道状态' },
-  { path: '/rules-v2', title: '规则管理', desc: '查看分页规则、远程同步和导入导出操作' },
-  { path: '/can', title: 'CAN 监控', desc: '实时抓帧并按接口、ID、数据内容过滤' },
+  { title: '硬件监控', desc: '快速确认 CPU、温度、网络和 CAN 通道状态' },
+  { title: '规则管理', desc: '查看分页规则、远程同步和导入导出操作' },
+  { title: 'CAN 监控', desc: '实时抓帧并按接口、ID、数据内容过滤' },
 ];
 
 const heroMetrics = computed(() => ([
@@ -166,15 +158,6 @@ const lastUpdatedText = computed(() => {
   return `更新于 ${new Date(lastUpdated.value).toLocaleTimeString()}`;
 });
 
-function go(path: string) {
-  router.push(path);
-}
-
-function openWallboard() {
-  const target = router.resolve({ path: '/wallboard' }).href;
-  window.open(target, '_blank', 'noopener,noreferrer');
-}
-
 function formatNum(value: number | string) {
   const num = Number(value ?? 0);
   return Number.isFinite(num) ? num.toFixed(1) : '-';
@@ -215,8 +198,8 @@ onMounted(async () => {
   border-radius: 28px;
   border: 1px solid rgba(136, 176, 255, 0.14);
   background:
-    linear-gradient(135deg, rgba(17, 35, 58, 0.96), rgba(8, 18, 31, 0.92)),
-    radial-gradient(circle at right top, rgba(74, 198, 255, 0.16), transparent 34%);
+    linear-gradient(135deg, rgba(23, 34, 54, 0.96), rgba(11, 18, 32, 0.92)),
+    radial-gradient(circle at right top, rgba(208, 165, 103, 0.14), transparent 34%);
   box-shadow: var(--app-shadow);
   align-items: stretch;
 }
@@ -232,7 +215,7 @@ onMounted(async () => {
 .eyebrow,
 .section-kicker {
   margin: 0 0 10px;
-  color: #72a2cf;
+  color: #b9a17b;
   font-size: 12px;
   letter-spacing: 0.2em;
   text-transform: uppercase;
@@ -246,8 +229,9 @@ onMounted(async () => {
 
 .hero-copy h1 {
   font-size: clamp(34px, 4vw, 54px);
-  line-height: 1.04;
+  line-height: 1.08;
   max-width: 10em;
+  letter-spacing: -0.02em;
 }
 
 .hero-desc {
@@ -255,14 +239,7 @@ onMounted(async () => {
   max-width: 42rem;
   font-size: 15px;
   line-height: 1.8;
-  color: #97abca;
-}
-
-.hero-actions {
-  display: flex;
-  gap: 12px;
-  flex-wrap: wrap;
-  margin-top: 24px;
+  color: #a8b3c8;
 }
 
 .hero-metrics {
@@ -280,14 +257,14 @@ onMounted(async () => {
 .metric-tile {
   padding: 18px;
   min-height: 132px;
-  border: 1px solid rgba(136, 176, 255, 0.1);
+  border: 1px solid rgba(139, 162, 199, 0.1);
   background: rgba(255, 255, 255, 0.035);
   backdrop-filter: blur(10px);
 }
 
 .metric-tile span,
 .subtle {
-  color: #7d94b7;
+  color: #8f9cb4;
   font-size: 12px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -303,7 +280,7 @@ onMounted(async () => {
 
 .metric-tile p {
   margin-top: 12px;
-  color: #8ea4c4;
+  color: #9aa8bf;
   font-size: 13px;
   line-height: 1.6;
 }
@@ -316,15 +293,15 @@ onMounted(async () => {
 
 .section-card {
   padding: 22px 24px;
-  border: 1px solid rgba(136, 176, 255, 0.12);
-  background: linear-gradient(180deg, rgba(14, 28, 47, 0.8), rgba(9, 18, 31, 0.76));
+  border: 1px solid rgba(139, 162, 199, 0.12);
+  background: linear-gradient(180deg, rgba(20, 31, 48, 0.82), rgba(11, 18, 31, 0.8));
   box-shadow: var(--app-shadow);
 }
 
 .section-card--accent {
   background:
-    linear-gradient(180deg, rgba(14, 31, 49, 0.88), rgba(8, 18, 31, 0.9)),
-    radial-gradient(circle at top right, rgba(25, 211, 162, 0.12), transparent 36%);
+    linear-gradient(180deg, rgba(22, 31, 46, 0.9), rgba(11, 18, 31, 0.9)),
+    radial-gradient(circle at top right, rgba(208, 165, 103, 0.12), transparent 36%);
 }
 
 .section-head {
@@ -356,7 +333,7 @@ onMounted(async () => {
 .signal-row span,
 .spotlight-item span,
 .workspace-item p {
-  color: #93a6c4;
+  color: #9eabc1;
 }
 
 .signal-row strong {
@@ -380,17 +357,14 @@ onMounted(async () => {
 .spotlight-item,
 .workspace-item {
   width: 100%;
-  border: 0;
-  cursor: pointer;
   text-align: left;
-  transition: transform 180ms ease, border-color 180ms ease, background 180ms ease;
 }
 
 .spotlight-item {
   padding: 16px 18px;
   border-radius: 18px;
   color: #edf5ff;
-  border: 1px solid rgba(136, 176, 255, 0.12);
+  border: 1px solid rgba(139, 162, 199, 0.12);
   background: rgba(255, 255, 255, 0.03);
 }
 
@@ -421,7 +395,7 @@ onMounted(async () => {
   min-height: 120px;
   padding: 18px;
   border-radius: 20px;
-  border: 1px solid rgba(136, 176, 255, 0.12);
+  border: 1px solid rgba(139, 162, 199, 0.12);
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.02));
   color: #eff6ff;
 }
@@ -432,16 +406,9 @@ onMounted(async () => {
 }
 
 .workspace-item span {
-  color: #66d7ff;
+  color: #d6b07a;
   font-size: 13px;
   white-space: nowrap;
-}
-
-.spotlight-item:hover,
-.workspace-item:hover {
-  transform: translateY(-2px);
-  border-color: rgba(74, 198, 255, 0.3);
-  background: rgba(74, 198, 255, 0.08);
 }
 
 @media (max-width: 1180px) {

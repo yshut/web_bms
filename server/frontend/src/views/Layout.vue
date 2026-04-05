@@ -130,9 +130,9 @@ onMounted(async () => {
 
 .sidebar {
   background:
-    linear-gradient(180deg, rgba(8, 18, 31, 0.96), rgba(8, 18, 31, 0.7)),
-    radial-gradient(circle at top, rgba(74, 198, 255, 0.12), transparent 32%);
-  border-right: 1px solid rgba(136, 176, 255, 0.12);
+    linear-gradient(180deg, rgba(11, 18, 32, 0.97), rgba(11, 18, 32, 0.78)),
+    radial-gradient(circle at top, rgba(208, 165, 103, 0.1), transparent 34%);
+  border-right: 1px solid rgba(139, 162, 199, 0.12);
   padding: 20px 14px 18px;
   backdrop-filter: blur(18px);
 }
@@ -153,13 +153,13 @@ onMounted(async () => {
   color: #07111d;
   font-weight: 800;
   letter-spacing: 0.08em;
-  background: linear-gradient(135deg, #68e7ff, #28a7ff);
-  box-shadow: 0 10px 24px rgba(40, 167, 255, 0.28);
+  background: linear-gradient(135deg, #e4bc7e, #b88745);
+  box-shadow: 0 10px 24px rgba(184, 135, 69, 0.28);
 }
 
 .logo-kicker {
   margin: 0 0 4px;
-  color: #6e85a9;
+  color: #8e9ab0;
   font-size: 11px;
   letter-spacing: 0.16em;
   text-transform: uppercase;
@@ -176,7 +176,7 @@ onMounted(async () => {
   margin: 6px 10px 18px;
   padding: 14px;
   border-radius: 18px;
-  border: 1px solid rgba(136, 176, 255, 0.12);
+  border: 1px solid rgba(139, 162, 199, 0.12);
   background: rgba(255, 255, 255, 0.03);
 }
 
@@ -212,14 +212,14 @@ onMounted(async () => {
 }
 
 :deep(.sidebar-menu .el-menu-item.is-active) {
-  background: linear-gradient(90deg, rgba(74, 198, 255, 0.2), rgba(74, 198, 255, 0.06)) !important;
-  box-shadow: inset 0 0 0 1px rgba(74, 198, 255, 0.16);
+  background: linear-gradient(90deg, rgba(208, 165, 103, 0.18), rgba(208, 165, 103, 0.04)) !important;
+  box-shadow: inset 0 0 0 1px rgba(208, 165, 103, 0.16);
 }
 
 .header {
-  background: rgba(8, 18, 31, 0.54);
+  background: rgba(11, 18, 32, 0.58);
   backdrop-filter: blur(14px);
-  border-bottom: 1px solid rgba(136, 176, 255, 0.12);
+  border-bottom: 1px solid rgba(139, 162, 199, 0.12);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -233,7 +233,7 @@ onMounted(async () => {
 }
 
 .eyebrow {
-  color: #6984aa;
+  color: #8f9eb9;
   font-size: 11px;
   letter-spacing: 0.18em;
   text-transform: uppercase;
@@ -256,12 +256,12 @@ onMounted(async () => {
   padding: 8px 12px;
   border-radius: 14px;
   background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(136, 176, 255, 0.12);
+  border: 1px solid rgba(139, 162, 199, 0.12);
 }
 
 .header-metric span {
   display: block;
-  color: #6f85a9;
+  color: #8696b1;
   font-size: 11px;
   margin-bottom: 4px;
   text-transform: uppercase;
@@ -278,8 +278,8 @@ onMounted(async () => {
   padding: 0 12px;
   font-size: 13px;
   line-height: 34px;
-  color: #a7b7d1;
-  border-left: 1px solid rgba(136, 176, 255, 0.1);
+  color: #b2bed2;
+  border-left: 1px solid rgba(139, 162, 199, 0.1);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;

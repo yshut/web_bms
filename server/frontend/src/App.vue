@@ -33,31 +33,31 @@ body,
 }
 
 body {
-  font-family: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  font-family: 'Avenir Next', 'SF Pro Display', 'PingFang SC', 'Microsoft YaHei', sans-serif;
   background:
-    radial-gradient(circle at top left, rgba(40, 113, 255, 0.16), transparent 36%),
-    radial-gradient(circle at top right, rgba(14, 212, 191, 0.12), transparent 28%),
-    linear-gradient(180deg, #09111f 0%, #0d1625 100%);
+    radial-gradient(circle at top left, rgba(111, 140, 255, 0.12), transparent 34%),
+    radial-gradient(circle at top right, rgba(216, 173, 102, 0.1), transparent 28%),
+    linear-gradient(180deg, #0b1220 0%, #101827 100%);
   color: #e7edf7;
   overflow: auto;
 }
 
 :root {
-  --app-bg: #09111f;
-  --app-bg-soft: rgba(11, 23, 39, 0.78);
-  --app-bg-strong: rgba(8, 16, 28, 0.92);
-  --app-panel: rgba(14, 28, 47, 0.82);
-  --app-panel-strong: rgba(17, 35, 58, 0.9);
-  --app-border: rgba(136, 176, 255, 0.18);
-  --app-border-strong: rgba(88, 210, 255, 0.34);
-  --app-text: #e7edf7;
-  --app-text-soft: #96a7c2;
-  --app-text-dim: #6b7f9f;
-  --app-primary: #4ac6ff;
-  --app-primary-strong: #1b8bff;
-  --app-success: #19d3a2;
-  --app-warning: #ffb347;
-  --app-danger: #ff6b7d;
+  --app-bg: #0b1220;
+  --app-bg-soft: rgba(16, 24, 39, 0.78);
+  --app-bg-strong: rgba(11, 18, 32, 0.94);
+  --app-panel: rgba(18, 27, 43, 0.84);
+  --app-panel-strong: rgba(23, 34, 54, 0.92);
+  --app-border: rgba(139, 162, 199, 0.18);
+  --app-border-strong: rgba(192, 154, 95, 0.28);
+  --app-text: #edf2fb;
+  --app-text-soft: #a5b2c8;
+  --app-text-dim: #72819c;
+  --app-primary: #d0a567;
+  --app-primary-strong: #b88745;
+  --app-success: #58c5a4;
+  --app-warning: #e8b66a;
+  --app-danger: #ef7a88;
   --app-shadow: 0 18px 48px rgba(3, 10, 18, 0.34);
   --app-radius-lg: 24px;
   --app-radius-md: 18px;
@@ -103,7 +103,7 @@ a {
   width: 34vw;
   height: 34vw;
   border-radius: 999px;
-  background: radial-gradient(circle, rgba(51, 123, 255, 0.2), transparent 68%);
+  background: radial-gradient(circle, rgba(111, 140, 255, 0.16), transparent 68%);
   filter: blur(20px);
 }
 
@@ -113,13 +113,13 @@ a {
   width: 28vw;
   height: 28vw;
   border-radius: 999px;
-  background: radial-gradient(circle, rgba(19, 211, 162, 0.14), transparent 66%);
+  background: radial-gradient(circle, rgba(208, 165, 103, 0.14), transparent 66%);
   filter: blur(20px);
 }
 
 .el-card {
   border: 1px solid var(--app-border) !important;
-  background: linear-gradient(180deg, rgba(16, 30, 48, 0.82), rgba(10, 20, 34, 0.88)) !important;
+  background: linear-gradient(180deg, rgba(20, 31, 48, 0.84), rgba(12, 19, 31, 0.9)) !important;
   box-shadow: var(--app-shadow) !important;
 }
 
@@ -128,10 +128,10 @@ a {
 }
 
 .el-table {
-  --el-table-border-color: rgba(136, 176, 255, 0.08);
-  --el-table-header-bg-color: rgba(255, 255, 255, 0.03);
+  --el-table-border-color: rgba(139, 162, 199, 0.08);
+  --el-table-header-bg-color: rgba(255, 255, 255, 0.02);
   --el-table-tr-bg-color: transparent;
-  --el-table-row-hover-bg-color: rgba(74, 198, 255, 0.08);
+  --el-table-row-hover-bg-color: rgba(208, 165, 103, 0.08);
   color: var(--app-text);
 }
 
@@ -143,12 +143,12 @@ a {
 .el-input__wrapper,
 .el-select__wrapper,
 .el-textarea__inner {
-  background: rgba(8, 18, 31, 0.76) !important;
-  box-shadow: 0 0 0 1px rgba(136, 176, 255, 0.14) inset !important;
+  background: rgba(11, 18, 31, 0.8) !important;
+  box-shadow: 0 0 0 1px rgba(139, 162, 199, 0.14) inset !important;
 }
 
 .el-button {
-  --el-button-hover-border-color: rgba(74, 198, 255, 0.66);
+  --el-button-hover-border-color: rgba(208, 165, 103, 0.66);
 }
 
 .el-tag {
